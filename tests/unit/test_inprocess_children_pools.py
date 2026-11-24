@@ -41,8 +41,14 @@ class _PoolWorker:
 		self.proc = None
 
 	def start(self):
+		# Drop broker/data overrides from the caller's env: the worker and the client must share
+		# this temp folder's filesystem broker.
+		inherited = {
+			k: v for k, v in os.environ.items()
+			if not k.startswith(('SECATOR_CELERY_', 'SECATOR_DIRS_'))
+		}
 		env = {
-			**os.environ,
+			**inherited,
 			'SECATOR_DIRS_DATA': str(self.data),
 			'SECATOR_CELERY_BROKER_URL': 'filesystem://',
 			'SECATOR_CELERY_RESULT_BACKEND': f'file://{self.results_dir}',
@@ -54,7 +60,8 @@ class _PoolWorker:
 			'-I', 'worker_app', '-P', self.pool, '-c', '1', '-Q', QUEUE, '-n', f'inproc-{self.pool}@%h',
 			'--without-mingle', '--without-gossip', '--without-heartbeat', '-l', 'INFO',
 		]
-		self.proc = subprocess.Popen(cmd, env=env, cwd=self.tmp, stdout=self.log, stderr=subprocess.STDOUT)
+		self.proc = subprocess.Popen(
+			cmd, env=env, cwd=self.tmp, stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
 
 	def client(self):
 		opts = {
@@ -82,7 +89,7 @@ class _PoolWorker:
 			try:
 				self.proc.wait(timeout=20)
 			except subprocess.TimeoutExpired:
-				self.proc.kill()
+				os.killpg(self.proc.pid, signal.SIGKILL)  # the whole group: prefork children too
 				self.proc.wait()
 		self.log.close()
 		shutil.rmtree(self.tmp, ignore_errors=True)
@@ -98,11 +105,8 @@ class _InProcessChildren:
 	@classmethod
 	def setUpClass(cls):
 		cls.worker = _PoolWorker(cls.pool)
+		cls.addClassCleanup(cls.worker.stop)  # runs even if start() raises
 		cls.worker.start()
-
-	@classmethod
-	def tearDownClass(cls):
-		cls.worker.stop()
 
 	def _run(self, targets):
 		try:

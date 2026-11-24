@@ -1084,6 +1084,8 @@ class Runner:
 			self.debug('running workflow in sync mode', sub='start')
 			# Eager run in this process: every result is already computed, so lift Celery's
 			# "never call result.get() within a task" guard (set by prefork/solo/threads).
+			# The guard is a process-wide flag: on a threads pool with concurrency > 1, two
+			# overlapping sync children can restore it under each other.
 			with allow_join_result():
 				results = workflow.apply().get()
 		else:
