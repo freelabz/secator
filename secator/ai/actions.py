@@ -1,7 +1,7 @@
 """AI action dispatch: ActionContext, guardrail checks, the tool dispatcher and batching.
 
 Each built-in tool's handler is its ``run(self, action, ctx)`` method in
-``secator/ai/tools/<tool>.py`` — the same contract external tools use.
+its resource module under ``secator/ai/tools/`` — the same contract external tools use.
 """
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed

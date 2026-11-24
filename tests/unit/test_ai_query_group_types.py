@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from secator.ai.actions import ActionContext
-from secator.ai.tools.query_workspace import QueryWorkspace
+from secator.ai.tools.findings import QueryWorkspace
 from secator.output_types import (
 	Certificate, Domain, Error, ExploitAttempt, Ip, Port, Record, Subdomain, Tag, Technology, Url, UserAccount,
 	Vulnerability)

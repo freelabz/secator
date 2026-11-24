@@ -1,8 +1,10 @@
 """Registry for native + external LLM tools.
 
-Each tool is one self-contained :class:`~secator.ai.tools.base.BaseTool` subclass,
-living one-per-file in this package (``run_task.py``, ``query_workspace.py``, …) the
-same way custom secator tasks live one-per-file under ``secator/tasks/``. The class
+Each tool is one self-contained :class:`~secator.ai.tools.base.BaseTool` subclass. The
+built-in tools are grouped by the resource they act on: ``runners.py`` (run_task,
+run_workflow, run_shell, run_subagent, list_runners), ``findings.py`` (query_workspace,
+add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search)
+and ``session.py`` (update_plan, change_mode, stop). The class
 carries everything that used to be hand-synced across 5 places (schema, dispatch
 action, mode exposure, permission auto-allow, handler), and every drift-prone view
 derives from the ``TOOLS`` registry:
@@ -14,9 +16,9 @@ source of truth for mode→tool exposure. A tool no longer declares its modes.
 * ``dispatch_action`` (actions.py) routes via ``TOOLS_BY_ACTION[action].handle``.
 * ``PermissionEngine`` (guardrails.py) reads ``tool.auto_allow``.
 
-Adding a BUILT-IN tool is one file: drop a ``BaseTool`` subclass in this package, list
-it in ``_TOOL_CLASSES``, and make sure a mode's ``tools:`` globs reach it. An EXTERNAL
-tool is dropped into the templates dir and auto-registered by
+Adding a BUILT-IN tool is one class: add a ``BaseTool`` subclass to the module of the
+resource it acts on (or a new module), list it in ``_TOOL_CLASSES``, and make sure a
+mode's ``tools:`` globs reach it. An EXTERNAL tool is dropped into the templates dir and auto-registered by
 :func:`secator.loader.discover_ai_tools` via :func:`register_ai_tool` — no core edit —
 and a mode opts it in by its EXACT name. One external file may define several tools that
 share module-level helpers or a nameless ``BaseTool`` subclass (a shared base without a
@@ -31,24 +33,13 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools.base import BaseTool  # noqa: F401 (re-exported)
 
-from secator.ai.tools.run_task import RunTask
-from secator.ai.tools.run_subagent import RunSubagent
-from secator.ai.tools.run_workflow import RunWorkflow
-from secator.ai.tools.run_shell import RunShell
-from secator.ai.tools.query_workspace import QueryWorkspace
-from secator.ai.tools.add_finding import AddFinding
-from secator.ai.tools.mark_vuln_exploited import MarkVulnExploited
-from secator.ai.tools.mark_vuln_false_positive import MarkVulnFalsePositive
-from secator.ai.tools.mark_vuln_fixed import MarkVulnFixed
-from secator.ai.tools.mark_vuln_exploit_failed import MarkVulnExploitFailed
-from secator.ai.tools.update_finding import UpdateFinding
-from secator.ai.tools.add_note import AddNote
-from secator.ai.tools.fetch_url import FetchUrl
-from secator.ai.tools.update_plan import UpdatePlan
-from secator.ai.tools.web_search import WebSearch
-from secator.ai.tools.list_runners import ListRunners
-from secator.ai.tools.change_mode import ChangeMode
-from secator.ai.tools.stop import Stop
+from secator.ai.tools.runners import RunTask, RunSubagent, RunWorkflow, RunShell, ListRunners
+from secator.ai.tools.findings import (
+	QueryWorkspace, AddFinding, MarkVulnExploited, MarkVulnFalsePositive, MarkVulnFixed, MarkVulnExploitFailed,
+	UpdateFinding, AddNote,
+)
+from secator.ai.tools.web import FetchUrl, WebSearch
+from secator.ai.tools.session import UpdatePlan, ChangeMode, Stop
 
 
 # Order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas emits tools

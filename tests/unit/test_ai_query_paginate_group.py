@@ -1,7 +1,7 @@
 import unittest
 
 from secator.ai.actions import ActionContext
-from secator.ai.tools.query_workspace import QueryWorkspace
+from secator.ai.tools.findings import QueryWorkspace
 
 _handle_query = QueryWorkspace().run  # the query tool's handler
 from secator.output_types import Error, Info
