@@ -62,7 +62,7 @@ class TestGroupFindings(unittest.TestCase):
 		self.assertEqual((tuple(Port._group_by), Port._group_aggregate), ((('{host}:{port}', '{ip}:{port}'),), '_source'))
 		self.assertEqual((tuple(Url._group_by), Url._group_aggregate), (('url',), '_source'))
 		self.assertEqual((tuple(Subdomain._group_by), Subdomain._group_aggregate), (('host',), '_source'))
-		self.assertEqual((tuple(Tag._group_by), Tag._group_aggregate), (('category', 'name'), 'match'))
+		self.assertEqual((tuple(Tag._group_by), Tag._group_aggregate), (('category', 'name', 'value'), 'match'))
 		self.assertEqual(
 			(tuple(Technology._group_by), Technology._group_aggregate), ((('{product}:{version}', 'product'),), 'match'))
 
@@ -119,8 +119,8 @@ class TestGroupFindingsDefaults(unittest.TestCase):
 		dicts = [self._tag('T', 'a', category=None, ts=1), self._tag('T', 'b', category='general', ts=2)]
 		objects = [Tag.load(d) for d in dicts]
 
-		reps_dict = group_findings(dicts, ['category', 'name'], aggregate_field='match', defaults=defaults)
-		reps_obj = group_findings(objects, ['category', 'name'], aggregate_field='match')
+		reps_dict = group_findings(dicts, list(Tag._group_by), aggregate_field='match', defaults=defaults)
+		reps_obj = group_findings(objects, list(Tag._group_by), aggregate_field='match')
 
 		# Object path collapses to a single 'general' group; raw path must match.
 		self.assertEqual(len(reps_obj), 1)

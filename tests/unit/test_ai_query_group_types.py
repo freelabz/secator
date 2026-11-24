@@ -14,7 +14,8 @@ from unittest import mock
 from secator.ai.actions import ActionContext
 from secator.ai.tools.query_workspace import QueryWorkspace
 from secator.output_types import (
-	Certificate, Domain, Error, Ip, Port, Record, Subdomain, Technology, Url, UserAccount, Vulnerability)
+	Certificate, Domain, Error, ExploitAttempt, Ip, Port, Record, Subdomain, Tag, Technology, Url, UserAccount,
+	Vulnerability)
 from secator.query.json import match_query
 from secator.query.utils import group_findings
 
@@ -63,6 +64,18 @@ def _findings():
 			# same username on another site is another account
 			('ua3', UserAccount(username='alice', site_name='wiki', url='http://w/alice')),
 			('ua4', UserAccount(username='', email='bob@example.com', site_name='wiki'))],
+		'tag': [('ta1', Tag(category='secret', name='aws-key', value='AKIA1', match='http://a.example.com/app.js')),
+		        ('ta2', Tag(category='secret', name='aws-key', value='AKIA1', match='http://b.example.com/app.js')),
+		        # same category + name, another value: its own row
+		        ('ta3', Tag(category='secret', name='aws-key', value='AKIA2', match='http://a.example.com/app.js')),
+		        # no category: grouped under the 'general' default
+		        ('ta4', Tag(name='email', value='bob@example.com', match='http://a.example.com/'))],
+		# no group key: two attempts on the same vulnerability stay two rows
+		'exploit_attempt': [
+			('ea1', ExploitAttempt(
+				name='t', vuln_id='CVE-1', matched_at='http://a.example.com/', verdict='failed', _source='ai')),
+			('ea2', ExploitAttempt(
+				name='t', vuln_id='CVE-1', matched_at='http://a.example.com/', verdict='success', _source='ai'))],
 	}
 	items = []
 	for i, (uuid, item) in enumerate(u for rows in spec.values() for u in rows):
@@ -91,6 +104,10 @@ EXPECTED = {
 		'a.example.com | A | 1.2.3.4': ['re1', 're2'], 'a.example.com | A | 1.2.3.5': ['re3']}),
 	'user_account': (('site_name', ('username', 'email')), '_source', {
 		'forum | alice': ['ua1', 'ua2'], 'wiki | alice': ['ua3'], 'wiki | bob@example.com': ['ua4']}),
+	'tag': (('category', 'name', 'value'), 'match', {
+		'secret | aws-key | AKIA1': ['ta1', 'ta2'], 'secret | aws-key | AKIA2': ['ta3'],
+		'general | email | bob@example.com': ['ta4']}),
+	'exploit_attempt': ((), None, {'ea1': ['ea1'], 'ea2': ['ea2']}),
 }
 
 
@@ -146,7 +163,7 @@ class TestGroupEveryType(unittest.TestCase):
 					self.assertEqual(member_uuids, groups[key])
 					for value, uuids in row['_group_members'].items():
 						for u in uuids:  # each member's own value maps to its own _uuid
-							self.assertEqual(str(by_uuid[u].get(agg) or ''), value)
+							self.assertEqual(str(by_uuid[u].get(agg or '_source') or ''), value)
 					# the row's _uuid is the newest member
 					self.assertEqual(row['_uuid'], max(row['_group_uuids'], key=lambda u: by_uuid[u]['_timestamp']))
 

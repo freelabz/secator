@@ -69,6 +69,8 @@ class TestConsoleExporterGroupedRows(unittest.TestCase):
 				['https://www.example.org/', 'https://example.com/']),
 			'vulnerability': ({'name': 'Example Flaw', 'id': 'CVE-2099-0001', 'severity': 'high'}, 'matched_at',
 				['192.0.2.10:22', '198.51.100.7:22']),
+			'tag': ({'category': 'secret', 'name': 'aws-key', 'value': 'AKIAEXAMPLE'}, 'match',
+				['https://www.example.org/app.js', 'https://example.com/app.js']),
 		}
 		for _type, (record, field, values) in cases.items():
 			with self.subTest(_type=_type):
@@ -94,3 +96,17 @@ class TestConsoleExporterGroupedRows(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+	def test_tag_rows_split_by_value(self):
+		# One row per category + name + value: each value is shown once, with where it was found.
+		reps = _group('tag', [
+			{'category': 'secret', 'name': 'email', 'value': 'a@example.org', 'match': 'https://example.org/'},
+			{'category': 'secret', 'name': 'email', 'value': 'b@example.org', 'match': 'https://example.org/'},
+			{'category': 'secret', 'name': 'email', 'value': 'a@example.org', 'match': 'https://example.org/team'},
+		])
+		lines = _render(reps)
+		self.assertEqual(len(lines), 2, lines)
+		self.assertIn('a@example.org found @ https://example.org/, https://example.org/team (count: 2)', lines[0])
+		self.assertIn('b@example.org found @ https://example.org/ (count: 1)', lines[1])
+		for line in lines:
+			self.assertNotIn('[https://', line)
