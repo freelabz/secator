@@ -69,7 +69,7 @@ class TestPrompts(unittest.TestCase):
 		"""Test SYSTEM_EXPLOIT template mentions expected concepts."""
 		self.assertIn("exploitation", SYSTEM_EXPLOIT.template)
 		self.assertIn("proof-of-concept", SYSTEM_EXPLOIT.template)
-		self.assertIn("docker", SYSTEM_EXPLOIT.template.lower())
+		self.assertIn("<isolation>", SYSTEM_EXPLOIT.template)
 
 	def test_system_scan_has_subagents(self):
 		"""Test SYSTEM_SCAN has subagent guidance."""
@@ -473,6 +473,40 @@ class TestPrompts(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestIsolationPrompts(unittest.TestCase):
+	"""Isolation is a run setting: with --isolated, run_shell already runs in the per-run
+	sandbox container (secator.ai.tools.run_shell); the model cannot opt in itself. The
+	prompts must not tell it to reach for Docker to get isolation or to escape a denial."""
+
+	def test_guardrails_has_no_container_retry_hint(self):
+		from secator.ai.prompts import load_prompt
+		g = load_prompt("constraints/guardrails.md")
+		self.assertNotIn("isolated Docker container", g)
+		self.assertNotIn("outside of docker run", g)
+
+	def test_isolation_block_follows_session_context(self):
+		from secator.ai.prompts import load_prompt
+		b = load_prompt("constraints/isolation.md")
+		self.assertIn("<session_context>", b)
+		self.assertIn("not something you choose", b)
+		self.assertNotIn("the default in this environment", b)  # shell isolation is off unless configured
+		self.assertNotIn("docker: not found", b)                # sandbox failures surface as [sandbox error]
+		self.assertIn("[sandbox error] could not start isolation container", b)
+		self.assertIn("no Docker daemon", b)
+
+	def test_isolation_sandbox_error_matches_run_shell(self):
+		"""The error string quoted in <isolation> is the one run_shell actually returns."""
+		import inspect
+		from secator.ai.tools import run_shell
+		self.assertIn("could not start isolation container", inspect.getsource(run_shell))
+
+	def test_research_has_no_docker_lab_in_sandbox(self):
+		from secator.ai.prompts import load_prompt
+		r = load_prompt("modes/research.md")
+		self.assertNotIn("in your sandbox: `docker run", r)
+		self.assertIn("no Docker daemon", r)
+
+
 class TestScopeInPrompt(unittest.TestCase):
 	"""Authorized scope is surfaced in the system prompt so the model stays in
 	scope up front (fewer guardrail-denied retries), and is omitted when absent."""
