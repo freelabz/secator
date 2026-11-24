@@ -2031,8 +2031,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	has_parent = None if show_children else False
 	with console.status('[bold]Listing reports …[/]'):
 		_t = time.time()
-		# Every backend returns runners oldest first, most recent last.
-		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
+		# Oldest first, most recent last: the most recent runs are the last lines printed.
+		runners = engine.list_runners(
+			workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent, order='asc')
 		debug(f'listed {len(runners)} runner(s) in {time.time() - _t:.3f}s', sub='report')
 
 	# --time-delta cutoff (local only): keep reports whose mtime is newer than the delta.

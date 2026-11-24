@@ -3,6 +3,7 @@ from typing import Dict, Generator
 from secator.output_types import Ai, Error, Info, Warning
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools.base import BaseTool
+from secator.query._base import RUNNER_ORDER_DESC
 
 
 class ListRunners(BaseTool):
@@ -78,8 +79,11 @@ class ListRunners(BaseTool):
 			return
 
 		try:
+			# Most recent first: the output can be truncated (limit, context budget), so the most
+			# recent runs, the most useful ones, must lead the response.
 			runners = engine.list_runners(
-				workspace_id=workspace_id or None, runner_type=runner_type, has_parent=has_parent)
+				workspace_id=workspace_id or None, runner_type=runner_type, has_parent=has_parent,
+				order=RUNNER_ORDER_DESC)
 		except Exception as e:
 			yield Error(message=f"Failed to list runners: {e}", _context=context)
 			return

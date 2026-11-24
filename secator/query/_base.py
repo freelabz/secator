@@ -72,12 +72,13 @@ class QueryBackend(ABC):
 
 	def list_runners(
 		self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
-		has_parent: Optional[bool] = None
+		has_parent: Optional[bool] = None, order: str = 'asc'
 	) -> List[Dict[str, Any]]:
 		"""List runners (tasks/workflows/scans) from this backend.
 
 		has_parent: None lists all runners, False only outermost (root) runners,
 		True only nested children.
+		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
 		return []
 
@@ -232,15 +233,27 @@ class QueryBackend(ABC):
 		return 0
 
 
-def sort_runners_chronologically(runners, fallback=None):
-	"""Sort runner dicts oldest first, most recent last — the order every backend returns.
+# list_runners sort orders: 'asc' = oldest first, most recent last (the default, used by
+# the CLI so the most recent runs are the last lines printed); 'desc' = most recent first
+# (used by the ai task, so a truncated listing keeps the most recent runs).
+RUNNER_ORDER_ASC = 'asc'
+RUNNER_ORDER_DESC = 'desc'
+RUNNER_ORDERS = (RUNNER_ORDER_ASC, RUNNER_ORDER_DESC)
 
-	The key is the runner's ``start_time`` (else ``end_time``), parsed whether it is an
-	epoch number or an ISO-8601 string. ``fallback(runner)`` may supply a timestamp for
-	runners that carry neither (e.g. a local report's file mtime). Runners with no known
-	timestamp sort first, so the most recent runs always end the list. The sort is stable,
-	so ties keep the backend's order. Never relies on the store or a remote endpoint's order.
+
+def sort_runners_chronologically(runners, fallback=None, order=RUNNER_ORDER_ASC):
+	"""Sort runner dicts by time, in the requested ``order`` ('asc' or 'desc').
+
+	``order='asc'`` (default) returns oldest first, most recent last; ``order='desc'``
+	returns most recent first. The key is the runner's ``start_time`` (else ``end_time``),
+	parsed whether it is an epoch number or an ISO-8601 string. ``fallback(runner)`` may
+	supply a timestamp for runners that carry neither (e.g. a local report's file mtime).
+	Runners with no known timestamp sit at the oldest end: first in 'asc', last in 'desc'.
+	The sort is stable in both orders, so ties keep the backend's order. Never relies on
+	the store or a remote endpoint's order. Raises ValueError on an unknown ``order``.
 	"""
+	if order not in RUNNER_ORDERS:
+		raise ValueError(f'invalid runner order {order!r}: use one of {", ".join(RUNNER_ORDERS)}')
 	from datetime import datetime, timezone
 	from secator.ai.runner_history import parse_dt
 	floor = datetime.min.replace(tzinfo=timezone.utc)
@@ -254,4 +267,4 @@ def sort_runners_chronologically(runners, fallback=None):
 				dt = None
 		return (dt is not None, dt or floor)
 
-	return sorted(runners, key=key)
+	return sorted(runners, key=key, reverse=(order == RUNNER_ORDER_DESC))

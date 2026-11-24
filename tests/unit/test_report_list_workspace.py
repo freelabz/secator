@@ -71,6 +71,23 @@ class ReportListAssertions:
 		self.assertEqual(result.exit_code, 0, result.output)
 		self.assertLess(out.index('beta'), out.index('alpha'))
 
+	def _root_names(self, **kwargs):
+		return [r['name'] for r in self._backend().list_runners(has_parent=False, **kwargs)]
+
+	def test_backend_order_asc_is_default(self):
+		self.assertEqual(self._root_names(), ['beta', 'alpha'])
+		self.assertEqual(self._root_names(order='asc'), ['beta', 'alpha'])
+
+	def test_backend_order_desc_most_recent_first(self):
+		self.assertEqual(self._root_names(order='desc'), ['alpha', 'beta'])
+
+	def test_backend_order_desc_through_query_engine(self):
+		from secator.query import QueryEngine
+		engine = QueryEngine('', context={})
+		with mock.patch.object(engine, 'backend', self._backend()):
+			names = [r['name'] for r in engine.list_runners(has_parent=False, order='desc')]
+		self.assertEqual(names, ['alpha', 'beta'])
+
 
 class TestReportListLocal(ReportListAssertions, unittest.TestCase):
 	"""Local reports live at <reports>/<workspace>/<type>/<id>/report.json."""
@@ -90,6 +107,10 @@ class TestReportListLocal(ReportListAssertions, unittest.TestCase):
 
 	def tearDown(self):
 		shutil.rmtree(self.tmp, ignore_errors=True)
+
+	def _backend(self):
+		from secator.query.json import JsonBackend
+		return JsonBackend('')
 
 	def test_workspace_and_all_workspaces_conflict(self):
 		result, out = _invoke(['--driver', 'local', '-ws', 'ws2', '--all-workspaces'])
@@ -184,6 +205,10 @@ class TestReportListMongoDB(ReportListAssertions, unittest.TestCase):
 		patcher.start()
 		self.addCleanup(patcher.stop)
 
+	def _backend(self):
+		from secator.query.mongodb import MongoDBBackend
+		return MongoDBBackend('')
+
 
 class TestReportListApi(unittest.TestCase):
 	"""The api backend filters by workspace id, so the current workspace name is resolved first."""
@@ -230,6 +255,19 @@ class TestReportListApi(unittest.TestCase):
 		self.assertEqual(result.exit_code, 0, result.output)
 		self.assertLess(out.index('beta'), out.index('alpha'))
 
+	def _backend_names(self, endpoint_rows, **kwargs):
+		from secator.query.api import ApiBackend
+		with mock.patch('secator.query.api.ApiBackend._make_request', return_value=endpoint_rows):
+			return [r['name'] for r in ApiBackend(WS_ID).list_runners(**kwargs)]
+
+	def test_backend_both_orders_regardless_of_endpoint_order(self):
+		old = {'name': 'beta', 'start_time': '2026-01-01T00:00:00Z'}
+		new = {'name': 'alpha', 'start_time': '2026-01-02T00:00:00Z'}
+		for rows in ([new, old], [old, new]):
+			self.assertEqual(self._backend_names(rows), ['beta', 'alpha'])
+			self.assertEqual(self._backend_names(rows, order='asc'), ['beta', 'alpha'])
+			self.assertEqual(self._backend_names(rows, order='desc'), ['alpha', 'beta'])
+
 	def test_unresolvable_workspace_errors_with_hint(self):
 		resolve = mock.Mock(side_effect=Exception('Workspace "ws1" not found in remote API.'))
 		result, out, calls, _ = self._invoke([], resolve=resolve)
@@ -259,3 +297,34 @@ class TestSortRunnersChronologically(unittest.TestCase):
 		runners = [{'name': 'new', 'm': 20.0}, {'name': 'old', 'm': 10.0}]
 		names = [r['name'] for r in sort_runners_chronologically(runners, fallback=lambda r: r['m'])]
 		self.assertEqual(names, ['old', 'new'])
+		names = [r['name'] for r in sort_runners_chronologically(runners, fallback=lambda r: r['m'], order='desc')]
+		self.assertEqual(names, ['new', 'old'])
+
+	def test_desc_most_recent_first_unknown_last(self):
+		from secator.query._base import sort_runners_chronologically
+		runners = [
+			{'name': 'unknown'},
+			{'name': 'a', 'start_time': '2026-01-01T00:00:00Z'},
+			{'name': 'c', 'start_time': '2026-01-03T00:00:00Z'},
+			{'name': 'b', 'start_time': '2026-01-02T00:00:00Z'},
+		]
+		names = [r['name'] for r in sort_runners_chronologically(runners, order='desc')]
+		self.assertEqual(names, ['c', 'b', 'a', 'unknown'])
+
+	def test_ties_keep_backend_order_in_both_orders(self):
+		from secator.query._base import sort_runners_chronologically
+		ts = '2026-01-01T00:00:00Z'
+		runners = [{'name': 'first', 'start_time': ts}, {'name': 'second', 'start_time': ts}]
+		for order in ('asc', 'desc'):
+			names = [r['name'] for r in sort_runners_chronologically(runners, order=order)]
+			self.assertEqual(names, ['first', 'second'], order)
+
+	def test_invalid_order_raises(self):
+		from secator.query import QueryEngine
+		from secator.query._base import sort_runners_chronologically
+		with self.assertRaises(ValueError):
+			sort_runners_chronologically([], order='newest')
+		engine = QueryEngine('', context={})
+		with mock.patch.object(engine, 'backend') as backend, self.assertRaises(ValueError):
+			engine.list_runners(order='newest')
+		backend.list_runners.assert_not_called()

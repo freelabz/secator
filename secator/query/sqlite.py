@@ -211,7 +211,7 @@ class SqliteBackend(QueryBackend):
 		return cur.rowcount
 
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
-					 has_parent: Optional[bool] = None) -> List[Dict[str, Any]]:
+					 has_parent: Optional[bool] = None, order: str = 'asc') -> List[Dict[str, Any]]:
 		"""List runners from the sqlite tasks/workflows/scans tables.
 
 		workspace_id: a workspace id or name. Rows mirror ``context.workspace_id`` (which
@@ -219,6 +219,7 @@ class SqliteBackend(QueryBackend):
 		and carry ``context.workspace_name`` in the JSON blob, so either value matches.
 		has_parent: None lists all runners, False only outermost (root) runners,
 		True only nested children.
+		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
 		if runner_type:
 			table = runner_type.rstrip('s') + 's'
@@ -246,8 +247,8 @@ class SqliteBackend(QueryBackend):
 					doc['_id_str'] = f'{table}/{rid}'
 					doc['_workspace'] = (doc.get('context') or {}).get('workspace_name') or ws_id or ''
 					runners.append(doc)
-			# Oldest first, most recent last, across the tasks/workflows/scans tables.
-			return sort_runners_chronologically(runners)
+			# In the requested order (default oldest first), across the tasks/workflows/scans tables.
+			return sort_runners_chronologically(runners, order=order)
 		except Exception as e:
 			console.print(Warning(message=f'SQLite list_runners failed: {e}'))
 			return []

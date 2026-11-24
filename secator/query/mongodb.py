@@ -213,11 +213,12 @@ class MongoDBBackend(QueryBackend):
 			return None
 
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
-					 has_parent: Optional[bool] = None):
+					 has_parent: Optional[bool] = None, order: str = 'asc'):
 		"""List runners from MongoDB tasks/workflows/scans collections.
 
 		has_parent: when not None, only return runners matching that parent relationship
 		(False = outermost runners only, True = nested children only).
+		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
 		try:
 			client = self._get_client()
@@ -252,8 +253,8 @@ class MongoDBBackend(QueryBackend):
 					doc['_id_str'] = f'{rtype}/{runner_id}' if runner_id else rtype
 					doc['_workspace'] = doc.get('context', {}).get('workspace_name', '')
 					runners.append(doc)
-			# Oldest first, most recent last, across the tasks/workflows/scans collections.
-			return sort_runners_chronologically(runners)
+			# In the requested order (default oldest first), across the tasks/workflows/scans collections.
+			return sort_runners_chronologically(runners, order=order)
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB list_runners failed: {e}'))
 			return []

@@ -105,11 +105,26 @@ class TestListRunnersTool(unittest.TestCase):
 		# top-level runs only by default
 		self.assertEqual(e.list_runners.call_args.kwargs['has_parent'], False)
 		self.assertEqual(e.list_runners.call_args.kwargs['runner_type'], 'scan')
+		# Most recent first, so a truncated listing keeps the most recent runs at the top.
+		self.assertEqual(e.list_runners.call_args.kwargs['order'], 'desc')
 		ai = [o for o in out if isinstance(o, Ai)]
 		self.assertEqual(ai[0].ai_type, 'list_runners')
 		self.assertEqual(ai[0].extra_data['count'], 1)
 		dict_rows = [o for o in out if isinstance(o, dict)]
 		self.assertTrue(dict_rows and dict_rows[0]['_context']['ai_query_result'])
+
+	def test_handler_truncation_keeps_most_recent_runs_first(self):
+		from secator.query._base import sort_runners_chronologically
+		now = datetime.now(timezone.utc).timestamp()
+		runners = [{'name': f'r{i}', 'status': 'SUCCESS', '_type': 'scans', 'start_time': now - i * 60} for i in range(5)]
+		e = MagicMock()
+		e.backend.name = 'mongodb'
+		# Emulate a backend honouring the requested order.
+		e.list_runners.side_effect = lambda **kw: sort_runners_chronologically(list(reversed(runners)), order=kw['order'])
+		out = list(dispatch_action({'action': 'list_runners', 'limit': 2}, self._ctx(e)))
+		ai = [o for o in out if isinstance(o, Ai)][0]
+		self.assertEqual([r['name'] for r in ai.extra_data['runners']], ['r0', 'r1'])
+		self.assertTrue(ai.extra_data['has_more'])
 
 	def test_handler_include_children_opens_filter(self):
 		e = MagicMock()

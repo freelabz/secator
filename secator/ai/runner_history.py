@@ -106,7 +106,9 @@ def filter_runners(runners, since=None, status=None, limit=50, now=None):
 		if cutoff is not None and (dt is None or dt < cutoff):
 			continue
 		rows.append((dt, r))
-	# newest first; unknown-timestamp runners sort last (only reachable when no `since`).
+	# Most recent first (the query layer's 'desc' order, re-applied here so the cap below
+	# always keeps the most recent runs); unknown-timestamp runners sort last (only
+	# reachable when no `since`).
 	rows.sort(key=lambda t: (t[0] is not None, t[0] or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 	try:
 		limit = int(limit)
