@@ -114,10 +114,20 @@ class Report:
 			if dedupe:
 				dup = {'_context.workspace_duplicate': {'$ne': True}}
 				query = {'$and': [query, dup]} if (query and set(query) & set(dup)) else {**query, **dup}
-			for output_type in list(FINDING_TYPES) + [Target]:
-				name = output_type.get_name()
+			# A type the query cannot match (e.g. `q technology` pins `_type`) gets an empty result
+			# without querying it: on a store without indexes every query is a full read.
+			from secator.query.utils import query_possible_types
+			names = [output_type.get_name() for output_type in list(FINDING_TYPES) + [Target]]
+			possible = set(query_possible_types(query, names))
+			for name in names:
+				if name not in possible:
+					data['results'][name] = []
+					continue
 				type_q = {'$and': [query, {'_type': name}]} if '_type' in query else {**query, '_type': name}
 				data['results'][name] = StreamView(engine, type_q, limit=limit)
+			# The shared query the per-type views narrow, so a caller can read several types in one
+			# pass (see secator.query._stream.iter_types_raw).
+			self.stream_query = query
 			self.data = data
 			return
 
