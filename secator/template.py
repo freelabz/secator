@@ -105,7 +105,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 	"""
 	from secator.tree import build_runner_tree, walk_runner_tree, get_flat_node_list
 	from secator.utils import debug
-	from secator.runners.task import Task
+	from secator.runners.task import Task, TaskNotFoundError
 
 	# Task config created on-the-fly
 	if config.type == 'task':
@@ -158,11 +158,11 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		if name not in resolved_task_classes:
 			try:
 				resolved_task_classes[name] = Task.get_task_class(name)
-			except ValueError as e:
-				resolved_task_classes[name] = e
+			except ValueError:
+				resolved_task_classes[name] = None
 		result = resolved_task_classes[name]
-		if isinstance(result, ValueError):
-			raise result
+		if result is None:
+			raise TaskNotFoundError(f'Task {name} not found. Aborting.')
 		return result
 
 	def find_same_opts(node, nodes, opt_name, check_class_opts=False):

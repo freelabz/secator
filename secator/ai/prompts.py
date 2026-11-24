@@ -873,6 +873,8 @@ def build_library_reference() -> str:
 	Built from the discovered tasks/workflows/profiles (themselves cached by the loader) and the
 	configured wordlists, so it is static for the process lifetime: cache it instead of rebuilding
 	it on every system-prompt render (several times per AI session, and on each mode switch).
+	Config changes made after the first call (e.g. new wordlist templates) need
+	``build_library_reference.cache_clear()``.
 	"""
 	sections = [
 		REFERENCE_FORMAT,
