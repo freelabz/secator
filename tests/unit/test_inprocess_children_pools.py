@@ -20,8 +20,6 @@ from pathlib import Path
 
 from celery import Celery
 
-from secator.celery_utils import allow_eager_join
-
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures' / 'inprocess_children'
 QUEUE = 'inprocess-test'
 TIMEOUT = 90
@@ -140,25 +138,3 @@ class TestInProcessChildrenThreads(_InProcessChildren, unittest.TestCase):
 @unittest.skipUnless(find_spec('gevent'), 'gevent not installed (worker addon)')
 class TestInProcessChildrenGevent(_InProcessChildren, unittest.TestCase):
 	pool = 'gevent'
-
-
-class TestAllowEagerJoin(unittest.TestCase):
-
-	def test_nested_and_restored(self):
-		from celery._state import _set_task_join_will_block, task_join_will_block
-		_set_task_join_will_block(True)
-		self.addCleanup(_set_task_join_will_block, False)
-		with allow_eager_join():
-			self.assertFalse(task_join_will_block())
-			with allow_eager_join():
-				self.assertFalse(task_join_will_block())
-			self.assertFalse(task_join_will_block())  # still inside the outer context
-		self.assertTrue(task_join_will_block())
-
-	def test_restored_on_error(self):
-		from celery._state import _set_task_join_will_block, task_join_will_block
-		_set_task_join_will_block(True)
-		self.addCleanup(_set_task_join_will_block, False)
-		with self.assertRaises(ValueError), allow_eager_join():
-			raise ValueError
-		self.assertTrue(task_join_will_block())

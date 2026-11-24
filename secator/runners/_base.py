@@ -12,9 +12,10 @@ from time import time
 from dotmap import DotMap
 from rich.errors import MarkupError as RichMarkupError
 import humanize
+from celery.result import allow_join_result
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
-from secator.celery_utils import CeleryData, allow_eager_join
+from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
@@ -1081,8 +1082,9 @@ class Runner:
 		if self.sync:
 			self.print_item = False
 			self.debug('running workflow in sync mode', sub='start')
-			# Eager run in this process: allow reading its results under any worker pool.
-			with allow_eager_join():
+			# Eager run in this process: every result is already computed, so lift Celery's
+			# "never call result.get() within a task" guard (set by prefork/solo/threads).
+			with allow_join_result():
 				results = workflow.apply().get()
 		else:
 			self.debug('running workflow in async mode', sub='start')
