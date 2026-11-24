@@ -116,7 +116,7 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(re.findall(r'\$\{\w+\}', prompt), [], "unresolved ${include} in exploit prompt")
 		template_vars = [
 			"library_reference", "discovery", "common", "queries", "findings",
-			"arsenal", "guardrails", "isolation", "shell_environment", "exploitation_report",
+			"arsenal", "guardrails", "shell_environment", "exploitation_report",
 			"workspace_path", "query_types", "output_types_reference",
 		]
 		leftover = [v for v in template_vars if f"${v}" in prompt]
@@ -515,7 +515,8 @@ class TestIsolationPrompts(unittest.TestCase):
 		self.assertIn("Docker is not available inside the\nsandbox", blk)
 		self.assertNotIn("docker run", blk)
 		self.assertIn("[sandbox error] could not start isolation container", blk)
-		self.assertIn("its loopback (127.0.0.1, ::1,\nlocalhost) is its own", blk)
+		self.assertIn("Tasks and workflows do NOT run in the sandbox", blk)
+		self.assertNotIn("$sandbox_loopback", blk)
 		self.assertIn("Tasks and workflows do NOT run in the sandbox", blk)
 		self.assertIn("/tmp/ws/.outputs/poc", blk)  # $workspace_path substituted
 
@@ -540,30 +541,40 @@ class TestIsolationPrompts(unittest.TestCase):
 		self.assertIn("could not start isolation container", inspect.getsource(run_shell))
 
 	def test_package_manager_variants(self):
-		"""The default image (Alpine, unprivileged `secator` user with sudo for `apk add`) and
-		known families get concrete install + Java commands; unknown images get a detect step."""
+		"""The default image (Alpine, unprivileged `secator` user with sudo for `apk add`) gets
+		concrete commands; an overridden image gets a detect-once step (OS, manager, root)."""
 		from secator.ai.prompts import build_sandbox_packages
-		cases = {
-			"freelabz/secator:1.0.0-lite": ("sudo apk add --no-cache", "openjdk17-jre-headless"),
-			"alpine:3.21": ("apk add --no-cache", "openjdk17-jre-headless"),
-			"kalilinux/kali-rolling": ("apt-get install -y", "default-jre-headless"),
-			"fedora:41": ("dnf install -y", "java-17-openjdk-headless"),
-		}
-		for image, (install, jre) in cases.items():
+		for image in ("freelabz/secator:1.0.0-lite", "freelabz/secator@sha256:abc"):
 			out = build_sandbox_packages(image)
-			self.assertIn(f"{install}", out, image)
-			self.assertIn(jre, out, image)
+			self.assertIn("sudo apk add --no-cache openjdk17-jre-headless", out, image)
 			self.assertIn("java -jar", out, image)
-		self.assertNotIn("sudo", build_sandbox_packages("alpine:3.21"))
-		unknown = build_sandbox_packages("registry.local/custom:1")
-		self.assertIn("cat /etc/os-release", unknown)
-		self.assertIn("java -jar", unknown)
+		for image in ("alpine:3.21", "kalilinux/kali-rolling", "myorg/freelabz/secator:1"):
+			out = build_sandbox_packages(image)
+			self.assertIn("cat /etc/os-release; id -u", out, image)
+			self.assertNotIn("sudo apk add --no-cache openjdk17", out, image)
+			self.assertIn("java -jar", out, image)
+
+	def test_sandbox_loopback_follows_network_mode(self):
+		from secator.ai.prompts import build_sandbox_loopback
+		with patch.dict("os.environ", {"SECATOR_AI_SANDBOX_NETWORK": ""}):
+			self.assertIn("its own network namespace", build_sandbox_loopback())
+		with patch.dict("os.environ", {"SECATOR_AI_SANDBOX_NETWORK": "host"}):
+			self.assertIn("scoped like any other target", build_sandbox_loopback())
+
+	def test_subagent_keeps_block(self):
+		with patch("secator.ai.context.load_context_blocks", return_value=[]):
+			p = get_system_prompt("exploit", workspace_path="/tmp/ws", isolated=True, is_subagent=True)
+		self.assertIn("Shell isolation is ON", self._block(p))
+
+	def test_host_docker_is_labs_only(self):
+		blk = self._block(self._prompt("scan", False))
+		self.assertIn("Docker commands are not\n  inspected for targets", blk)
 
 	def test_image_override_reaches_prompt(self):
 		blk = self._block(self._prompt("research", True, image="registry.local/kali:2"))
 		self.assertIn("image `registry.local/kali:2`", blk)
-		self.assertIn("apt-get install -y", blk)
-		self.assertNotIn("apk add", blk)
+		self.assertIn("cat /etc/os-release", blk)
+		self.assertNotIn("sudo apk add --no-cache go", blk)
 
 	def test_contribute_does_not_hardcode_image(self):
 		p = self._prompt("contribute", True, image="registry.local/custom:1")

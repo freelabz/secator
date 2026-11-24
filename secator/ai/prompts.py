@@ -570,37 +570,45 @@ def build_session_context(isolated: bool = False) -> str:
 	return "\n".join(lines)
 
 
-# Package manager per sandbox image family, derived from the configured image name (the sandbox
-# starts lazily on the first run_shell, after the prompt is built, so it cannot be probed here).
-# (name substrings, package manager install command, headless JRE package). The default
-# freelabz/secator image is Alpine and runs as the unprivileged `secator` user with passwordless
-# sudo for `apk add` only (see Dockerfile), hence the `sudo`.
-_SANDBOX_PACKAGE_MANAGERS = (
-	(("freelabz/secator",), "sudo apk add --no-cache", "openjdk17-jre-headless"),
-	(("alpine",), "apk add --no-cache", "openjdk17-jre-headless"),
-	(("debian", "ubuntu", "kali"), "apt-get install -y --no-install-recommends", "default-jre-headless"),
-	(("fedora", "rocky", "alma", "centos"), "dnf install -y", "java-17-openjdk-headless"),
-)
+# The default sandbox image (freelabz/secator, Alpine) runs as the unprivileged `secator` user with
+# passwordless sudo for `apk add` only (see Dockerfile). Any other configured image is unknown here
+# (the sandbox starts lazily on the first run_shell, after the prompt is built), so the model is
+# told to detect its OS once.
+_DEFAULT_SANDBOX_REPO = "freelabz/secator"
 
 
 def build_sandbox_packages(image: str) -> str:
-	"""Install guidance for the sandbox image: concrete commands when the image family is known
-	from its name, otherwise tell the model to detect the OS once and pick the manager."""
-	name = image.lower()
-	for needles, install, jre in _SANDBOX_PACKAGE_MANAGERS:
-		if any(n in name for n in needles):
-			return (
-				f'- System packages / runtimes:   run_shell(command="{install} go rust cargo nmap-scripts")\n'
-				f'- Java tools:   run_shell(command="{install} {jre}"), then '
-				'run_shell(command="java -jar $workspace_path/.outputs/<tool>/<tool>.jar")'
-			)
+	"""Install guidance for the sandbox image: concrete apk commands for the default secator image,
+	a detect-once step (OS, package manager, root or not) for any overridden image."""
+	java_run = 'run_shell(command="java -jar $workspace_path/.outputs/<tool>/<tool>.jar")'
+	if image.split(":", 1)[0].split("@", 1)[0] == _DEFAULT_SANDBOX_REPO:
+		return (
+			'- System packages / runtimes (Alpine, unprivileged user: apk via sudo):   '
+			'run_shell(command="sudo apk add --no-cache go rust cargo nmap-scripts")\n'
+			'- Java tools:   run_shell(command="sudo apk add --no-cache openjdk17-jre-headless"), then ' + java_run
+		)
 	return (
-		"- The package manager of this image is not known in advance: run `cat /etc/os-release; id -u` once, "
-		"then use its manager (`apk add --no-cache`, `apt-get install -y`, `dnf install -y`), prefixed "
-		"with `sudo` when you are not root.\n"
+		"- System packages / runtimes: this image's package manager is not known in advance: run "
+		"`cat /etc/os-release; id -u` once, then use its manager (`apk add --no-cache`, "
+		"`apt-get install -y`, `dnf install -y`), prefixed with `sudo` when you are not root.\n"
 		"- Java tools: install a headless JRE with that manager (e.g. openjdk17-jre-headless, "
-		"default-jre-headless or java-17-openjdk-headless), then "
-		'run_shell(command="java -jar $workspace_path/.outputs/<tool>/<tool>.jar")'
+		"default-jre-headless or java-17-openjdk-headless), then " + java_run
+	)
+
+
+def build_sandbox_loopback() -> str:
+	"""Loopback rule for the sandbox, matching what the permission engine enforces (a private
+	network namespace exempts the sandbox's own loopback; host/container networking does not)."""
+	from secator.ai.guardrails import _sandbox_has_private_loopback
+	if _sandbox_has_private_loopback():
+		return (
+			"The sandbox has its own network namespace, so its loopback (127.0.0.1, ::1, localhost) is\n"
+			"its own: a lab or PoC service you start there can be reached on loopback from run_shell\n"
+			"without an approval prompt, unless a deny rule or out_of_scope entry covers it."
+		)
+	return (
+		"The sandbox shares another network namespace (host or container networking), so loopback\n"
+		"(127.0.0.1, ::1, localhost) is scoped like any other target."
 	)
 
 
@@ -612,7 +620,8 @@ def build_shell_environment(isolated: bool) -> str:
 	from secator.ai.tools._sandbox import _sandbox_image
 	image = _sandbox_image()
 	return Template(load_prompt("constraints/shell_sandbox.md")).safe_substitute(
-		sandbox_image=image, sandbox_packages=build_sandbox_packages(image))
+		sandbox_image=image, sandbox_packages=build_sandbox_packages(image),
+		sandbox_loopback=build_sandbox_loopback())
 
 
 def build_contribute_deliverable(backend=None) -> str:
