@@ -25,6 +25,13 @@ class _missing_privileged_tool(Command):
 
 
 @task()
+class _missing_unprivileged_tool(Command):
+	"""Tool run without sudo whose binary is not on the user's PATH."""
+	cmd = MISSING_BINARY
+	input_types = None
+
+
+@task()
 class _missing_tool_with_installer(Command):
 	"""Tool whose binary is not installed, installed by secator from source."""
 	cmd = MISSING_BINARY
@@ -192,3 +199,58 @@ class TestIsInstalled(unittest.TestCase):
 			self.assertTrue(runner.is_installed())
 			runner.run_opts['env'] = {'PATH': tempfile.gettempdir()}
 			self.assertFalse(runner.is_installed())
+
+
+@unittest.skipUnless(shutil.which('which'), 'needs `which`')
+class TestIsInstalledWithSudo(unittest.TestCase):
+	"""A binary only on sudo's PATH (e.g. /usr/sbin/arp for a standard user) counts as installed for a sudo task."""
+
+	def setUp(self):
+		tmp = tempfile.TemporaryDirectory()
+		self.addCleanup(tmp.cleanup)
+		self.user_bin = os.path.join(tmp.name, 'bin')
+		self.sbin = os.path.join(tmp.name, 'sbin')
+		os.makedirs(self.user_bin)
+		os.makedirs(self.sbin)
+		binary = os.path.join(self.sbin, MISSING_BINARY)
+		with open(binary, 'w') as f:
+			f.write('#!/bin/sh\n')
+		os.chmod(binary, 0o755)
+		patcher = mock.patch.object(Command, '_sudo_search_path', return_value=self.sbin)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def _runner(self, cls):
+		return cls('example.com', sync=True, print_item=False, print_line=False, env={'PATH': self.user_bin})
+
+	def test_sudo_task_finds_binary_on_sudo_path(self):
+		self.assertTrue(self._runner(_missing_privileged_tool).is_installed())
+
+	def test_non_sudo_task_does_not_use_sudo_path(self):
+		self.assertFalse(self._runner(_missing_unprivileged_tool).is_installed())
+
+	def test_sudo_task_missing_everywhere_is_not_installed(self):
+		os.remove(os.path.join(self.sbin, MISSING_BINARY))
+		self.assertFalse(self._runner(_missing_privileged_tool).is_installed())
+
+	def test_sudo_task_with_binary_on_sudo_path_reaches_sudo_check(self):
+		runner = self._runner(_missing_privileged_tool)
+		no_tty = mock.patch.object(_missing_privileged_tool, '_prompt_sudo', return_value=(None, 'no tty'))
+		with mock.patch.object(CONFIG.security, 'prompt_sudo_password', True), no_tty as prompt_sudo:
+			list(runner)
+		prompt_sudo.assert_called_once()
+		self.assertFalse([e for e in runner.errors if 'not found' in e.message])
+
+
+class TestSudoSearchPath(unittest.TestCase):
+
+	def test_reads_secure_path_from_sudoers(self):
+		sudoers = 'Defaults\tenv_reset\nDefaults\tsecure_path="/opt/sbin:/usr/bin"\n'
+		with mock.patch('builtins.open', mock.mock_open(read_data=sudoers)):
+			self.assertEqual(Command._sudo_search_path(), '/opt/sbin:/usr/bin')
+
+	def test_unreadable_sudoers_uses_default(self):
+		from secator.runners.command import SUDO_DEFAULT_SECURE_PATH
+		with mock.patch('builtins.open', side_effect=PermissionError):
+			self.assertEqual(Command._sudo_search_path(), SUDO_DEFAULT_SECURE_PATH)
+		self.assertIn('/usr/sbin', SUDO_DEFAULT_SECURE_PATH)

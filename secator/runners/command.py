@@ -28,6 +28,9 @@ from secator.utils import debug, rich_escape as _s, signal_to_name
 
 logger = logging.getLogger(__name__)
 
+# PATH sudo resolves commands on when its `secure_path` can't be read (sudoers is root-only by default).
+SUDO_DEFAULT_SECURE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
 # Serialize interactive sudo prompts and cache the verified password for the process lifetime.
 # Under the gevent worker (default -c 100) many tasks call getpass on the same tty at once and
 # corrupt its termios state (issue #1332); the lock prompts one at a time and the cache lets the
@@ -707,7 +710,33 @@ class Command(Runner):
 		cwd = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
 		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd)
 		result.communicate()
-		return result.returncode == 0
+		if result.returncode == 0:
+			return True
+		# A command run with sudo is resolved on sudo's PATH (`secure_path`), which usually holds sbin
+		# directories missing from a standard user's PATH (e.g. /usr/sbin/arp): look there too.
+		if self.requires_sudo or re.search(r'\bsudo\b', self.cmd or ''):
+			return shutil.which(self.cmd_name, path=self._sudo_search_path()) is not None
+		return False
+
+	@staticmethod
+	def _sudo_search_path():
+		"""Return the PATH sudo uses to resolve commands.
+
+		This is `Defaults secure_path` from /etc/sudoers when it is readable (it usually is only for root),
+		else the common default secure_path.
+
+		Returns:
+			str: Colon-separated list of directories.
+		"""
+		try:
+			with open('/etc/sudoers') as f:
+				for line in f:
+					match = re.match(r'\s*Defaults\s+secure_path\s*=\s*"?([^"\s]+)"?', line)
+					if match:
+						return match.group(1)
+		except OSError:
+			pass
+		return SUDO_DEFAULT_SECURE_PATH
 
 	def process_line(self, line):
 		"""Process a single line of output emitted on stdout / stderr and yield results."""
