@@ -109,15 +109,16 @@ def _create_message(embeds):
 
 
 def _edit_message(message_id, embeds, thread_id=None):
-	"""Edit an existing Discord webhook message."""
+	"""Edit an existing Discord webhook message. Returns whether it was edited."""
 	if not WEBHOOK_URL or not message_id:
-		return
+		return False
 	url = f'{WEBHOOK_URL}/messages/{message_id}'
 	if thread_id:
 		url += f'?thread_id={thread_id}'
 	response = _request_with_retry('PATCH', url, json={'embeds': embeds})
 	if response:
 		debug(f'message updated: {message_id}', sub='hooks.discord')
+	return bool(response)
 
 
 def _create_thread(channel_id, message_id, thread_name):
@@ -285,12 +286,13 @@ def update_runner(self):
 		own_msg_key = f'_discord_task_msg_{self.unique_name}'
 		own_msg_id = self.context.get(own_msg_key)
 		if own_msg_id:
-			_edit_message(own_msg_id, [embed], thread_id=thread_id)
+			sent = _edit_message(own_msg_id, [embed], thread_id=thread_id)
 		else:
 			response = _request_with_retry(
 				'POST', f'{WEBHOOK_URL}?wait=true&thread_id={thread_id}',
 				json={'embeds': [embed]}
 			)
+			sent = bool(response)
 			if response:
 				own_msg_id = response.json().get('id')
 				self.context[own_msg_key] = own_msg_id
@@ -300,9 +302,10 @@ def update_runner(self):
 		msg_key = '_discord_msg_id'
 		msg_id = self.context.get(msg_key)
 		if msg_id:
-			_edit_message(msg_id, [embed])
+			sent = _edit_message(msg_id, [embed])
 		else:
 			msg_id, channel_id = _create_message([embed])
+			sent = bool(msg_id)
 			if msg_id:
 				self.context[msg_key] = msg_id
 				if BOT_TOKEN and channel_id:
@@ -310,6 +313,10 @@ def update_runner(self):
 					thread_id = _create_thread(channel_id, msg_id, thread_name)
 					if thread_id:
 						self.context['_discord_thread_id'] = thread_id
+	# Stamp the shared runner-update throttle (Runner.run_hooks on_interval) so a run with only
+	# this driver edits its message once per backend_update_frequency, not once per item.
+	if sent:
+		self.last_updated_db = time.time()
 
 
 def update_finding(self, item):

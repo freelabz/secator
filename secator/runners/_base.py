@@ -1221,14 +1221,18 @@ class Runner:
 		if self.dry_run:
 			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
 			return result
-		for hook in self.resolved_hooks[hook_type]:
+		hooks = self.resolved_hooks[hook_type]
+		# Periodic runner updates are throttled on `last_updated_db`, which every driver's runner
+		# update hook stamps after a successful write. Checked once per pass, so a hook stamping
+		# it never skips the hooks registered after it.
+		if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):  # noqa: E501
+			self.debug('hook skipped (backend update frequency)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			return result
+		for hook in hooks:
 			if phase and get_hook_phase(hook) != phase:
 				continue
 			fun = self.get_func_path(hook)
 			try:
-				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
-					return
 				if not self.enable_hooks or self.no_process:
 					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					continue
