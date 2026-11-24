@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from urllib.parse import urlparse
 
-from secator.cve import extract_software_and_version
 from secator.definitions import CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE, TECH, TITLE, URL, WEBSERVER, METHOD
 from secator.output_types import OutputType, Technology
 from secator.utils import rich_to_ansi, trim_string, format_object, rich_escape as _s, to_title_case_hyphenated  # noqa: E501
@@ -62,8 +61,9 @@ class Url(OutputType):
 		'screenshot_path',
 	]
 	_sort_by = (URL,)
-	_group_by = ('host',)        # collapse a host's URLs into one row
-	_group_aggregate = URL
+	_target_fields = ['url']
+	_group_by = (URL,)           # one row per URL
+	_group_aggregate = '_source'
 
 	def __post_init__(self):
 		super().__post_init__()
@@ -108,15 +108,10 @@ class Url(OutputType):
 		return self.url
 
 	def get_techs(self):
+		# Wappalyzer names ("Apache HTTP Server:2.4.56") or a raw Server header
+		# ("Apache/2.4.25 (Debian)"): Technology splits and normalizes the identity.
 		for tech in self.tech:
-			normalized = tech.replace('_', ' ').replace('/', ' ').replace('(', ' ').replace(')', ' ').replace(':', ' ')
-			product, version = extract_software_and_version(normalized)
-			product = product or tech
-			yield Technology(
-				match=self.url,
-				product=product,
-				version=version,
-			)
+			yield Technology(match=self.url, product=tech)
 
 	def __rich__(self):
 		s = f'🔗 [white]{_s(self.url)}'
