@@ -1410,6 +1410,39 @@ class TestChildInheritsParentHooks(unittest.TestCase):
 		self.assertIsNot(hooks[Workflow], json_hooks.HOOKS[Workflow])
 		self.assertIsNot(hooks[Task]['on_item'], json_hooks.HOOKS[Task]['on_item'])
 
+	def test_isolated_run_shell_runs_inherited_hooks_in_parent_process(self):
+		"""With --isolated, only the command string crosses into the sandbox container
+		(`docker exec`): the child `command` runner, and so every inherited hook, runs in
+		the ai task's own process, never inside the container (which may lack storage or
+		database access). Drives a real runner with the container exec swapped for a
+		local stand-in."""
+		import os
+		calls = []
+
+		def _record(name):
+			def _hook(runner, *args):
+				calls.append((name, os.getpid()))
+				return args[0] if args else None
+			_hook.__module__ = __name__
+			return _hook
+		parent = {'on_start': [_record('on_start')], 'on_end': [_record('on_end')]}
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'},
+		                    isolated=True, hooks=parent)
+		wrapped = []
+
+		def _fake_wrap(name, command):
+			wrapped.append((name, command))
+			return 'echo from-sandbox'  # stand-in for `docker exec <name> ...`
+		with patch('secator.ai.tools.run_shell._ensure_sandbox_container', return_value='sbx-r1'), \
+		     patch('secator.ai.tools.run_shell._wrap_docker_exec', side_effect=_fake_wrap):
+			results = list(dispatch_action({'action': 'shell', 'command': 'id'}, ctx))
+		# Only the command was handed to the container side.
+		self.assertEqual(wrapped, [('sbx-r1', 'id')])
+		out = [r for r in results if isinstance(r, Ai) and r.ai_type == 'shell_output']
+		self.assertTrue(out and 'from-sandbox' in out[0].content, results)
+		# The inherited hooks ran, in this (the ai task's) process.
+		self.assertEqual(sorted(calls), sorted([('on_end', os.getpid()), ('on_start', os.getpid())]))
+
 	def test_ai_task_hands_its_hooks_to_action_context(self):
 		"""The ai task passes its own hooks to ActionContext (what children inherit)."""
 		from secator.tasks.ai import ai
