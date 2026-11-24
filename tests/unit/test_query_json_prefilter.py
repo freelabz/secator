@@ -226,7 +226,7 @@ class TestGroupFindingsEquivalence(unittest.TestCase):
 class TestAggregateStreamedNoCount(unittest.TestCase):
 
 	def test_ungrouped_type_is_read_without_a_count_query(self):
-		from secator.query.aggregate import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		from secator.query._stream import StreamView
 
 		class _Engine:

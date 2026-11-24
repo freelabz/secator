@@ -3,7 +3,7 @@ results: the per-type helpers, and the streaming aggregation over StreamView res
 bounded by the result size) with a single shared read on scan-per-query backends."""
 from collections import Counter
 
-from secator.query.format import _apply_format, _render_finding
+from secator.query._format import _apply_format, _render_finding
 
 
 def _sort_results_by_field(results, sort):

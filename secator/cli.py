@@ -26,8 +26,8 @@ from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STA
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.query import QueryEngine
-from secator.query.aggregate import _aggregate_streamed, _aggregate_views
-from secator.query.format import _apply_format
+from secator.query._aggregate import _aggregate_streamed, _aggregate_views
+from secator.query._format import _apply_format
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner

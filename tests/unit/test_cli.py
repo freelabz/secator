@@ -7,7 +7,7 @@ from unittest import mock
 
 
 from secator.cli import cli
-from secator.query.format import _apply_format
+from secator.query._format import _apply_format
 from secator.definitions import VERSION
 from secator.installer import InstallerStatus
 
