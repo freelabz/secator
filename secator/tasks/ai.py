@@ -284,6 +284,15 @@ def _ack_resultless_calls(runner, actions, collected):
 		         _context=dict(runner.context))
 
 
+def write_system_prompt(prompt, mode):
+	"""Write the rendered system prompt to stdout, byte-for-byte (no Rich markup,
+	emoji, highlighting or wrapping), with its header on stderr so piping stdout to
+	a file captures only the prompt."""
+	console.print(f"[bold orange3]System prompt ({mode})[/]")
+	sys.stdout.write(prompt if prompt.endswith("\n") else prompt + "\n")
+	sys.stdout.flush()
+
+
 def resolve_llm_credentials(
 	caller_api_base, caller_api_key, config_api_base, config_api_key,
 	disallow_config_token=False,
@@ -393,7 +402,7 @@ class ai(PythonRunner):
 		"show_prompt": {
 			"is_flag": True,
 			"default": False,
-			"help": "Render and display the system prompt, then exit"
+			"help": "Write the rendered system prompt to stdout, then exit"
 		},
 		"dangerous": {
 			"is_flag": True,
@@ -443,17 +452,23 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
-		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
-		if self._credential_error:
-			yield Error(message=self._credential_error)
-			return
+		# A mode name passed as the model (`--model chat`) is almost always a typo for
+		# `--mode chat`: say so instead of silently using the wrong mode / model.
+		model = getattr(self, "model", None)
+		if isinstance(model, str) and normalize_mode(model) in MODES:
+			yield Warning(message=f'--model "{model}" is a mode name, not an LLM model: did you mean --mode {model}?')
 
-		# Show prompt mode (diagnostic)
+		# Show prompt mode (diagnostic). Rendering the prompt needs no LLM credentials,
+		# so it runs before the credential check.
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "scan"
 			prompt = self._system_prompt_for(show_mode)
-			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
-			console.print(prompt, highlight=False, soft_wrap=True)
+			write_system_prompt(prompt, show_mode)
+			return
+
+		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
+		if self._credential_error:
+			yield Error(message=self._credential_error)
 			return
 
 		# Verify model is configured and reachable
@@ -604,7 +619,7 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _resolve_context_includes(self):
-		"""Resolve the forced AI-context filenames (profiles' ``ai_context``) for this run.
+		"""Resolve the forced AI-context files (profiles' ``ai_context``: names or paths relative to ``ai/``).
 
 		Merges filenames declared by any applied profile with any inherited from the
 		run context (``ai_context_includes``) — a subagent does NOT receive the
