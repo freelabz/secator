@@ -148,12 +148,12 @@ MARKS = {
 @pytest.mark.parametrize('mark', list(MARKS))
 def test_finding_management(run_ai, lab, mark):
 	make_call, check = MARKS[mark]
-	url = f'{lab.url}/admin'
+	url = f'{lab.url}/admin?case={mark}'  # unique per case: the workspace is shared by the session
 	run = run_ai(f'basic_mark_{mark}', [
 		tools(call('add_finding', id='add', _type='vulnerability',
 		           fields={'name': f'Forbidden bypass {mark}', 'matched_at': url, 'severity': 'medium'})),
-		tools(call('query_workspace', id='q1', query={'_type': 'vulnerability', 'matched_at': url},
-		           description='Find it')),
+		tools(call('query_workspace', id='q1', description='Find it',
+		           query={'_type': 'vulnerability', 'matched_at': url, 'name': f'Forbidden bypass {mark}'})),
 		lambda req: tools(make_call(_vuln_uuid(req))),
 		say('done'),
 	])
