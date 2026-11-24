@@ -1499,7 +1499,7 @@ class TestGetQueryEngine(unittest.TestCase):
 
 		self.assertIsInstance(engine.backend, ApiBackend)
 
-	@patch('secator.query.api.requests.request')
+	@patch('secator.query.api._session.request')
 	def test_workspace_scope_api_search(self, mock_request):
 		"""scope=workspace api search calls POST to search endpoint."""
 		mock_response = MagicMock()
@@ -1523,7 +1523,7 @@ class TestGetQueryEngine(unittest.TestCase):
 		call_kwargs = mock_request.call_args
 		self.assertEqual(call_kwargs[1]['method'], 'POST')
 
-	@patch('secator.query.api.requests.request')
+	@patch('secator.query.api._session.request')
 	def test_workspace_scope_api_count(self, mock_request):
 		"""scope=workspace api count returns total from response."""
 		mock_response = MagicMock()

@@ -18,11 +18,10 @@ import time
 import requests
 
 from functools import cache
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, Info
+from secator.requests import get_api_session
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
@@ -44,62 +43,13 @@ API_TIMEOUT = CONFIG.addons.api.timeout
 API_RETRIES = CONFIG.addons.api.retries
 API_RETRY_BACKOFF = CONFIG.addons.api.retry_backoff
 
-# Gateway statuses: a proxy or load balancer in front of the API answered instead of the API
-# (backend unreachable, restarting, or too slow).
-TRANSIENT_STATUSES = (502, 503, 504)
-# Retry-safe methods: repeating them leaves the same end state.
-IDEMPOTENT_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'})
-# A POST (create) is not idempotent: the API does not dedupe creates, so replaying one it
-# already handled would create a duplicate runner / finding / workspace. 503 means the
-# gateway could not hand the request to any backend. 502 and 504 are NOT retried for POST:
-# the backend may have received and processed it before the connection broke or the
-# gateway gave up waiting.
-POST_RETRY_STATUSES = (503,)
-
 
 def get_runner_dbg(runner):
 	"""Runner debug object"""
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
-class _ApiRetry(Retry):
-	"""urllib3 Retry that also retries a POST, on POST_RETRY_STATUSES only."""
-
-	def is_retry(self, method, status_code, has_retry_after=False):
-		if method.upper() == 'POST':
-			return bool(self.total) and status_code in POST_RETRY_STATUSES
-		return super().is_retry(method, status_code, has_retry_after)
-
-
-def _build_session(retries=API_RETRIES, backoff=API_RETRY_BACKOFF):
-	"""HTTP session retrying transient failures that are safe to repeat.
-
-	- Gateway errors (TRANSIENT_STATUSES) for idempotent methods, HTTP 503 only for POST.
-	- Connections that could not be established (refused, connect timeout, DNS failure,
-	  refused proxy connection) for every method: the request was never sent.
-	- Read errors (read timeout, connection dropped or reset after sending, e.g. a pooled
-	  keep-alive connection the server just closed) for idempotent methods only: a POST
-	  may already have been processed.
-	- Never any other error (TLS failure, proxy tunnel error): it may have happened after
-	  the request was sent, and retrying a certificate error cannot help.
-	"""
-	retry = _ApiRetry(
-		total=max(0, retries),
-		other=0,  # urllib3 retries "other" errors for every method, POST included
-		backoff_factor=backoff,
-		status_forcelist=TRANSIENT_STATUSES,
-		allowed_methods=IDEMPOTENT_METHODS,
-		raise_on_status=False,  # the last error response is returned and raised by _make_request
-		respect_retry_after_header=False,  # keep waits bounded by the backoff settings
-	)
-	session = requests.Session()
-	adapter = HTTPAdapter(max_retries=retry)
-	session.mount('http://', adapter)
-	session.mount('https://', adapter)
-	return session
-
-
-_session = _build_session()
+_session = get_api_session(retries=API_RETRIES, backoff=API_RETRY_BACKOFF)
 
 
 def _make_request(method, endpoint, data=None):
@@ -262,7 +212,12 @@ def resolve_workspace(value):
 	if API_ORG_ID is not None:
 		endpoint += f'?org_id={API_ORG_ID}'
 	result = _make_request('GET', endpoint)
-	items = result if isinstance(result, list) else (result.get('items') or result.get('results') or [])
+	if isinstance(result, list):
+		items = result
+	elif isinstance(result, dict):
+		items = result.get('items') or result.get('results') or []
+	else:
+		items = []  # e.g. an empty body
 	match = next((w for w in items if w.get('name') == value), None)
 	if not match:
 		raise Exception(f'Workspace "{value}" not found in remote API.')

@@ -4,11 +4,11 @@ import json
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode
 
-import requests
 
 from secator.output_types import Warning
 from secator.query._base import QueryBackend, QueryBackendError
 from secator.config import CONFIG
+from secator.requests import get_api_session
 from secator.rich import console
 from secator.serializers.dataclass import DataclassEncoder
 
@@ -23,6 +23,10 @@ def _auth_error_message(status_code: int, url: str, has_key: bool) -> str:
         f'API request to {url} was rejected ({status_code}): the configured API key '
         '(addons.api.key) is invalid, expired, or not allowed to access this resource.'
     )
+
+
+# Same retry policy as the api driver hooks.
+_session = get_api_session(retries=CONFIG.addons.api.retries, backoff=CONFIG.addons.api.retry_backoff)
 
 
 class ApiBackend(QueryBackend):
@@ -50,7 +54,7 @@ class ApiBackend(QueryBackend):
         if self.api_key:
             headers["Authorization"] = f"{self.header_name} {self.api_key}"
 
-        response = requests.request(
+        response = _session.request(
             method=method,
             url=url,
             # DataclassEncoder (like the api driver hook): datetime values (e.g. a certificate's

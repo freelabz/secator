@@ -525,7 +525,7 @@ class ApiAddon(StrictModel):
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
-	retries: int = 3  # retries on gateway errors (502/503/504) / connections not established
+	retries: int = 3  # api driver + query backend retries on gateway errors (502/503/504) / connections not established
 	retry_backoff: float = 1.0  # backoff factor (s): 1st retry immediate, retry N waits factor * 2^(N-1)
 	org_id: Optional[int] = None  # Override org to query (admins only); defaults to the user's own org
 	runner_create_endpoint: str = 'runners'
