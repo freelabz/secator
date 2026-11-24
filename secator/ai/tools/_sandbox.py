@@ -54,24 +54,25 @@ _PKG_NAME_MAP = {"apk": {"python3-pip": "py3-pip"}}
 
 
 def _detect_package_manager(name: str) -> str:
-	"""Return the first package manager available in container `name` ('' if none)."""
+	"""Return the first package manager available in container `name`. Raises when there is
+	none, or when the probe itself fails (e.g. the container is not running)."""
 	import subprocess
 	probe = "for pm in " + " ".join(_PKG_INSTALL_CMDS) + "; do command -v $pm >/dev/null 2>&1 && echo $pm && exit 0; done"
 	r = subprocess.run(["docker", "exec", "-u", "0", name, "sh", "-c", probe], capture_output=True, text=True, timeout=30)
 	pm = (r.stdout or "").strip()
-	return pm if pm in _PKG_INSTALL_CMDS else ""
+	if pm in _PKG_INSTALL_CMDS:
+		return pm
+	if (r.stderr or "").strip():
+		raise RuntimeError(r.stderr.strip().splitlines()[-1])
+	raise RuntimeError("no supported package manager (apk/apt-get/dnf/yum) in the image")
 
 
 def _install_base_packages(name: str) -> None:
 	"""Best-effort install of _SANDBOX_PACKAGES with the sandbox's own package manager.
 	Never raises: a failure only prints a warning (the LLM can still install on demand)."""
 	import subprocess
-	from secator.output_types import Warning
-	from secator.rich import console
 	try:
 		pm = _detect_package_manager(name)
-		if not pm:
-			raise RuntimeError("no supported package manager (apk/apt-get/dnf/yum) in the image")
 		names = _PKG_NAME_MAP.get(pm, {})
 		pkgs = " ".join(names.get(pkg, pkg) for pkg in _SANDBOX_PACKAGES.split())
 		r = subprocess.run(
@@ -81,7 +82,12 @@ def _install_base_packages(name: str) -> None:
 			err = (r.stderr or r.stdout or "").strip().splitlines()
 			raise RuntimeError(f"{pm} exited {r.returncode}" + (f": {err[-1]}" if err else ""))
 	except Exception as e:
-		console.print(Warning(message=f"Sandbox {name}: could not install base packages ({_SANDBOX_PACKAGES}): {e}"))
+		try:
+			from secator.output_types import Warning
+			from secator.rich import console
+			console.print(Warning(message=f"Sandbox {name}: could not install base packages ({_SANDBOX_PACKAGES}): {e}"))
+		except Exception:
+			pass
 
 
 def _sandbox_image() -> str:
@@ -155,7 +161,8 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 				err = (run.stderr or run.stdout or "").strip() or f"docker run exited {run.returncode}"
 				raise RuntimeError(err)
 			if not _sandbox_is_running(name):
-				logs = subprocess.run(["docker", "logs", "--tail", "5", name], capture_output=True, text=True)
+				logs = subprocess.run(
+					["docker", "logs", "--tail", "5", name], capture_output=True, text=True, timeout=30)
 				out = (logs.stderr or logs.stdout or "").strip()
 				raise RuntimeError(f"sandbox container exited right after start{': ' + out if out else ''}")
 			created = True
@@ -169,7 +176,9 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 		try:
 			subprocess.run(
 				["docker", "exec", "-u", "0", name, "sh", "-c",
-				 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
+				 # /work is a fresh volume owned by root; the image's user (the default image
+				 # runs as `secator`) must be able to write to it.
+				 'chmod 1777 /work; printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
 				capture_output=True, timeout=30)
 		except Exception:
 			pass

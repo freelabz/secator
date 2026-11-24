@@ -164,6 +164,22 @@ class TestSandboxStartAndBootstrap(unittest.TestCase):
 		            and "/etc/gai.conf" not in c[-1]]
 		return name, calls, installs, printed
 
+	def test_work_dir_is_made_writable_as_root(self):
+		_, calls, _, _ = self._create()
+		prep = next(c for c in calls if c[:2] == ["docker", "exec"] and "/etc/gai.conf" in c[-1])
+		self.assertEqual(prep[2:4], ["-u", "0"])
+		self.assertIn("chmod 1777 /work", prep[-1])
+
+	def test_dead_container_warns_with_the_exec_error(self):
+		from secator.ai.tools import _sandbox as A
+
+		def fake_run(argv, **kw):
+			return _CP(1, "", "Error response from daemon: container abc is not running")
+
+		with patch("subprocess.run", side_effect=fake_run), patch("secator.rich.console.print") as printed:
+			A._install_base_packages("sbx-x")
+		self.assertIn("is not running", printed.call_args[0][0].message)
+
 	def test_entrypoint_is_overridden_to_keep_alive(self):
 		_, calls, _, _ = self._create()
 		run = next(c for c in calls if c[:2] == ["docker", "run"])
