@@ -60,7 +60,24 @@ def _records():
 	add('record', name='h0', type='A', host='h0')
 	add('target', name='h0', type='host')
 	add('ai', content='thinking', ai_type='response')
+	# store-side duplicates (hidden when runners.remove_duplicates is on); equal timestamps (group ties)
+	for rec in recs[1:40:7]:
+		rec['_context']['workspace_duplicate'] = True
+	for rec in recs[0:12:4]:
+		rec['_timestamp'] = 1.0
 	return recs
+
+
+def _updates(recs):
+	"""Later records of existing findings (same _uuid, appended after): the latest one wins."""
+	by_type = {}
+	for rec in recs:
+		by_type.setdefault(rec['_type'], []).append(rec)
+	return [
+		{**by_type['technology'][0], 'product': 'php', '_timestamp': 99.0},
+		{**by_type['vulnerability'][1], 'id': 'CVE-2026-20484', 'severity': 'high', '_timestamp': 98.0},
+		{**by_type['url'][2], 'status_code': 404, '_timestamp': 97.0},
+	]
 
 
 def _types_of(query):
@@ -136,7 +153,6 @@ class TestQueryPossibleTypes(unittest.TestCase):
 			({}, ALL_TYPES),
 			({'_type': 'url'}, ['url']),
 			({'_type': 'nope'}, []),
-			({'_type': {'$eq': 'url'}}, ['url']),
 			({'_type': {'$in': ['url', 'port']}}, ['port', 'url']),
 			({'_type': {'$nin': ['url', None], '$exists': True}}, [t for t in ALL_TYPES if t != 'url']),
 			({'_type': {'$ne': 'url'}}, [t for t in ALL_TYPES if t != 'url']),
@@ -149,6 +165,7 @@ class TestQueryPossibleTypes(unittest.TestCase):
 			# not analysed -> every type kept
 			({'_type': {'$regex': 'u'}}, ALL_TYPES),
 			({'_type': {'$not': {'$eq': 'url'}}}, ALL_TYPES),
+			({'_type': {'$eq': 'url'}}, ALL_TYPES),  # the json matcher has no $eq: not narrowed
 			({'_type': ['url']}, ALL_TYPES),
 			({'$nor': [{'_type': 'url'}]}, ALL_TYPES),
 			({'$or': []}, ALL_TYPES),
@@ -169,9 +186,10 @@ class _QueryCliBase:
 	def setUp(self):
 		self.tmp = Path(tempfile.mkdtemp())
 		self.addCleanup(shutil.rmtree, self.tmp, True)
-		self.write_store(_records())
+		recs = _records()
+		self.write_store(recs, _updates(recs))
 
-	def _invoke(self, expr, flags, optimised=True):
+	def _invoke(self, expr, flags, optimised=True, dedupe=False):
 		"""Run `secator q` and return (normalized results, [types of each backend iterate])."""
 		from secator.cli import cli
 		captured, calls = {}, []
@@ -200,7 +218,7 @@ class _QueryCliBase:
 			json_cfg.dirs.reports = self.tmp
 			cli_cfg.dirs.reports = self.tmp
 			cli_cfg.workspaces.current = None
-			cli_cfg.runners.remove_duplicates = False
+			cli_cfg.runners.remove_duplicates = dedupe
 			cli_cfg.queries = {}
 			for p in patches[4:]:
 				p.start()
@@ -213,10 +231,10 @@ class _QueryCliBase:
 		return _normalize(captured['results']), calls
 
 	def test_same_results_and_only_matching_types_read(self):
-		for expr, flags, expected in CASES:
-			with self.subTest(expr=expr, flags=flags):
-				got, calls = self._invoke(expr, flags)
-				ref, ref_calls = self._invoke(expr, flags, optimised=False)
+		for (expr, flags, expected), dedupe in [(case, d) for case in CASES for d in (False, True)]:
+			with self.subTest(expr=expr, flags=flags, dedupe=dedupe):
+				got, calls = self._invoke(expr, flags, dedupe=dedupe)
+				ref, ref_calls = self._invoke(expr, flags, optimised=False, dedupe=dedupe)
 				self.assertEqual(got, ref)
 				self.assertEqual(len(ref_calls), len(ALL_TYPES))  # unoptimised: one read per type
 				scanned = sorted(t for call in calls for t in call)
@@ -230,12 +248,16 @@ class _QueryCliBase:
 class TestQueryCliJson(_QueryCliBase, unittest.TestCase):
 	driver = 'local'
 
-	def write_store(self, recs):
-		for i in range(3):  # several runner stores: a pass reads every one of them
+	def write_store(self, recs, updates):
+		lines = {i: list(recs[i::3]) for i in range(3)}  # several runner stores: a pass reads them all
+		for upd in updates:  # appended to the store holding the finding
+			lines[next(i for i in lines if any(r['_uuid'] == upd['_uuid'] for r in lines[i]))].append(upd)
+		lines[2].append({**lines[0][3], 'status_code': 999})  # same _uuid in two stores: first one read wins
+		for i, store in lines.items():
 			d = self.tmp / WS / 'tasks' / str(i)
 			d.mkdir(parents=True)
 			with open(d / 'results.ndjson', 'wb') as f:
-				for rec in recs[i::3]:
+				for rec in store:
 					f.write(orjson.dumps(rec) + b'\n')
 
 	def assert_reads(self, calls, expected, flags):
@@ -253,7 +275,8 @@ class TestQueryCliJson(_QueryCliBase, unittest.TestCase):
 class TestQueryCliSqlite(_QueryCliBase, unittest.TestCase):
 	driver = 'sqlite'
 
-	def write_store(self, recs):
+	def write_store(self, recs, updates):
+		recs = list({r['_uuid']: r for r in recs + updates}.values())  # one row per finding, latest data
 		import secator.hooks.sqlite as sqlite_mod
 		from secator.config import CONFIG
 		self.sqlite_mod = sqlite_mod
@@ -276,6 +299,46 @@ class TestQueryCliSqlite(_QueryCliBase, unittest.TestCase):
 
 	def assert_reads(self, calls, expected, flags):
 		self.assertEqual(len(calls), len(expected))   # indexed backend: one query per matching type
+
+
+class TestSummaryQueryTypes(unittest.TestCase):
+	"""The workspace summary `query()` reads the same type set; an explicit list keeps its order."""
+
+	def setUp(self):
+		self.tmp = Path(tempfile.mkdtemp())
+		self.addCleanup(shutil.rmtree, self.tmp, True)
+		TestQueryCliJson.write_store(self, _records(), [])
+
+	def _rows(self, expr, **kwargs):
+		from secator.cli import _summary_query
+		calls = []
+		orig_iterate = QueryEngine.iterate
+
+		def iterate(engine, query, batch_size=1000):
+			calls.append((query['$and'][0] if '$and' in query else query)['_type'])  # the per-type clause
+			yield from orig_iterate(engine, query, batch_size)
+
+		json_cfg_patch, cli_cfg_patch = mock.patch('secator.query.json.CONFIG'), mock.patch('secator.cli.CONFIG')
+		with json_cfg_patch as json_cfg, cli_cfg_patch as cli_cfg, mock.patch.object(QueryEngine, 'iterate', iterate):
+			json_cfg.dirs.reports = self.tmp
+			cli_cfg.runners.remove_duplicates = False
+			engine = QueryEngine(WS, context={'drivers': [], 'workspace_name': WS})
+			rows = _summary_query(engine, expr, **kwargs)
+		return rows.splitlines(), calls
+
+	def test_explicit_type_list_keeps_order_and_non_finding_types(self):
+		rows, calls = self._rows("_type in ['target', 'port']", fmt='{_type}', uniq=True)
+		self.assertEqual(rows, ['target', 'port'])
+		self.assertEqual(calls, ['target', 'port'])
+
+	def test_multi_type_or_and_negation(self):
+		expr = "technology.product ~= 'nginx' || vulnerability.id == 'CVE-2026-20484'"
+		rows, calls = self._rows(expr, fmt='{_type}', count=True)
+		self.assertEqual(sorted(calls), ['technology', 'vulnerability'])
+		self.assertEqual(len(rows), 2)
+		rows, calls = self._rows("_type != 'url'", fmt='{_type}', uniq=True)
+		self.assertNotIn('url', rows)  # the type exclusion is honoured (it used to be dropped)
+		self.assertNotIn('url', calls)
 
 
 if __name__ == '__main__':

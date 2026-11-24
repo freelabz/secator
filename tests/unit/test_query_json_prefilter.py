@@ -144,6 +144,13 @@ class TestIterLatestEquivalence(unittest.TestCase):
 			self._assert_same({'$and': [{'_type': {'$nin': ['target', 'ai']}}, {'_type': _type}]})
 		self.assertEqual(total, len(self._assert_same({})))
 
+	def test_multi_type_reads(self):
+		# `_type: {$in: [...]}` (one read for several types) skips lines naming none of the types
+		for query in ({'_type': {'$in': ['url', 'tag']}},
+				{'$and': [{'_type': {'$nin': ['target']}}, {'_type': {'$in': ['port', 'info']}}], 'status': 'OPEN'},
+				{'_type': {'$in': ['nope']}}):
+			self._assert_same(query)
+
 	def test_conflicting_types_match_nothing(self):
 		self.assertEqual(self._assert_same({'$and': [{'_type': 'url'}, {'_type': 'port'}]}), [])
 

@@ -174,6 +174,32 @@ def _line_needles(query):
 	return needles
 
 
+# Every `"_type": "<name>"` pair of a raw ndjson line (nested ones included, so the record's own
+# type is always among them).
+_LINE_TYPES = re.compile(rb'"_type"\s*:\s*"([^"\\]*)"')
+
+
+def _line_type_sets(query):
+	"""Sets of type names (bytes) a raw ndjson line must name at least one of, as a ``"_type"``
+	value: from ``_type: {$in: [...]}`` (a multi-type read, see
+	``secator.query._stream.iter_types_raw``) at the top level or in ``$and`` branches. The
+	multi-type counterpart of the ``_line_needles`` prefilter; one regex scan per line, however
+	many types are listed. Names a plain JSON string cannot hold verbatim disable it."""
+	if not isinstance(query, dict):
+		return []
+	sets = []
+	cond = query.get('_type')
+	values = cond.get('$in') if isinstance(cond, dict) else None
+	if (isinstance(values, list) and values
+			and all(isinstance(v, str) and v and orjson.dumps(v)[1:-1] == v.encode() for v in values)):
+		sets.append(frozenset(v.encode() for v in values))
+	and_queries = query.get('$and')
+	if isinstance(and_queries, list):
+		for sub in and_queries:
+			sets.extend(_line_type_sets(sub))
+	return sets
+
+
 class JsonBackend(QueryBackend):
 	"""Query backend for JSON files on filesystem."""
 
@@ -198,7 +224,8 @@ class JsonBackend(QueryBackend):
 		workspace_folder = get_workspace_folder_name(self.workspace_id, self.reports_dir)
 		return self.reports_dir / workspace_folder
 
-	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, needles: list = None):
+	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, needles: list = None,
+						type_sets: list = None):
 		"""Yield one runner's records matching ``query``, keeping only each finding's LATEST record.
 
 		The live store (``results.ndjson``) is append-only: updating a finding appends a new record
@@ -215,7 +242,8 @@ class JsonBackend(QueryBackend):
 		legacy ``report.json`` (no ndjson) is read whole.
 
 		``needles``: pass 1 skips ndjson lines missing any of these byte strings without parsing
-		them (see ``_line_needles``). Every record of one finding has the same ``_uuid`` and
+		them (see ``_line_needles``); ``type_sets`` skips lines naming none of a set's types
+		(see ``_line_type_sets``). Every record of one finding has the same ``_uuid`` and
 		``_type``, so the latest record of each finding that can match is still indexed."""
 		runner_id = report_dir.name
 
@@ -252,6 +280,8 @@ class JsonBackend(QueryBackend):
 									continue
 							elif needles and not all(map(line.__contains__, needles)):
 								continue
+							elif type_sets and not all(not s.isdisjoint(_LINE_TYPES.findall(line)) for s in type_sets):
+								continue
 							line = line.strip()
 							if not line:
 								continue
@@ -283,6 +313,7 @@ class JsonBackend(QueryBackend):
 		parses the lines containing that uuid / type name. A finding lives in one runner's store;
 		should a ``_uuid`` appear in several, the first runner dir read wins."""
 		needles = _line_needles(query)
+		type_sets = _line_type_sets(query)
 		report_dir = self.context.get('report_dir')
 		if report_dir:
 			report_dir = Path(report_dir)
@@ -297,7 +328,7 @@ class JsonBackend(QueryBackend):
 						dirs.extend((d, runner_type.rstrip('s')) for d in runner_path.iterdir() if d.is_dir())
 		seen = set()
 		for d, singular in dirs:
-			for rec in self._iter_report_dir(d, singular, query, needles):
+			for rec in self._iter_report_dir(d, singular, query, needles, type_sets):
 				uid = rec.get('_uuid') if isinstance(rec, dict) else None
 				if uid:
 					if uid in seen:

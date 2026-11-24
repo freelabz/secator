@@ -928,8 +928,15 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	# `_type`: only the types the expression can match (conservative: `||` unites, `&&` intersects,
 	# anything not analysable keeps every type) — each skipped type saves a full read on json.
 	typemap = {c.get_name(): c for c in FINDING_TYPES}
+	# An explicit type list keeps its own order and may name non-finding types (e.g. target).
 	tv = raw.get('_type')
-	types = [tv] if isinstance(tv, str) and tv not in typemap else query_possible_types(raw, typemap)
+	if isinstance(tv, str):
+		universe = [tv]
+	elif isinstance(tv, dict) and isinstance(tv.get('$in'), list):
+		universe = [t for t in tv['$in'] if isinstance(t, str)]
+	else:
+		universe = list(typemap)
+	types = query_possible_types(raw, universe)
 	# A plain `_type` equality is implied by the per-type clause below; any other type constraint
 	# (e.g. `$nin`, or `_type` inside `$or`) stays in the query.
 	base = {k: v for k, v in raw.items() if not (k == '_type' and isinstance(v, str))}

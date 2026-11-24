@@ -788,9 +788,7 @@ def _type_condition_types(cond, universe):
         return set(universe)  # array / literal-subdocument equality: not analysed
     types = set(universe)
     for op, value in cond.items():
-        if op == '$eq' and isinstance(value, str):
-            types &= {value}
-        elif op == '$in' and isinstance(value, (list, tuple, set)):
+        if op == '$in' and isinstance(value, (list, tuple, set)):
             types &= {v for v in value if isinstance(v, str)}
         elif op == '$nin' and isinstance(value, (list, tuple, set)):
             types -= {v for v in value if isinstance(v, str)}
@@ -803,10 +801,11 @@ def _type_condition_types(cond, universe):
 def query_possible_types(query, universe):
     """Return the type names from ``universe`` that a record matching ``query`` could have.
 
-    Conservative, so a caller may skip querying every type NOT returned: ``_type`` equality,
-    ``$eq`` / ``$in`` narrow and ``$nin`` / ``$ne`` remove; the keys of one dict and the branches
+    Conservative, so a caller may skip querying every type NOT returned: ``_type`` equality and
+    ``$in`` narrow, ``$nin`` / ``$ne`` remove; the keys of one dict and the branches
     of ``$and`` intersect; the branches of ``$or`` unite. Anything else (other ``_type``
-    operators such as ``$regex`` / ``$not``, other logical operators, non-dict queries) keeps
+    operators such as ``$regex`` / ``$not`` / ``$eq`` — the json matcher has no ``$eq`` — other
+    logical operators, non-dict queries) keeps
     every type, so a type that could match is never dropped.
 
     Args:
