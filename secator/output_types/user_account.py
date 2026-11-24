@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 
-from secator.definitions import SITE_NAME, URL, USERNAME
+from secator.definitions import EMAIL, SITE_NAME, URL, USERNAME
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
@@ -29,6 +29,9 @@ class UserAccount(OutputType):
 
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)
+	# one row per account: the same username on two sites is two accounts
+	_group_by = (SITE_NAME, (USERNAME, EMAIL))
+	_group_aggregate = '_source'
 
 	def __str__(self) -> str:
 		return self.url

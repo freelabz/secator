@@ -1,7 +1,7 @@
 """AI tool: `query_workspace`."""
 import json
 from typing import Dict, Generator, Optional
-from secator.output_types import Ai, Error, Info, OutputType, Warning
+from secator.output_types import FINDING_TYPES, Ai, Error, Info, OutputType, Warning
 from secator.ai.utils import _decrypt_dict, _union_live_results, loads_lenient
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA
@@ -53,6 +53,24 @@ def _resolve_single_output_type(query: Dict):
 	return next((cls for cls in OUTPUT_TYPES if cls.get_name() == type_val), None)
 
 
+def _single_row(result):
+	"""One group row for a finding whose type has no group key: the finding is its own group."""
+	get = result.get if isinstance(result, dict) else lambda k, d=None: getattr(result, k, d)
+	uuid = get('_uuid') or ''
+	extra = {
+		'_group_key': uuid,
+		'_group_count': 1,
+		'_group_uuids': [uuid] if uuid else [],
+		'_group_members': {str(get('_source') or ''): [uuid]} if uuid else {},
+	}
+	for name, val in extra.items():
+		if isinstance(result, dict):
+			result[name] = val
+		else:
+			setattr(result, name, val)
+	return result
+
+
 class QueryWorkspace(BaseTool):
 	name = "query_workspace"
 	action = "query"
@@ -86,12 +104,14 @@ class QueryWorkspace(BaseTool):
 					},
 					"group": {
 						"type": "boolean",
-						"description": "Return aggregated group representatives (one per group, with a _group_count "  # noqa: E501
-						               "member count + aggregated targets) instead of every finding — a compact overview "  # noqa: E501
-						               "that saves context. Requires a single _type in the query. Each representative is "  # noqa: E501
-						               "grouped by that type's key field (shown on the row, e.g. vulnerability->name, "  # noqa: E501
-						               "port->host); drill into a group by re-querying that field — NOT the _uuid, which "  # noqa: E501
-						               "identifies only the one representative finding.",
+						"description": "Return one row per entity instead of every finding: the duplicates of a "  # noqa: E501
+						               "finding across runs and tools collapse into one row. Requires a single _type. Keys: "  # noqa: E501
+						               "port->host:port (ip:port), url->url, ip->ip, subdomain->host, domain->domain, "  # noqa: E501
+						               "certificate->host+fingerprint, record->host+type+name, user_account->site_name+username, "  # noqa: E501
+						               "technology->product:version, vulnerability->id (name), tag->category+name+value, exploit->name; "  # noqa: E501
+						               "exploit_attempt is one row per attempt. Each row has _group_key, "  # noqa: E501
+						               "_group_count, _group_uuids (EVERY member's _uuid) and _group_members ({value: [_uuids]}, "  # noqa: E501
+						               "values: matched_at for vulnerability/exploit, match for technology/tag, host for ip, else _source).",  # noqa: E501
 						"default": False
 					}
 				},
@@ -200,6 +220,9 @@ class QueryWorkspace(BaseTool):
 						_context=context,
 					)
 					return
+				if not group_cls._group_by and (group_cls is Ai or group_cls not in FINDING_TYPES):
+					yield Error(message=f"group=True is not supported for {group_cls.get_name()} (no group key).", _context=context)
+					return
 
 			results = engine.search(search_query, limit=limit, offset=offset)
 			# Local driver only writes to disk at end-of-run, so union this run's live
@@ -210,9 +233,14 @@ class QueryWorkspace(BaseTool):
 
 			page_len = len(results)
 
-			if group_cls is not None:
+			if group_cls is not None and group_cls._group_by:
 				from secator.query.utils import group_findings
-				results = group_findings(results, list(group_cls._group_by), group_cls._group_aggregate)
+				results = group_findings(
+					results, list(group_cls._group_by), group_cls._group_aggregate, with_members=True)
+			elif group_cls is not None:
+				# A finding type without a group key (e.g. exploit_attempt: each attempt is
+				# distinct) is one row per document, with the same group fields.
+				results = [_single_row(r) for r in results]
 
 			extra = {"results": len(results), "limit": limit, "offset": offset}
 			if group:

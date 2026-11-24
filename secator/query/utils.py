@@ -639,6 +639,31 @@ def _finding_ts(item):
     return 0.0
 
 
+_GROUP_RULE_FIELDS = re.compile(r'{(\w+)}')
+
+
+def group_key_part(item, part, defaults=None):
+    """Return the value of one part of a type's ``_group_by`` key for a finding.
+
+    A part is a field name (``'url'``), a format rule over several fields
+    (``'{host}:{port}'``, the syntax extractors' ``group_by`` uses), or a tuple of
+    such rules tried in order, the first one whose fields are all set winning
+    (``('{host}:{port}', '{ip}:{port}')``). Returns '' when no rule applies.
+    """
+    rules = part if isinstance(part, (list, tuple)) else (part,)
+    for rule in rules:
+        rule = rule if '{' in rule else '{%s}' % rule
+        values = {name: _finding_value(item, name, defaults) for name in _GROUP_RULE_FIELDS.findall(rule)}
+        if all(v not in (None, '') for v in values.values()):
+            return rule.format(**{name: str(v) for name, v in values.items()})
+    return ''
+
+
+def group_key_label(group_by):
+    """Human-readable label of a ``_group_by`` key, e.g. ``'{host}:{port} or {ip}:{port}'``."""
+    return ' + '.join(' or '.join(p) if isinstance(p, (list, tuple)) else p for p in group_by)
+
+
 def _truncate_aggregate(values, max_display=5):
     """Join aggregated values, truncating with '.. and X more' past max_display."""
     values = [str(v) for v in values]
@@ -648,20 +673,24 @@ def _truncate_aggregate(values, max_display=5):
     return f'{shown} .. and {len(values) - max_display} more'
 
 
-def group_findings(items, group_by, aggregate_field=None, max_display=5, defaults=None):
+def group_findings(items, group_by, aggregate_field=None, max_display=5, defaults=None, with_members=False):
     """Group findings by one or more fields, collapsing each group to a single
     representative (the newest finding) that carries the aggregated field values
     and a `_group_count` attribute for display.
 
     Args:
         items (list): Findings (dicts or OutputType objects) of a single type.
-        group_by (list[str]): Field names to group by.
+        group_by (list): Key parts to group by: field names, format rules or
+            tuples of fallback rules (see ``group_key_part``).
         aggregate_field (str): Field whose distinct values are collected onto the
             representative (truncated for display). None disables aggregation.
         max_display (int): Max aggregated values shown before '.. and X more'.
         defaults (dict): Optional {field: default} map applied to raw-dict items
             when a group-by field is absent, so raw dicts group identically to
             rehydrated OutputType objects (which fill dataclass defaults).
+        with_members (bool): Also attach ``_group_key`` (parts joined by ' | '),
+            ``_group_uuids`` (every member's ``_uuid``) and, with ``aggregate_field``,
+            ``_group_members`` ({str(value): [uuids]}) to the representative.
 
     Returns:
         list: One representative finding per group (OutputType objects when the
@@ -673,12 +702,12 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
     groups = {}
     order = []
     for item in items:
-        key = tuple(str(_finding_value(item, f, defaults)) for f in group_by)
+        key = tuple(group_key_part(item, part, defaults) for part in group_by)
         ts = _finding_ts(item)
         if key not in groups:
             # 'agg' is an insertion-ordered set of the distinct aggregated values (dict keys):
             # a list membership test made grouping quadratic in the size of a group.
-            groups[key] = {'rep': item, 'ts': ts, 'agg': {}, 'count': 0}
+            groups[key] = {'rep': item, 'ts': ts, 'agg': {}, 'count': 0, 'uuids': {}, 'members': {}}
             order.append(key)
         group = groups[key]
         group['count'] += 1
@@ -691,6 +720,14 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
                     group['agg'].setdefault(value, value)
                 except TypeError:  # unhashable value (e.g. a list): dedup on its repr
                     group['agg'].setdefault(repr(value), value)
+        uuid = _finding_value(item, '_uuid') if with_members else None
+        if uuid:
+            group['uuids'].setdefault(uuid, None)
+            if aggregate_field:
+                value = _finding_value(item, aggregate_field)
+                member_uuids = group['members'].setdefault('' if value is None else str(value), [])
+                if uuid not in member_uuids:
+                    member_uuids.append(uuid)
 
     out = []
     for key in order:
@@ -710,6 +747,15 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
             setattr(rep, aggregate_field, _truncate_aggregate(list(group['agg'].values()), max_display))
         if not isinstance(rep, dict):
             rep._group_count = group['count']
+        if with_members:
+            extra = {'_group_key': ' | '.join(key), '_group_uuids': list(group['uuids'])}
+            if aggregate_field:
+                extra['_group_members'] = group['members']
+            for name, val in extra.items():
+                if isinstance(rep, dict):
+                    rep[name] = val
+                else:
+                    setattr(rep, name, val)
         out.append(rep)
     return out
 

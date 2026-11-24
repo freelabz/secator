@@ -28,6 +28,8 @@ class Record(OutputType):
 
 	_table_fields = [NAME, HOST, TYPE]
 	_sort_by = (TYPE, NAME)
+	_group_by = (HOST, TYPE, NAME)  # one row per record value (same as its identity)
+	_group_aggregate = '_source'
 
 	def __str__(self) -> str:
 		return self.name

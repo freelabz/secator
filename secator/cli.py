@@ -1781,7 +1781,8 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			report.data['results'][type_name] = _aggregate_streamed(
 				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
 			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
-				grouped_types.append((type_name, ', '.join(cls._group_by)))
+				from secator.query.utils import group_key_label
+				grouped_types.append((type_name, group_key_label(cls._group_by)))
 		if group and not grouped_types:
 			console.print(Warning(message='--group: no groupable finding types in results'))
 	else:

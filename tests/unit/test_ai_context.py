@@ -246,3 +246,113 @@ def test_filename_is_embedded_in_tag(ctx_dir):
 	block = _raw('scan')[0]
 	assert block.startswith('<rule:engagement.md>')
 	assert block.endswith('</rule>')
+
+
+# === subfolders ===
+
+def _write_at(d, rel, content):
+	path = d / rel
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(content)
+
+
+def test_nested_files_load_with_relative_path_label(ctx_dir):
+	_write_at(ctx_dir, 'rules/no-destructive.md', '---\ntype: rule\n---\nNo DoS.')
+	_write_at(ctx_dir, 'engagements/acme/scope.md', 'Scope is 10.0.0.0/8.')
+	assert _raw('scan') == [
+		'<context:engagements/acme/scope.md>\nScope is 10.0.0.0/8.\n</context>',
+		'<rule:rules/no-destructive.md>\nNo DoS.\n</rule>',
+	]
+
+
+def test_nested_files_ordered_by_relative_path(ctx_dir):
+	_write_at(ctx_dir, 'z.md', 'top z')
+	_write_at(ctx_dir, 'b/x.md', 'b x')
+	_write_at(ctx_dir, 'a.md', 'top a')
+	_write_at(ctx_dir, 'b/a/y.md', 'b a y')
+	assert _load('scan') == ['top a', 'b a y', 'b x', 'top z']
+
+
+def test_nested_files_respect_frontmatter_scope(ctx_dir):
+	_write_at(ctx_dir, 'rules/exploit-only.md', '---\nmodes: exploit\n---\nexploit rule')
+	assert _load('scan') == []
+	assert _load('exploit') == ['exploit rule']
+
+
+def test_hidden_files_and_dirs_are_skipped(ctx_dir):
+	_write_at(ctx_dir, '.git/notes.md', 'git internals')
+	_write_at(ctx_dir, '.obsidian/workspace.md', 'editor state')
+	_write_at(ctx_dir, 'rules/.draft.md', 'hidden draft')
+	_write_at(ctx_dir, 'rules/.keep.md.swp', 'swap')
+	_write_at(ctx_dir, 'rules/real.md', 'real rule')
+	assert _load('scan') == ['real rule']
+
+
+def test_symlink_loop_is_not_followed_forever(ctx_dir):
+	_write_at(ctx_dir, 'rules/r.md', 'rule')
+	(ctx_dir / 'rules' / 'loop').symlink_to(ctx_dir, target_is_directory=True)
+	assert _load('scan') == ['rule']
+
+
+def test_profile_include_by_relative_path(ctx_dir):
+	_write_at(ctx_dir, 'engagements/acme.md', '---\nmodes: exploit\n---\nacme notes')
+	assert _load('scan') == []
+	assert _load('scan', includes=['engagements/acme.md']) == ['acme notes']
+	assert _load('scan', includes=['./engagements/acme.md']) == ['acme notes']
+
+
+def test_profile_include_by_unique_basename(ctx_dir):
+	_write_at(ctx_dir, 'engagements/acme.md', '---\nmodes: exploit\n---\nacme notes')
+	assert _load('scan', includes=['acme.md']) == ['acme notes']
+
+
+def test_profile_include_by_absolute_path_inside_folder(ctx_dir):
+	_write_at(ctx_dir, 'engagements/acme.md', '---\nmodes: exploit\n---\nacme notes')
+	_write_at(ctx_dir, 'other/acme.md', '---\nmodes: exploit\n---\nother notes')
+	assert _load('scan', includes=[str(ctx_dir / 'other' / 'acme.md')]) == ['other notes']
+
+
+def test_profile_include_bare_name_prefers_top_level_file(ctx_dir):
+	_write_at(ctx_dir, 'eng.md', '---\nmodes: exploit\n---\ntop')
+	_write_at(ctx_dir, 'old/eng.md', '---\nmodes: exploit\n---\nnested')
+	assert _load('scan', includes=['eng.md']) == ['top']
+
+
+def test_profile_include_ambiguous_basename_warns_and_loads_nothing(ctx_dir):
+	from secator.rich import console
+	_write_at(ctx_dir, 'a/eng.md', '---\nmodes: exploit\n---\nfrom a')
+	_write_at(ctx_dir, 'b/eng.md', '---\nmodes: exploit\n---\nfrom b')
+	with console.capture() as cap:
+		assert _load('scan', includes=['eng.md']) == []
+	out = cap.get()
+	assert 'ambiguous' in out
+	assert 'a/eng.md' in out and 'b/eng.md' in out
+	# the relative path disambiguates
+	assert _load('scan', includes=['b/eng.md']) == ['from b']
+
+
+def test_profile_include_unknown_warns(ctx_dir):
+	from secator.rich import console
+	_write(ctx_dir, 'a.md', '---\nmodes: exploit\n---\nbody')
+	with console.capture() as cap:
+		assert _load('scan', includes=['missing.md']) == []
+	assert 'not found' in cap.get()
+
+
+def test_nested_file_warnings_use_relative_path(ctx_dir):
+	from secator.rich import console
+	_write_at(ctx_dir, 'rules/bad.md', '---\ntype: bogus\n---\nbody')
+	with console.capture() as cap:
+		assert _load('scan') == []
+	assert 'rules/bad.md' in cap.get()
+
+
+def test_symlinked_folder_label_and_absolute_include(ctx_dir):
+	_write_at(ctx_dir, 'real/x.md', '---\nmodes: exploit\n---\nreal x')
+	_write_at(ctx_dir, 'other/x.md', '---\nmodes: exploit\n---\nother x')
+	(ctx_dir / 'alias').symlink_to(ctx_dir / 'real', target_is_directory=True)
+	# the real folder wins over the symlinked spelling, and the file loads once
+	assert _raw('exploit')[1].startswith('<context:real/x.md>')
+	assert len(_raw('exploit')) == 2
+	# an absolute include through the symlink resolves to the discovered file
+	assert _load('scan', includes=[str(ctx_dir / 'alias' / 'x.md')]) == ['real x']

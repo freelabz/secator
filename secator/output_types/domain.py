@@ -39,6 +39,9 @@ class Domain(OutputType):
 
 	_table_fields = [DOMAIN, ALIVE]
 	_sort_by = (DOMAIN,)
+	_target_fields = ['domain']
+	_group_by = (DOMAIN,)        # one row per domain name
+	_group_aggregate = '_source'
 
 	def __post_init__(self):
 		super().__post_init__()
