@@ -41,15 +41,14 @@ query_workspace(query={"_context.workflow_id": "<runner_id>", "_type": "port"}) 
 </example>
 
 <example>
-Grouped overview first, then drill down. group=True returns ONE representative per group
-(each with a _group_count member count + aggregated targets + its own _uuid) instead of
-every finding — a compact overview that saves context. It requires a single _type.
+Grouped overview first, then drill down. group=True returns ONE row per entity (the
+duplicates of a finding across runs and tools collapse into it) with a _group_count member
+count, the aggregated values and every member's _uuid. It requires a single _type.
 query_workspace(query={"_type": "vulnerability"}, group=True)
-# -> a few rows like {name: "CVE-2021-1234", _group_count: 12, matched_at: "a, b, c .. and 9 more", _uuid: "<rep>"}
-# Each row is grouped by its type's key field (vulnerability->name, port->host, url->host).
-# To see ALL findings in a group, re-query that key field — NOT the _uuid (which is just the one representative):
-query_workspace(query={"_type": "vulnerability", "name": "CVE-2021-1234"})
-# The representative's _uuid identifies only that single finding — use it to mark/update that one.
+# -> a few rows like {_group_key: "CVE-2021-1234", _group_count: 12, matched_at: "a, b, c .. and 9 more",
+#    _group_uuids: [<all 12>], _group_members: {"a": ["<uuid>"], ...}, _uuid: "<newest member>"}
+# Act on one member with its _uuid from _group_members. To see the full findings of a group, re-query its key:
+query_workspace(query={"_type": "vulnerability", "id": "CVE-2021-1234"})
 </example>
 
 <example>

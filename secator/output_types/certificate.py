@@ -41,6 +41,9 @@ class Certificate(OutputType):
 	_related: list = field(default_factory=list, compare=False)
 	_table_fields = ['ip', 'host']
 	_sort_by = ('ip',)
+	_target_fields = ['host']
+	_group_by = ('host', 'fingerprint_sha256')  # one row per served certificate (same as its identity)
+	_group_aggregate = '_source'
 
 	def __post_init__(self):
 		super().__post_init__()

@@ -59,11 +59,11 @@ class TestSoftwareVersionExtraction(unittest.TestCase):
 		])
 		techs = [(t.product, t.version) for t in url.get_techs()]
 		self.assertEqual(techs, [
-			('underscore.js', '1.13.8'),
+			('Underscore.js', '1.13.8'),
 			('Clipboard.js', None),
 			('nginx', '1.18.0'),
-			('apache http server', '2.4.41'),
-			('php', '8.1.2'),
-			('jquery ui', '1.12.1'),
-			('bootstrap', '4.5.2'),
+			('Apache HTTP Server', '2.4.41'),
+			('PHP', '8.1.2'),
+			('jQuery UI', '1.12.1'),
+			('Bootstrap', '4.5.2'),
 		])
