@@ -12,6 +12,7 @@ from time import time
 from dotmap import DotMap
 from rich.errors import MarkupError as RichMarkupError
 import humanize
+from celery.result import allow_join_result
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
@@ -1115,7 +1116,12 @@ class Runner:
 		if self.sync:
 			self.print_item = False
 			self.debug('running workflow in sync mode', sub='start')
-			results = workflow.apply().get()
+			# Eager run in this process: every result is already computed, so lift Celery's
+			# "never call result.get() within a task" guard (set by prefork/solo/threads).
+			# The guard is a process-wide flag: on a threads pool with concurrency > 1, two
+			# overlapping sync children can restore it under each other.
+			with allow_join_result():
+				results = workflow.apply().get()
 		else:
 			self.debug('running workflow in async mode', sub='start')
 			self.celery_result = workflow()
