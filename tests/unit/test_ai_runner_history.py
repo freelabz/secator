@@ -41,14 +41,17 @@ class TestRunnerHistoryHelpers(unittest.TestCase):
 		self.assertEqual(rh.parse_since('2026-09-20', now=NOW),
 		                 datetime(2026, 9, 20, tzinfo=timezone.utc))
 
-	def test_filter_by_window_and_sort_newest_first(self):
+	def test_filter_by_window_keeps_incoming_order(self):
+		# Most recent first, as list_runners(order='desc') returns them.
 		runners = [
-			{'name': 'old', '_type': 'scans', 'status': 'SUCCESS', 'start_time': (NOW.timestamp() - 3 * 86400)},
 			{'name': 'recent', '_type': 'scans', 'status': 'SUCCESS', 'start_time': (NOW.timestamp() - 3600)},
 			{'name': 'mid', '_type': 'scans', 'status': 'FAILURE', 'start_time': (NOW.timestamp() - 5 * 3600)},
+			{'name': 'old', '_type': 'scans', 'status': 'SUCCESS', 'start_time': (NOW.timestamp() - 3 * 86400)},
 		]
 		out = rh.filter_runners(runners, since='24h', now=NOW)
-		self.assertEqual([r['name'] for r in out], ['recent', 'mid'])  # old dropped, newest first
+		self.assertEqual([r['name'] for r in out], ['recent', 'mid'])  # old dropped, order kept
+		self.assertEqual([r['name'] for r in rh.filter_runners(list(reversed(runners)), now=NOW)],
+		                 ['old', 'mid', 'recent'])  # never re-sorted
 		self.assertEqual(out[0]['_type'], 'scan')  # plural trimmed
 
 	def test_filter_by_status(self):
@@ -105,11 +108,29 @@ class TestListRunnersTool(unittest.TestCase):
 		# top-level runs only by default
 		self.assertEqual(e.list_runners.call_args.kwargs['has_parent'], False)
 		self.assertEqual(e.list_runners.call_args.kwargs['runner_type'], 'scan')
+		# Most recent first, so a truncated listing keeps the most recent runs at the top.
+		self.assertEqual(e.list_runners.call_args.kwargs['order'], 'desc')
 		ai = [o for o in out if isinstance(o, Ai)]
 		self.assertEqual(ai[0].ai_type, 'list_runners')
 		self.assertEqual(ai[0].extra_data['count'], 1)
 		dict_rows = [o for o in out if isinstance(o, dict)]
 		self.assertTrue(dict_rows and dict_rows[0]['_context']['ai_query_result'])
+
+	def test_handler_truncation_keeps_most_recent_runs_first(self):
+		from secator.query._base import sort_runners_chronologically
+		now = datetime.now(timezone.utc).timestamp()
+		# No start/end time: only the backend's fallback timestamp (like a local report's
+		# mtime) orders them, so this fails if the tool does not request 'desc'.
+		runners = [{'name': f'r{i}', 'status': 'SUCCESS', '_type': 'scans', '_m': now - i * 60} for i in range(5)]
+		e = MagicMock()
+		e.backend.name = 'json'
+		# Emulate a backend honouring the requested order.
+		e.list_runners.side_effect = lambda **kw: sort_runners_chronologically(
+			list(reversed(runners)), fallback=lambda r: r['_m'], order=kw['order'])
+		out = list(dispatch_action({'action': 'list_runners', 'limit': 2}, self._ctx(e)))
+		ai = [o for o in out if isinstance(o, Ai)][0]
+		self.assertEqual([r['name'] for r in ai.extra_data['runners']], ['r0', 'r1'])
+		self.assertTrue(ai.extra_data['has_more'])
 
 	def test_handler_include_children_opens_filter(self):
 		e = MagicMock()

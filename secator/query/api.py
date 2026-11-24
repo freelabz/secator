@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend, QueryBackendError
+from secator.query._base import QueryBackend, QueryBackendError, sort_runners_chronologically, validate_runner_order
 from secator.config import CONFIG
 from secator.requests import get_api_session
 from secator.rich import console
@@ -253,7 +253,7 @@ class ApiBackend(QueryBackend):
         return bool(value) and len(value) == 24 and all(c in '0123456789abcdefABCDEF' for c in value)
 
     def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
-                     has_parent: Optional[bool] = None):
+                     has_parent: Optional[bool] = None, order: str = 'asc'):
         """List runners from API.
 
         The CLI passes a workspace name via -ws. The API accepts either workspace_id
@@ -262,7 +262,9 @@ class ApiBackend(QueryBackend):
 
         has_parent: when not None, only return runners matching that parent relationship
         (False = outermost runners only, True = nested children only).
+        order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
         """
+        validate_runner_order(order)
         try:
             endpoint = CONFIG.addons.api.runners_list_endpoint
             # Build params as a dict and url-encode them (workspace names may contain
@@ -283,12 +285,16 @@ class ApiBackend(QueryBackend):
                 endpoint += '?' + urlencode(params)
             result = self._make_request('GET', endpoint)
             if isinstance(result, list):
-                return result
+                runners = result
             elif isinstance(result, dict) and 'items' in result:
-                return result['items']
+                runners = result['items']
             elif isinstance(result, dict) and 'results' in result:
-                return result['results']
-            return []
+                runners = result['results']
+            else:
+                runners = []
+            # Don't rely on the endpoint's order (it may return newest first): sort
+            # client-side in the requested order, like the other backends.
+            return sort_runners_chronologically(runners, order=order)
         except QueryBackendError:
             raise
         except Exception as e:

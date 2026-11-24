@@ -127,15 +127,20 @@ class QueryEngine:
         return self.backend.get_workspace(workspace_id)
 
     def list_runners(
-        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None,
+        order: str = 'asc'
     ) -> List[Dict[str, Any]]:
         """List runners (tasks/workflows/scans) via the active backend.
 
         has_parent: filter on the runner's parent relationship. None lists all runners,
         False lists only outermost (root) runners, True lists only nested children.
+        order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
+        Raises ValueError on an unknown order.
         """
+        from secator.query._base import validate_runner_order
+        validate_runner_order(order)
         return self.backend.list_runners(
-            workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent
+            workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent, order=order
         )
 
     def get_runner(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:

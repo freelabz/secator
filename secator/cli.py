@@ -1615,7 +1615,8 @@ def _format_vuln_counts(counts):
 
 
 @report.command('list')
-@click.option('-ws', '-w', '--workspace', type=str)
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name (default: current)')
+@click.option('--all-workspaces', 'all_workspaces', is_flag=True, default=False, help='List reports from every workspace')  # noqa: E501
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
@@ -1624,9 +1625,14 @@ def _format_vuln_counts(counts):
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
 @click.option('--show-children', is_flag=True, default=False, help='Include nested sub-tasks / sub-workflows (by default only outermost runners are shown)')  # noqa: E501
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children):
-	"""List all secator reports."""
+def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children, all_workspaces=False):  # noqa: E501
+	"""List secator reports of the current workspace (or of every workspace with --all-workspaces)."""
+	if all_workspaces and workspace:
+		console.print(Error(message='Use either -ws/--workspace or --all-workspaces, not both.'))
+		ctx.exit(1)
 	effective_driver = QueryEngine.resolve_backend(driver)
+	# Same current-workspace resolution as `report show`, `report info` and `query`.
+	workspace_name = None if all_workspaces else (workspace or CONFIG.workspaces.current or 'default')
 
 	# --show-children only applies to the mongodb/api backends, which persist nested
 	# runners. Local JSON reports don't store sub-tasks/sub-workflows separately.
@@ -1645,7 +1651,8 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	# Build table. overflow='fold' wraps long values onto multiple lines instead of
 	# truncating with an ellipsis, so important fields stay readable on small screens.
 	table = Table()
-	table.add_column('Workspace', style='bold gold3', overflow='fold')
+	if all_workspaces:
+		table.add_column('Workspace', style='bold gold3', overflow='fold')
 	table.add_column('Name', overflow='fold')
 	table.add_column('Id', overflow='fold')
 	table.add_column('Target', overflow='fold')
@@ -1668,15 +1675,17 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		if unsupported:
 			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
 
-	# Resolve the workspace name to its id for the API backend (it filters by id).
-	list_workspace = workspace
-	if effective_driver == 'api' and workspace:
+	# Resolve the workspace name to its id for the API backend (it filters by id). The
+	# local, mongodb and sqlite backends match the workspace name directly.
+	list_workspace = workspace_name
+	if effective_driver == 'api' and workspace_name:
 		try:
 			from secator.hooks.api import resolve_workspace
-			list_workspace, _ = resolve_workspace(workspace)
+			list_workspace, workspace_name = resolve_workspace(workspace_name)
 		except Exception as e:
 			console.print(Error(message=f'Error resolving workspace from API: {e}'))
-			return
+			console.print(Info(message='Use [bold green4]-ws <workspace_name>[/] to pick a workspace, or [bold green4]--all-workspaces[/] to list reports from every workspace.'))  # noqa: E501
+			ctx.exit(1)
 
 	# ONE code path for every backend: list runners via the QueryEngine, then stream
 	# rows into a live table. Vuln counts exist only for the local driver (read from
@@ -1685,10 +1694,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	has_parent = None if show_children else False
 	with console.status('[bold]Listing reports …[/]'):
 		_t = time.time()
-		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
-		if is_local:
-			# Chronological (oldest first), as before — sort by report mtime.
-			runners = sorted(runners, key=lambda r: Path(r['_path']).stat().st_mtime)
+		# Oldest first, most recent last: the most recent runs are the last lines printed.
+		runners = engine.list_runners(
+			workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent, order='asc')
 		debug(f'listed {len(runners)} runner(s) in {time.time() - _t:.3f}s', sub='report')
 
 	# --time-delta cutoff (local only): keep reports whose mtime is newer than the delta.
@@ -1709,7 +1717,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				runner_id = f'{rtype}/{rid}' if rtype and rid else (rid or rtype)
 		path = r.get('_path')
 		id_cell = f'[link={Path(path).as_uri()}]{runner_id}[/link]' if path else runner_id
-		ws_name = r.get('context', {}).get('workspace_name') or r.get('_workspace') or (workspace or '')
+		ws_name = r.get('context', {}).get('workspace_name') or r.get('_workspace') or ''
 		targets = r.get('targets', [])
 		first_target = str(targets[0]) if targets else ''
 		if len(targets) > 1:
@@ -1720,8 +1728,8 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		profiles = [p for p in profiles if p]
 		runner_status = r.get('status', '')
 		status_color = STATE_COLORS.get(runner_status, 'white')
-		row = [
-			ws_name,
+		row = [ws_name] if all_workspaces else []
+		row += [
 			f'[bold blue]{r.get("name", "")}[/]',
 			id_cell,
 			first_target,
@@ -1764,12 +1772,12 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 
 	if shown > 0:
 		console.print(Info(message=f'Found {shown} reports.'))
-		if workspace:
-			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
-		else:
-			console.print(Info(message='All workspaces selected. Use [bold green4]-ws <workspace_name>[/] to filter on a workspace.'))  # noqa: E501
 	else:
 		console.print(Error(message='No reports found.'))
+	if all_workspaces:
+		console.print(Info(message='All workspaces selected. Use [bold green4]-ws <workspace_name>[/] to filter on a workspace.'))  # noqa: E501
+	else:
+		console.print(Info(message=f'Current workspace: [bold gold3]{workspace_name}[/]. Use [bold green4]-ws <workspace_name>[/] to switch, or [bold green4]--all-workspaces[/] to list every workspace.'))  # noqa: E501
 
 
 @report.command('info')

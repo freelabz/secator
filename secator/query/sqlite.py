@@ -2,10 +2,10 @@
 
 import json
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend
+from secator.query._base import QueryBackend, sort_runners_chronologically, validate_runner_order
 from secator.rich import console
 
 # Query fields that map to real indexed columns instead of json_extract.
@@ -25,6 +25,9 @@ COMPARISON_OPS = {
 	'$lte': '<=',
 }
 
+
+# Runner tables written by the sqlite driver (see hooks/sqlite.py).
+RUNNER_TABLES = ('tasks', 'workflows', 'scans')
 
 _FIELD_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_.]*$')
 
@@ -211,6 +214,50 @@ class SqliteBackend(QueryBackend):
 		# Connection is shared; commit flushes pending writes (best-effort single-host semantics, per design).
 		conn.commit()
 		return cur.rowcount
+
+	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+					 has_parent: Optional[bool] = None, order: str = 'asc') -> List[Dict[str, Any]]:
+		"""List runners from the sqlite tasks/workflows/scans tables.
+
+		workspace_id: a workspace id or name. Rows mirror ``context.workspace_id`` (which
+		defaults to the workspace name when no id is set) into the ``workspace_id`` column,
+		and carry ``context.workspace_name`` in the JSON blob, so either value matches.
+		has_parent: None lists all runners, False only outermost (root) runners,
+		True only nested children.
+		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
+		"""
+		validate_runner_order(order)
+		if runner_type:
+			table = runner_type.rstrip('s') + 's'
+			tables = [table] if table in RUNNER_TABLES else []
+		else:
+			tables = list(RUNNER_TABLES)
+		runners = []
+		try:
+			conn = self._get_conn()
+			for table in tables:
+				clauses, params = [], []
+				if workspace_id:
+					clauses.append("(workspace_id = ? OR json_extract(data, '$.context.workspace_name') = ?)")
+					params.extend([workspace_id, workspace_id])
+				if has_parent is not None:
+					# json booleans extract as 1/0; a missing key means a root runner.
+					clauses.append("COALESCE(json_extract(data, '$.has_parent'), 0) = ?")
+					params.append(int(has_parent))
+				where = ' AND '.join(clauses) or '1=1'
+				# `table` comes from the fixed RUNNER_TABLES allowlist, never from user input.
+				sql = f"SELECT id, workspace_id, data FROM {table} WHERE {where}"  # nosec B608
+				for rid, ws_id, data in conn.execute(sql, params).fetchall():
+					doc = json.loads(data)
+					doc['_type'] = table
+					doc['_id_str'] = f'{table}/{rid}'
+					doc['_workspace'] = (doc.get('context') or {}).get('workspace_name') or ws_id or ''
+					runners.append(doc)
+			# In the requested order (default oldest first), across the tasks/workflows/scans tables.
+			return sort_runners_chronologically(runners, order=order)
+		except Exception as e:
+			console.print(Warning(message=f'SQLite list_runners failed: {e}'))
+			return []
 
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into a dedicated ``notes`` table (created on first use).

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from secator.utils import to_datetime
-from secator.query._base import QueryBackend
+from secator.query._base import QueryBackend, sort_runners_chronologically, validate_runner_order
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
 from secator.utils import debug
@@ -562,12 +562,14 @@ class JsonBackend(QueryBackend):
 		return None
 
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
-					 has_parent: Optional[bool] = None):
+					 has_parent: Optional[bool] = None, order: str = 'asc'):
 		"""List runners from local report JSON files.
 
 		has_parent: when not None, only return runners matching that parent relationship
 		(False = outermost runners only, True = nested children only).
+		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
+		validate_runner_order(order)
 		from secator.utils import list_reports, get_info_from_report_path
 		paths = list_reports(workspace=workspace_id, type=runner_type)
 		runners = []
@@ -587,4 +589,5 @@ class JsonBackend(QueryBackend):
 			except Exception as e:
 				debug(f'failed to load runner report {path}: {e}', sub='query.json')
 				continue
-		return runners
+		# In the requested order (default oldest first); a report without timestamps falls back to its file mtime.
+		return sort_runners_chronologically(runners, fallback=lambda r: Path(r['_path']).stat().st_mtime, order=order)

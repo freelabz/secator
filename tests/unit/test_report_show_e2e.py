@@ -406,7 +406,7 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 	def tearDown(self):
 		shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-	def _run_list(self, workspace_opt, default_ws):
+	def _run_list(self, workspace_opt, default_ws, all_workspaces=False):
 		import click
 		from secator.cli import report_list, console
 
@@ -425,10 +425,11 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 		with ctx, \
 				mock.patch('secator.cli.QueryEngine.list_runners', return_value=[runner]), \
 				mock.patch('secator.cli._count_report_vulns', return_value=vuln_counts), \
+				mock.patch('secator.cli.CONFIG.workspaces.current', default_ws), \
 				console.capture() as cap:
 			report_list.callback(
 				workspace=workspace_opt, runner_type=None, time_delta=None, driver='local', show_all=False,
-				interesting=False, status=None, show_children=False,
+				interesting=False, status=None, show_children=False, all_workspaces=all_workspaces,
 			)
 		# Strip ANSI codes then flatten whitespace so assertions work on plain text
 		return ' '.join(_strip_ansi(cap.get()).split())
@@ -442,9 +443,16 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 		self.assertIn('-ws <workspace_name>', out)
 		self.assertIn('to switch', out)
 
-	def test_all_workspaces_message_without_ws(self):
+	def test_defaults_to_current_workspace_without_ws(self):
 		out = self._run_list(workspace_opt=None, default_ws='defws')
-		# Without -ws, all workspaces are listed, so don't claim a single current workspace
+		# Without -ws, only the current workspace is listed
+		self.assertIn('Current workspace', out)
+		self.assertIn('defws', out)
+		self.assertIn('--all-workspaces', out)
+		self.assertNotIn('All workspaces selected', out)
+
+	def test_all_workspaces_message(self):
+		out = self._run_list(workspace_opt=None, default_ws='defws', all_workspaces=True)
 		self.assertNotIn('Current workspace', out)
 		self.assertIn('All workspaces selected', out)
 		self.assertIn('-ws <workspace_name>', out)
