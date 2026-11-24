@@ -1,6 +1,7 @@
 """Tests for AI finding-management tools: mark_vuln_exploited, mark_vuln_false_positive, update_finding."""
 
 import unittest
+import unittest.mock
 from unittest.mock import MagicMock
 
 from secator.definitions import ADDONS_ENABLED
@@ -639,6 +640,132 @@ class TestExploitAttempt(unittest.TestCase):
 		from secator.ai.tools._findings import _rollup_lock
 		self.assertIs(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'm')))
 		self.assertIsNot(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'OTHER')))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestItemUpdateHooks(unittest.TestCase):
+	"""update_finding / mark_vuln_* run the runner's on_item_update hooks around ONE store write:
+	pre hooks may mutate the updated finding (persisted in the same $set), post hooks see the result."""
+
+	VULN = {'_uuid': 'u1', '_type': 'vulnerability', 'name': 'XSS', 'id': '', 'matched_at': '', 'severity': 'low',
+		'severity_nb': 3, 'extra_data': {'keep': 1}, 'tags': [], '_context': {'workspace_id': 'ws'}}
+
+	def setUp(self):
+		"""Wire an ActionContext to a real task's run_hooks over an in-memory store."""
+		import copy
+		import importlib
+		from functools import partial
+		self.engine = FakeEngine([copy.deepcopy(self.VULN)])
+		self.engine.update = MagicMock(side_effect=self.engine.update)
+		self.calls = []
+		self.task = importlib.import_module('secator.tasks.httpx').httpx(
+			['http://localhost'], enable_hooks=False, dry_run=True, raise_on_error=True)
+		self.task.dry_run = False
+		self.task.enable_hooks = True
+		self.ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws'},
+			run_item_update_hooks=partial(self.task.run_hooks, 'on_item_update', sub='item'))
+		self.ctx._query_engine = self.engine
+
+	def _register(self, driver, event, fun):
+		"""Register ``fun`` as an ``event`` hook of driver module ``secator.hooks.<driver>``."""
+		fun.__module__ = f'secator.hooks.{driver}'
+		self.task.register_hooks({event: [fun]})
+
+	def _add_external_driver(self, fail=False):
+		"""Register an external pre driver, a post driver and a persistence on_item hook."""
+		def sync_finding(runner, item):
+			"""Pre on_item_update hook: tag the finding with an external id (optionally failing)."""
+			self.calls.append(('pre', item.severity, item.severity_nb))
+			item.extra_data['synced_id'] = 'ext-1'
+			if fail:
+				raise RuntimeError('reporting tool down')
+			return item
+
+		def notify(runner, item):
+			self.calls.append(('post', item.extra_data.get('synced_id')))
+
+		def persist_on_item(runner, item):
+			self.calls.append(('persist_on_item',))
+			return item
+
+		self._register('external_sync', 'on_item_update', sync_finding)
+		self._register('discord', 'on_item_update', notify)
+		self._register('json', 'on_item', persist_on_item)
+
+	def test_update_finding_runs_hooks_around_single_write(self):
+		self._add_external_driver()
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1', 'fields': {'severity': 'high'}}, self.ctx))
+		self.assertFalse([o for o in out if isinstance(o, Error)])
+		# the external driver sees the updated finding with severity_nb re-derived, once
+		self.assertEqual(self.calls, [('pre', 'high', 1), ('post', 'ext-1')])
+		self.engine.update.assert_called_once()
+		sset = self.engine.update.call_args[0][1]['$set']
+		self.assertEqual(sset['severity'], 'high')
+		self.assertEqual(sset['severity_nb'], 1)              # derived field recomputed
+		self.assertEqual(sset['extra_data.synced_id'], 'ext-1')  # hook mutation in the same $set
+		self.assertNotIn('extra_data', sset)
+		self.assertFalse(any(k.startswith('_') for k in sset))
+		doc = self.engine.docs[0]
+		self.assertEqual(doc['extra_data'], {'keep': 1, 'synced_id': 'ext-1'})
+		ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'update_finding'][0]
+		self.assertEqual(ai.extra_data['finding']['severity_nb'], 1)
+
+	def test_failing_hook_does_not_fail_update_finding(self):
+		self._add_external_driver(fail=True)
+		with unittest.mock.patch.object(self.task, 'add_result'):
+			out = list(dispatch_action(
+				{'action': 'update_finding', '_uuid': 'u1', 'fields': {'severity': 'high'}}, self.ctx))
+		self.assertFalse([o for o in out if isinstance(o, Error)])
+		self.assertTrue([o for o in out if isinstance(o, Ai) and o.ai_type == 'update_finding'])
+		self.assertEqual(self.engine.docs[0]['severity'], 'high')
+
+	def test_failing_hook_does_not_fail_mark_vuln(self):
+		self._add_external_driver(fail=True)
+		with unittest.mock.patch.object(self.task, 'add_result'):
+			out = list(dispatch_action(
+				{'action': 'mark_vuln_false_positive', '_uuid': 'u1', 'reason': 'dup'}, self.ctx))
+		self.assertFalse([o for o in out if isinstance(o, Error)])
+		self.assertTrue(self.engine.docs[0]['is_false_positive'])
+		self.assertIn(('post', 'ext-1'), self.calls)
+
+	def test_mark_vuln_exploited_runs_hooks(self):
+		self._add_external_driver()
+		list(dispatch_action({'action': 'mark_vuln_exploited', '_uuid': 'u1', 'poc': '# poc'}, self.ctx))
+		self.assertEqual(self.engine.docs[0]['status'], 'EXPLOITED')
+		self.assertIn(('post', 'ext-1'), self.calls)
+		self.assertNotIn(('persist_on_item',), self.calls)
+
+	def test_finding_update_tools_run_methods_fire_item_update_hooks(self):
+		"""Each finding-update tool's OWN run() (its handler, in its tool file) still routes the
+		store write through _apply_finding_update, so pre + post on_item_update hooks fire."""
+		import copy
+		from secator.ai.tools import TOOLS_BY_NAME
+		cases = [
+			('update_finding', {'_uuid': 'u1', 'fields': {'severity': 'high'}}),
+			('mark_vuln_exploited', {'_uuid': 'u1', 'poc': '# poc'}),
+			('mark_vuln_false_positive', {'_uuid': 'u1', 'reason': 'dup'}),
+			('mark_vuln_exploit_failed', {'_uuid': 'u1', 'reason': 'payload blocked'}),
+			('mark_vuln_fixed', {'_uuid': 'u1', 'reason': 'no longer reproduces'}),
+		]
+		for name, args in cases:
+			with self.subTest(tool=name):
+				self.engine.docs[:] = [copy.deepcopy(self.VULN)]
+				self.calls.clear()
+				self.task.resolved_hooks['on_item_update'] = []
+				self._add_external_driver()
+				tool = TOOLS_BY_NAME[name]
+				out = list(tool.run({'action': tool.action, **args}, self.ctx))
+				self.assertFalse([o for o in out if isinstance(o, Error)], f"{name}: {out}")
+				self.assertTrue(any(c[0] == 'pre' for c in self.calls), f"{name}: pre hook not fired")
+				self.assertIn(('post', 'ext-1'), self.calls, f"{name}: post hook not fired")
+
+	def test_no_hooks_without_runner(self):
+		self.ctx.run_item_update_hooks = None
+		self._add_external_driver()
+		list(dispatch_action({'action': 'update_finding', '_uuid': 'u1', 'fields': {'severity': 'high'}}, self.ctx))
+		self.assertEqual(self.calls, [])
+		self.assertEqual(self.engine.update.call_args[0][1]['$set']['severity_nb'], 1)
 
 
 if __name__ == '__main__':

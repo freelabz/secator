@@ -148,3 +148,52 @@ class TestCeleryEventsDriver(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+class TestRunEndHookPhases(unittest.TestCase):
+	"""on_run_end goes through the same phased path as every hook event: celery_events is a
+	post-phase driver, so it publishes after every persistence hook, whatever the driver order."""
+
+	def setUp(self):
+		self.order = []
+		self.send_task = mock.patch(
+			'secator.celery.app.send_task', side_effect=lambda *a, **kw: self.order.append('publish')).start()
+		mock.patch.object(CONFIG.addons.celery_events, 'run_end_task', 'myapp.on_run_end').start()
+		self.addCleanup(mock.patch.stopall)
+
+	def test_driver_is_post_phase(self):
+		from secator.loader import get_driver_phase
+		self.assertEqual(get_driver_phase('celery_events'), 'post')
+
+	def test_on_run_end_sorted_after_persistence_hooks(self):
+		# Listed first on purpose: register_hooks() sorts each event by phase.
+		task = _build_task(context={'drivers': ['celery_events', 'json']})
+		self.assertEqual(
+			task.resolved_hooks['on_run_end'],
+			[json_driver.finalize_store, json_driver.announce_report, celery_events.publish_run_end],
+		)
+
+	def test_publishes_after_the_mongodb_status_write(self):
+		if importlib.util.find_spec('pymongo') is None:
+			self.skipTest('mongodb driver needs the optional pymongo extra')
+		from secator.hooks import mongodb
+
+		def record_write(query, update, upsert=False):
+			self.order.append(('write', update['$set']['status']))
+
+		client = mock.MagicMock()
+		client.main.__getitem__.return_value.update_one.side_effect = record_write
+		mock.patch.object(mongodb, 'get_mongodb_client', return_value=client).start()
+		task = _build_task(context={'drivers': ['celery_events', 'mongodb'], 'task_id': str(mongodb.ObjectId())})
+		task.mark_completed()
+		self.assertEqual(self.order, [('write', 'SUCCESS'), 'publish'])
+
+	def test_failing_post_hook_is_isolated_on_run_end(self):
+		# Even with raise_on_error, a failing post-phase hook yields an Error instead of aborting.
+		def broken(runner):
+			raise RuntimeError('boom')
+		broken.__module__ = 'secator.hooks.celery_events'
+		task = _build_task(raise_on_error=True, hooks={'on_run_end': [broken]})
+		task.mark_completed()
+		self.assertTrue(task.done)
+		self.assertTrue(any('boom' in str(e.message) or 'broken' in str(e.message) for e in task.errors))

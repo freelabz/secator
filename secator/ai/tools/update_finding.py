@@ -4,7 +4,9 @@ from typing import Dict, Generator
 from secator.output_types import Ai, Error, FINDING_TYPES
 from secator.ai.utils import _coerce_finding_fields, _decrypt_dict
 from secator.ai.actions import ActionContext, _get_result_context
-from secator.ai.tools._findings import _FINDING_IMMUTABLE_FIELDS, _drop_readonly_fields, _lookup_finding
+from secator.ai.tools._findings import (
+	_FINDING_IMMUTABLE_FIELDS, _apply_finding_update, _drop_readonly_fields, _lookup_finding,
+)
 from secator.ai.tools.base import BaseTool
 
 
@@ -219,9 +221,8 @@ class UpdateFinding(BaseTool):
 				yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 			return
 
-		engine = ctx.get_query_engine()
 		try:
-			modified = engine.update({"_uuid": uuid}, {"$set": update})
+			modified, updated = _apply_finding_update(ctx, {"_uuid": uuid}, update, doc=existing)
 		except Exception as e:
 			yield Error(message=f"Failed to update finding: {e}", _context=context)
 			return
@@ -229,7 +230,6 @@ class UpdateFinding(BaseTool):
 			yield Error(message=f"No finding updated for _uuid={uuid}.", _context=context)
 			return
 
-		updated = _lookup_finding(ctx, uuid)  # every backend reads back the finding as stored
 		yield Ai(
 			content=f"Updated finding {uuid} ({', '.join(sorted(update.keys()))}).",
 			ai_type="update_finding",
