@@ -570,6 +570,30 @@ class TestRepairOrphanToolUses(unittest.TestCase):
         self.assertEqual(second, 0)
         self.assertEqual(len(messages), count_after_first)
 
+    def test_orphan_result_depends_on_tool(self):
+        """A `stop` call never gets a result by design, so it is acknowledged. Any other call
+        without a result was interrupted before it returned: it must read "not run", never
+        "acknowledged" (which the model takes as "ran, no output")."""
+        import json
+        from secator.ai.utils import _repair_orphan_tool_uses, TOOL_ACK_RESULT, TOOL_NOT_RUN_RESULT
+
+        def _call(tc_id, name):
+            return {"id": tc_id, "type": "function", "function": {"name": name, "arguments": "{}"}}
+        messages = [
+            {"role": "assistant", "content": None, "tool_calls": [
+                _call("tc_a", "run_shell"), _call("tc_b", "run_shell"), _call("tc_c", "run_shell")]},
+            {"role": "user", "content": "any luck?"},
+            {"role": "assistant", "content": None, "tool_calls": [_call("tc_stop", "stop")]},
+            {"role": "user", "content": "go on"},
+        ]
+        self.assertEqual(_repair_orphan_tool_uses(messages), 4)
+        results = {m["tool_call_id"]: m["content"] for m in messages if m["role"] == "tool"}
+        self.assertEqual(results, {
+            "tc_a": TOOL_NOT_RUN_RESULT, "tc_b": TOOL_NOT_RUN_RESULT, "tc_c": TOOL_NOT_RUN_RESULT,
+            "tc_stop": TOOL_ACK_RESULT,
+        })
+        self.assertEqual(json.loads(TOOL_NOT_RUN_RESULT)["status"], "not_run")
+
     def test_call_llm_preemptively_repairs_orphan_tool_use(self):
         """call_llm should repair orphan tool_use blocks before the first API call."""
         from secator.ai.utils import call_llm

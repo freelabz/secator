@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
+import click
+
 from secator.utils import debug
 
 
@@ -25,6 +27,24 @@ def is_internal_doc(doc) -> bool:
 	"""True for an internal ai doc (dict or output type) that must never be surfaced."""
 	get = doc.get if isinstance(doc, dict) else (lambda k, d=None: getattr(doc, k, d))
 	return get('_type') == 'ai' and get('ai_type') in INTERNAL_AI_TYPES
+
+
+class QueryBackendError(click.ClickException):
+	"""A query backend failure that must reach the caller instead of degrading to an empty result.
+
+	Raised for failures that make every result meaningless, e.g. rejected or missing
+	credentials: best-effort reads re-raise it rather than return "0 results". A
+	``ClickException``, so CLI commands print the message and exit non-zero without a traceback.
+
+	Attributes:
+		backend (str): name of the backend that failed (e.g. ``api``).
+		status_code (int | None): the backend's status code, when it has one.
+	"""
+
+	def __init__(self, message: str, backend: Optional[str] = None, status_code: Optional[int] = None):
+		super().__init__(message)
+		self.backend = backend
+		self.status_code = status_code
 
 
 class QueryBackend(ABC):

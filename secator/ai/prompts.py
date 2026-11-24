@@ -626,7 +626,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 			subagent persona so it carries out its assigned objective itself.
 		workspace_name: current workspace name, for scoping user AI context files.
 		workspace_id: current workspace id, for scoping user AI context files.
-		context_includes: filenames of user AI context files to force-load (from a
+		context_includes: names / relative paths of user AI context files to force-load (from a
 			profile's ``ai_context``), bypassing frontmatter mode/workspace scope.
 
 	Returns:
@@ -698,13 +698,13 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# context, so a user note's body is treated verbatim (never token-substituted).
 	result = result.replace("$workspace_path", ws)
 
-	# User-provided engagement context (~/.secator/templates/ai/*.md), appended last so
+	# User-provided engagement context (~/.secator/templates/ai/**/*.md), appended last so
 	# it reads as an authoritative, run-specific overlay on top of the baked-in prompt.
 	from secator.ai.context import load_context_blocks
 	blocks = load_context_blocks(
 		mode, workspace_name=workspace_name, workspace_id=workspace_id, includes=context_includes)
 	if blocks:
-		# Each block is already wrapped in its own <type:filename> tag (context.py).
+		# Each block is already wrapped in its own <type:relative/path.md> tag (context.py).
 		result += "\n\n" + "\n\n".join(blocks)
 
 	return result

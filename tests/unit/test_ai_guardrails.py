@@ -1813,5 +1813,138 @@ class TestMalformedPortUrlTarget(unittest.TestCase):
 		self.assertNotIn("http://127.0.0.1:8080;", got)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestUrlTargetMalformedPortKeepsHost(unittest.TestCase):
+	"""`urlparse(...).port` raises on a non-numeric port while `.hostname` is still valid: the
+	host must survive for the scope check instead of the whole URL being denied as unparseable."""
+
+	def _engine(self, **kw):
+		return PermissionEngine(config={"allow": [], "deny": [], "ask": ["target(*)"]}, **kw)
+
+	def test_in_scope_host_with_malformed_port_is_allowed(self):
+		eng = self._engine(in_scope=["testphp.vulnweb.com"])
+		r = eng._check_value("target", "http://testphp.vulnweb.com:8o/")
+		self.assertEqual(r.decision, "allow", r.reason)
+		self.assertNotIn("Unparseable", r.reason or "")
+
+	def test_out_of_scope_host_with_malformed_port_is_not_allowed(self):
+		eng = self._engine(in_scope=["testphp.vulnweb.com"])
+		r = eng._check_value("target", "http://10.1.2.3:8o/")
+		self.assertNotEqual(r.decision, "allow", r.reason)
+
+	def test_out_of_scope_deny_still_wins_with_malformed_port(self):
+		eng = self._engine(out_of_scope=["testphp.vulnweb.com"])
+		r = eng._check_value("target", "http://testphp.vulnweb.com:8o/")
+		self.assertEqual(r.decision, "deny")
+		self.assertEqual(r.reason, "out_of_scope")
+
+	def test_config_deny_on_host_still_wins_with_malformed_port(self):
+		eng = PermissionEngine(config={"allow": [], "deny": ["target(testphp.vulnweb.com)"], "ask": []},
+		                       in_scope=["testphp.vulnweb.com"])
+		r = eng._check_value("target", "http://testphp.vulnweb.com:8o/")
+		self.assertEqual(r.decision, "deny")
+		self.assertIn("Denied by rule", r.reason)
+
+	def test_check_action_in_scope_malformed_port_allowed(self):
+		# curl is allowed at the shell-command layer, so the verdict comes from the target check.
+		eng = PermissionEngine(config={"allow": ["shell(curl)"], "deny": [], "ask": ["target(*)"]},
+		                       in_scope=["testphp.vulnweb.com"])
+		r = eng.check_action({"action": "shell", "command": "curl http://testphp.vulnweb.com:8o/"})
+		self.assertEqual(r.decision, "allow", r.reason)
+		# Control: the same command on a host denied by rule is blocked, so the target check ran.
+		deny = PermissionEngine(config={"allow": ["shell(curl)"], "deny": ["target(testphp.vulnweb.com)"],
+		                                "ask": ["target(*)"]}, in_scope=["testphp.vulnweb.com"])
+		r = deny.check_action({"action": "shell", "command": "curl http://testphp.vulnweb.com:8o/"})
+		self.assertEqual(r.decision, "deny", r.reason)
+
+	def test_build_target_choices_malformed_port_does_not_raise(self):
+		choices = build_target_choices("http://testphp.vulnweb.com:8o/")
+		self.assertTrue(any("target(testphp.vulnweb.com)" in c["rules"] for c in choices))
+		# No URL-only rule built from the malformed authority.
+		self.assertFalse(any("8o" in r for c in choices for r in c["rules"]), choices)
+		self.assertEqual(choices[-1]["rules"], [])  # deny is still offered
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestIsolatedShellLoopback(unittest.TestCase):
+	"""An isolated run_shell runs in its own sandbox container: its loopback is the sandbox's,
+	so a local lab there is allowed without a prompt. Deny layers still win, and non-shell
+	actions / non-isolated runs / a host-network sandbox keep scoping loopback."""
+
+	LOOPBACK = (
+		"curl http://127.0.0.1:8080/",
+		"curl http://localhost:3000/api",
+		"curl http://[::1]:8000/",
+		"nc 127.0.0.1 4444",
+		"curl http://127.0.0.5/",
+	)
+
+	def _engine(self, config=None, **kw):
+		return PermissionEngine(config=config or CONFIG.addons.ai.permissions, **kw)
+
+	def _shell(self, cmd):
+		return {"action": "shell", "command": cmd}
+
+	def setUp(self):
+		patcher = patch.dict("os.environ", {"SECATOR_AI_SANDBOX_NETWORK": ""})
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def test_isolated_shell_loopback_allowed(self):
+		eng = self._engine(isolated=True)
+		for cmd in self.LOOPBACK:
+			r = eng.check_action(self._shell(cmd))
+			self.assertEqual(r.decision, "allow", f"{cmd} -> {r.decision} ({r.reason})")
+
+	def test_isolated_shell_loopback_allowed_with_in_scope_and_hard_deny(self):
+		with patch.object(CONFIG.security, "scope_hard_deny", True):
+			eng = self._engine(isolated=True, in_scope=["testphp.vulnweb.com"])
+			r = eng.check_action(self._shell("curl http://127.0.0.1:8080/"))
+			self.assertEqual(r.decision, "allow", r.reason)
+
+	def test_not_isolated_loopback_still_asks(self):
+		eng = self._engine()
+		r = eng.check_action(self._shell("curl http://127.0.0.1:8080/"))
+		self.assertEqual(r.decision, "ask", r.reason)
+
+	def test_isolated_task_loopback_not_allowed(self):
+		# task/workflow/subagent run on the worker: loopback there is the worker itself.
+		eng = self._engine(isolated=True)
+		for action in ("task", "workflow", "subagent"):
+			r = eng.check_action({"action": action, "name": "httpx", "targets": ["127.0.0.1"]})
+			self.assertNotEqual(r.decision, "allow", f"{action}: {r.reason}")
+
+	def test_host_network_sandbox_loopback_still_asks(self):
+		for net in ("host", "container:other"):
+			with patch.dict("os.environ", {"SECATOR_AI_SANDBOX_NETWORK": net}):
+				r = self._engine(isolated=True).check_action(self._shell("curl http://127.0.0.1:8080/"))
+				self.assertEqual(r.decision, "ask", f"{net}: {r.reason}")
+
+	def test_config_deny_on_loopback_still_wins(self):
+		cfg = {"allow": [], "deny": ["target(127.0.0.1)"], "ask": ["target(*)"]}
+		r = self._engine(config=cfg, isolated=True).check_action(self._shell("curl http://127.0.0.1:8080/"))
+		self.assertEqual(r.decision, "deny", r.reason)
+
+	def test_out_of_scope_loopback_still_denied(self):
+		r = self._engine(isolated=True, out_of_scope=["127.0.0.1"]).check_action(
+			self._shell("curl http://127.0.0.1:8080/"))
+		self.assertEqual(r.decision, "deny", r.reason)
+
+	def test_mixed_loopback_and_external_still_scoped(self):
+		r = self._engine(isolated=True).check_action(
+			self._shell("curl http://127.0.0.1:8080/ && curl http://10.1.2.3/"))
+		self.assertEqual(r.decision, "ask", r.reason)
+		self.assertIn("10.1.2.3", " ".join(r.targets or []))
+
+	def test_loopback_lookalikes_not_treated_as_loopback(self):
+		from secator.ai.guardrails import _is_loopback_target
+		for v in ("foo.localhost", "localhost.evil.com", "127.0.0.1.evil.com", "http://127.0.0.1@evil.com/",
+		          "http://evil.com/127.0.0.1", "10.0.0.1", "", "http://[::1"):
+			self.assertFalse(_is_loopback_target(v), v)
+		for v in ("127.0.0.1", "127.0.0.1:8080", "localhost", "LOCALHOST:80", "::1", "[::1]:8000",
+		          "http://localhost/", "https://127.1.2.3:8443/x"):
+			self.assertTrue(_is_loopback_target(v), v)
+
+
 if __name__ == '__main__':
 	unittest.main()

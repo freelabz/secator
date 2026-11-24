@@ -40,7 +40,7 @@ from secator.utils import (
 	get_file_timestamp,
 	list_reports,
 	human_to_timedelta,
-	sanitize_folder_name,
+	get_workspace_folder_name,
 	vhs_tap_to_tape,
 	trim_gif,
 	reduce_gif_frames,
@@ -658,14 +658,15 @@ def config():
 
 @config.command('get')
 @click.option('--user/--full', is_flag=True, help='Show config (user/full)')
+@click.option('--reveal', is_flag=True, default=False, help='Show secret values (keys, tokens, passwords) in clear.')
 @click.argument('key', required=False)
-def config_get(user, key=None):
-	"""Get config value"""
+def config_get(user, reveal, key=None):
+	"""Get config value. Secret values are masked unless --reveal is passed."""
 	if key is None:
 		partial = user and default_config != CONFIG
-		CONFIG.print(partial=partial)
+		CONFIG.print(partial=partial, reveal=reveal)
 		return
-	CONFIG.get(key)
+	CONFIG.get(key, reveal=reveal)
 
 
 @config.command('set')
@@ -851,7 +852,7 @@ def workspace_use(name, driver):
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
-		workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+		workspace_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(name)
 		workspace_folder.mkdir(parents=True, exist_ok=True)
 		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
 	else:
@@ -987,7 +988,7 @@ def workspace_summary(workspace_opt, driver, template_path):
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
 	driver = QueryEngine.resolve_backend(driver)
-	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+	workspace_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(name)
 
 	# The API keys workspaces by id, so resolve the name to its id for the api driver.
 	api_workspace_id = name
@@ -1780,7 +1781,8 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			report.data['results'][type_name] = _aggregate_streamed(
 				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
 			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
-				grouped_types.append((type_name, ', '.join(cls._group_by)))
+				from secator.query.utils import group_key_label
+				grouped_types.append((type_name, group_key_label(cls._group_by)))
 		if group and not grouped_types:
 			console.print(Warning(message='--group: no groupable finding types in results'))
 	else:
@@ -2146,7 +2148,7 @@ def report_info(runner_id, workspace, driver, show_all):
 		info.pop('_id', None)
 		source_label, source_value = '_source', f'{effective_driver}:{runner_type}/{runner_number}'
 	else:
-		report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
+		report_path = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
 		if not report_path.exists():
 			console.print(Error(message=f'Report not found: {report_path}'))
 			return
@@ -2261,7 +2263,7 @@ def _resolve_runner_db_id(report_folder, runner_type_singular):
 
 def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver):
 	"""Perform the actual deletion for a single runner reference."""
-	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+	report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 
 	# 1. Remove report folder (local driver only; api/mongodb delete from the backend)
 	if driver == 'local':
@@ -2349,7 +2351,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	resolved = []
 	console.print('[bold]The following actions will be performed:[/]')
 	for runner_type_plural, runner_type_singular, runner_number in refs:
-		report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+		report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 		if runner_number.isdigit():
 			# Local report: resolve the backend id from the report's context.
 			runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)

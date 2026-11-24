@@ -1,5 +1,6 @@
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.text import Text
 
 from secator.exporters._base import Exporter
 from secator.output_types import OUTPUT_TYPES
@@ -28,6 +29,45 @@ def _print_vuln_extra(item):
 		console_stdout.print(f"  [dim cyan]{label}:[/] {escape(str(value))}", highlight=False)
 
 
+def _plain(item):
+	"""Plain text of a finding's one-line rendering."""
+	return Text.from_markup(item.__rich__()).plain
+
+
+def _aggregate_shown_inline(item, field, value):
+	"""Return True if the finding's own line already shows its aggregated field.
+
+	The line is rendered with the field set, then blanked: when both match, the line
+	does not print that field (e.g. `_source`), unless the value is identical to
+	another field that is printed (an ip whose only hostname is the ip itself).
+	"""
+	try:
+		line = _plain(item)
+		setattr(item, field, "")
+		try:
+			blank = _plain(item)
+		finally:
+			setattr(item, field, value)
+	except Exception:
+		return False
+	if line != blank:
+		return True
+	return any(str(getattr(item, name, None)) == str(value) for name in item.fields() if name != field)
+
+
+def _group_suffix(item, count):
+	"""Suffix of a grouped row: the aggregated values (when the line hides them) and the count.
+
+	The values use the line's own bracketed-value style, e.g. `[naabu, nmap] (count: 2)`.
+	"""
+	suffix = ''
+	field = getattr(type(item), "_group_aggregate", None)
+	value = getattr(item, field, None) if field else None
+	if value and not _aggregate_shown_inline(item, field, value):
+		suffix = rf'\[[cyan]{escape(str(value))}[/]] '
+	return f'{suffix}[dim](count: {count})[/]'
+
+
 class ConsoleExporter(Exporter):
 	# Map type names to classes for fast lookup
 	_type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
@@ -50,10 +90,11 @@ class ConsoleExporter(Exporter):
 								item = cls.load(item)
 							except (TypeError, Exception):
 								pass
-					# Grouped findings carry a _group_count; show it next to the line.
+					# Grouped findings carry a _group_count; show it (and the aggregated
+					# values, when the line itself does not print them) next to the line.
 					count = getattr(item, "_group_count", 0)
 					if count:
-						console_stdout.print(item, f"[dim](count: {count})[/]", highlight=False)
+						console_stdout.print(item, _group_suffix(item, count), highlight=False)
 					else:
 						console_stdout.print(item, highlight=False)
 					# --show-all: print extra vulnerability fields below the main line.

@@ -176,7 +176,7 @@ class TestExtractorFunctions(unittest.TestCase):
         # `len(<field>)` is no longer supported (Mongo can't express it without $expr; no shipped
         # config uses it). It must RAISE explicitly, never silently match-all/none.
         with self.assertRaises(ValueError):
-            process_extractor([], {'type': 'mock', 'field': 'field1', 'condition': 'len(item.field1) > 3'}, ctx=self.ctx)
+            process_extractor([], {'type': 'mock', 'field': 'field1', 'condition': 'len(item.field1) > 3'}, ctx=self.ctx)  # noqa: E501
 
     def test_process_extractor_with_nested_condition(self):
         """Test process_extractor with nested dict field access in conditions (dot notation)."""
@@ -261,7 +261,7 @@ class TestExtractorFunctions(unittest.TestCase):
         }
         result = process_extractor([], extractor, ctx=self.tech_ctx)
         self.assertEqual(len(result), 2)
-        self.assertIn('10.0.0.1:80,10.0.0.2:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.1:80,10.0.0.2:80~Apache HTTP Server 2.4.50', result)
         self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
 
     def test_process_extractor_group_by_single_item(self):
@@ -284,8 +284,8 @@ class TestExtractorFunctions(unittest.TestCase):
         }
         result = process_extractor([], extractor, ctx=self.tech_ctx)
         self.assertEqual(len(result), 3)
-        self.assertIn('10.0.0.1:80~apache httpd 2.4.50', result)
-        self.assertIn('10.0.0.2:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.1:80~Apache HTTP Server 2.4.50', result)
+        self.assertIn('10.0.0.2:80~Apache HTTP Server 2.4.50', result)
         self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
 
     def test_fmt_extractor_with_group_by(self):
@@ -377,10 +377,10 @@ class TestExtractorFunctions(unittest.TestCase):
         inputs, _updated_opts, errors = run_extractors([], opts, ctx=self._store_ctx(results))
         self.assertEqual(errors, [])
         self.assertEqual(len(inputs), 2)  # 2 unique services
-        apache_input = next(i for i in inputs if 'apache' in i)
+        apache_input = next(i for i in inputs if 'Apache' in i)
         self.assertIn('10.0.0.1:80', apache_input.split('~')[0])
         self.assertIn('10.0.0.2:80', apache_input.split('~')[0])
-        self.assertEqual(apache_input.split('~')[1], 'apache httpd 2.4.50')
+        self.assertEqual(apache_input.split('~')[1], 'Apache HTTP Server 2.4.50')
         nginx_input = next(i for i in inputs if 'nginx' in i)
         self.assertEqual(nginx_input, '10.0.0.3:80~nginx 1.21.0')
 
