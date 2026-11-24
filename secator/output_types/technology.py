@@ -29,7 +29,9 @@ class Technology(OutputType):
 
 	_table_fields = ['match', 'product', 'version', 'extra_data']
 	_sort_by = ('match', 'product', 'version')
-	_group_by = ('product',)
+	# one row per product:version (product when no version); `match` (where it was seen) is the
+	# aggregate, so a grouped row maps each location to its own _uuids
+	_group_by = (('{product}:{version}', 'product'),)
 	_group_aggregate = 'match'
 
 	def __post_init__(self):

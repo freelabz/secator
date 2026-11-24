@@ -35,8 +35,8 @@ class Subdomain(OutputType):
 	]
 	_sort_by = (HOST,)
 	_target_fields = ['host']
-	_group_by = (DOMAIN,)        # collapse a domain's subdomains into one row
-	_group_aggregate = HOST
+	_group_by = (HOST,)          # one row per name
+	_group_aggregate = '_source'
 
 	def __str__(self):
 		return self.host
