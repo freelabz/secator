@@ -172,13 +172,15 @@ MODES = {
 		# the outcome: an unchanged finding gets an `add_note`; a changed one `update_finding` +
 		# `add_note` (the delta); a finding that no longer reproduces is retired with
 		# `mark_vuln_false_positive` (reversible) + a note; a previously-exploited vuln that is now
-		# gone is closed with `mark_vuln_fixed` + a note. It deliberately CANNOT run
-		# tasks/workflows (those re-ingest findings through the normal pipeline and would re-add
-		# the very surface it is auditing), add findings, exploit, spawn subagents, or
-		# self-escalate — no add_finding, no mark_vuln_exploited/exploit_failed, no subagent, no
+		# gone is closed with `mark_vuln_fixed` + a note. `mark_vuln_exploited` is exposed ONLY to
+		# re-open a FIXED vuln by replaying its recorded successful PoC (same request, same target,
+		# read-only proof); the tool itself refuses any other use in monitor mode. It deliberately
+		# CANNOT run tasks/workflows (those re-ingest findings through the normal pipeline and would
+		# re-add the very surface it is auditing), add findings, exploit anything new, spawn
+		# subagents, or self-escalate — no add_finding, no mark_vuln_exploit_failed, no subagent, no
 		# change_mode. No iteration override/cap: like the other modes it relies on the default
 		# budget and the model calling `stop` when the surface has been walked.
-		"allowed_actions": ["query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed", "update_finding", "add_note", "stop"],  # noqa: E501
+		"allowed_actions": ["query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed", "mark_vuln_exploited", "update_finding", "add_note", "stop"],  # noqa: E501
 	},
 	"research": {
 		"system_prompt": SYSTEM_RESEARCH,

@@ -1068,6 +1068,7 @@ class ai(PythonRunner):
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
 			dangerous=bool(getattr(self, "dangerous", False)),
+			extra_tools=list(getattr(self, "extra_tools", None) or []),
 			run_item_update_hooks=partial(self.run_hooks, 'on_item_update', sub='item'),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end

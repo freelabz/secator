@@ -65,6 +65,9 @@ class ActionContext:
 	# the in_scope/out_of_scope boundary to child runners — bypass means run freely, so the
 	# shipped scope-gate shouldn't keep dropping out-of-scope targets.
 	dangerous: bool = False
+	# Extra tools enabled for this run (the `extra_tools` option, unresolved). With the config
+	# default it forms the run's custom-tool set, which the dispatch-side mode gate allows.
+	extra_tools: List[str] = field(default_factory=list)
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
 	# Runs the runner's on_item_update hooks of one driver phase: ``(item, phase=) -> item``.
@@ -255,6 +258,19 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	from secator.ai.tools import TOOLS_BY_ACTION
 	action_type = action.get("action", "")
 	tool = TOOLS_BY_ACTION.get(action_type)
+	mode = getattr(ctx, "mode", "")
+	if tool and isinstance(mode, str) and mode:
+		from secator.ai.tools import resolve_extra_tools, tool_exposed_in_mode
+		try:
+			extras = resolve_extra_tools(getattr(ctx, "extra_tools", None))
+		except ValueError:
+			extras = []
+		if not tool_exposed_in_mode(tool, mode, extras):
+			# Schema exposure already hides tools outside the active mode; this is the dispatch-side
+			# gate so a call naming a hidden tool (hallucinated or injected) never reaches its handler.
+			context = _get_result_context(action, ctx)
+			yield Error(message=f"Action '{action_type}' is not allowed in {mode} mode.", _context=context)
+			return
 	if tool:
 		yield from tool.handle(action, ctx)
 	else:

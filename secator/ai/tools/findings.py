@@ -10,7 +10,9 @@ The shared helpers at the top (scoped finding lookup + update, exploit-attempt r
 the vuln rollup) are used only by these tools.
 """
 import copy
+import re
 import threading
+import time
 import json
 from typing import Dict, Generator, Optional
 from dataclasses import fields
@@ -19,6 +21,7 @@ from secator.output_types import ExploitAttempt, Ai, Error, Info, OutputType, Wa
 from secator.utils import debug
 from secator.ai.utils import _decrypt_dict, _union_live_results, loads_lenient, _coerce_finding_fields
 from secator.ai.actions import ActionContext, _get_result_context
+from secator.ai.prompts import normalize_mode
 from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA
 
 
@@ -126,12 +129,18 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict, doc: Option
 	return modified, updated, updated.get("name") or uuid, None
 
 
+# extra_data keys only the handlers themselves may write. ``fixed_at`` is the remediation boundary
+# the attempt rollup trusts, so a caller must not be able to move it.
+_SERVER_OWNED_EXTRA_DATA = frozenset({"fixed_at"})
+
+
 def _merge_extra_data(update: Dict, extra_data) -> None:
-	"""Merge caller ``extra_data`` into ``update`` with dotted keys so existing keys survive."""
+	"""Merge caller ``extra_data`` into ``update`` with dotted keys so existing keys survive.
+	Server-owned keys (``_SERVER_OWNED_EXTRA_DATA``) are skipped."""
 	if isinstance(extra_data, dict):
 		for k, v in extra_data.items():
 			key = str(k)
-			if key and "." not in key and not key.startswith("$"):
+			if key and "." not in key and not key.startswith("$") and key not in _SERVER_OWNED_EXTRA_DATA:
 				update[f"extra_data.{key}"] = v
 
 
@@ -201,18 +210,34 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 		counts = _attempt_counts(attempts)
 		# Current (possibly legacy) vuln state, so a failed attempt never downgrades an EXPLOITED vuln.
 		cur = next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else {})
-		if counts["success"]:
-			successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
-			status, verified = "EXPLOITED", True
+		successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
+		# Remediation boundary: if ANY occurrence of the identity is FIXED (mark_vuln_fixed may have
+		# targeted a duplicate), the vuln is re-opened ONLY by a success recorded AFTER the latest
+		# fix (``extra_data.fixed_at``); pre-fix successes and any failed/partial re-test leave it
+		# FIXED (only the attempt recap is refreshed). A FIXED occurrence with no ``fixed_at`` has
+		# no reliable boundary, so no success qualifies.
+		fixed_occ = [v for v in occurrences if v.get("status") == "FIXED"]
+		fixed = bool(fixed_occ)
+		if fixed:
+			stamps = [(v.get("extra_data") or {}).get("fixed_at") for v in fixed_occ]
+			if all(isinstance(t, (int, float)) for t in stamps):
+				fixed_at = max(stamps)
+				successes = [a for a in successes if (a.get("_timestamp") or 0) > fixed_at]
+			else:
+				successes = []
+		if successes:
 			poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
+			update = {"status": "EXPLOITED", "verified": True, "poc": poc}
+		elif fixed:
+			update = {}
 		elif (cur or {}).get("status") == "EXPLOITED":
 			# Legacy / pre-backfill success — preserve it (keep the existing poc); do not downgrade.
-			status, verified, poc = "EXPLOITED", True, (cur or {}).get("poc") or ""
+			update = {"status": "EXPLOITED", "verified": True, "poc": (cur or {}).get("poc") or ""}
 		elif counts["failed"] or counts["partial"]:
-			status, verified, poc = "EXPLOIT FAILED", False, ""
+			update = {"status": "EXPLOIT FAILED", "verified": False, "poc": ""}
 		else:
 			return cur or None
-		update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
+		update["extra_data.exploit_attempts"] = counts
 		# Apply the $set to each occurrence by its own _uuid (point ops), so each one is addressed explicitly.
 		primary = None
 		for v in occurrences:
@@ -921,7 +946,7 @@ class UpdateFinding(BaseTool):
 			update[key] = v
 		for k, v in extra_data.items():
 			key = str(k)
-			if key and "." not in key and not key.startswith("$"):
+			if key and "." not in key and not key.startswith("$") and key not in _SERVER_OWNED_EXTRA_DATA:
 				update[f"extra_data.{key}"] = v
 		# A confidence downgrade must re-prioritize: recompute the derived sort key where the type
 		# carries it (update_finding writes a raw $set, so __post_init__ never runs to derive it).
@@ -968,6 +993,38 @@ class UpdateFinding(BaseTool):
 
 
 # ---------- mark_vuln_exploited ----------
+
+# The date stamp mark_vuln_exploited prepends to every recorded PoC (see MarkVulnExploited.run()).
+_POC_DATE_STAMP = re.compile(r"^_Exploited on \d{4}-\d{2}-\d{2}_\n\n")
+
+
+def _monitor_reopen_error(ctx: ActionContext, vuln: Dict, poc: str):
+	"""Why a monitor-mode ``mark_vuln_exploited`` is refused, or None when it is allowed.
+
+	Monitor re-verifies the existing findings; it never exploits anything new. Its only use of this
+	tool is to RE-OPEN a vulnerability marked FIXED whose fix did not hold, and only by replaying a
+	PoC already recorded as a successful attempt on that same vulnerability (same request, same
+	target): ``poc`` must equal a recorded successful attempt's PoC.
+	"""
+	if vuln.get("status") != "FIXED":
+		return ("In monitor mode, mark_vuln_exploited only re-opens a vulnerability marked FIXED. "
+		        "Record re-test results for other findings with add_note.")
+	attempts = ctx.get_query_engine().search({
+		"_type": "exploit_attempt",
+		"vuln_name": vuln.get("name", "") or "",
+		"vuln_id": vuln.get("id", "") or "",
+		"matched_at": vuln.get("matched_at", "") or "",
+	}, scope_only=True) or []
+	recorded = {
+		_POC_DATE_STAMP.sub("", str(a.get("poc") or "")).strip()
+		for a in attempts if str(a.get("verdict") or "").lower() == "success"
+	}
+	if poc not in recorded:
+		return ("In monitor mode, a FIXED vulnerability is re-opened only by replaying a PoC already "
+		        "recorded as a successful attempt on it: query `_type: exploit_attempt` for this "
+		        "vulnerability and pass that recorded `poc` unchanged.")
+	return None
+
 
 class MarkVulnExploited(BaseTool):
 	name = "mark_vuln_exploited"
@@ -1087,6 +1144,7 @@ class MarkVulnExploited(BaseTool):
 			yield Error(message="mark_vuln_exploited requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
 			return
 
+		raw_poc = str(poc).strip()
 		# Stamp the exploitation date at the top of the PoC (authoritative server-side date).
 		poc = f"_Exploited on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}_\n\n{str(poc).strip()}"
 
@@ -1097,6 +1155,12 @@ class MarkVulnExploited(BaseTool):
 				message=f"No vulnerability found with _uuid={uuid} in this workspace. "
 				"Re-check the `_uuid` from query_workspace results.", _context=context)
 			return
+
+		if normalize_mode(getattr(ctx, "mode", "") or "") == "monitor":
+			refusal = _monitor_reopen_error(ctx, vuln, raw_poc)
+			if refusal:
+				yield Error(message=refusal, _context=context)
+				return
 
 		# Record the exploitation as an append-only ExploitAttempt (success) — persisted via the
 		# pipeline, so parallel agents accumulate HISTORY instead of overwriting each other.
@@ -1462,7 +1526,9 @@ class MarkVulnFixed(BaseTool):
 
 		# FIXED is set directly (no is_false_positive change → stays visible). verified=False: it is no
 		# longer a live/exploitable finding.
-		update = {"status": "FIXED", "verified": False}
+		# fixed_at is the remediation boundary the attempt rollup honours: only a success recorded
+		# after it can re-open the vuln as EXPLOITED.
+		update = {"status": "FIXED", "verified": False, "extra_data.fixed_at": time.time()}
 		if reason:
 			update["extra_data.fixed_reason"] = reason
 		_merge_extra_data(update, action.get("extra_data"))
