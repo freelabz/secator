@@ -149,6 +149,18 @@ class TestStreamingAggregation(unittest.TestCase):
 		self.assertEqual(len(rows), 1)
 		self.assertEqual(getattr(rows[0], '_group_count', None), 2)
 
+	def test_group_keeps_every_exploit_attempt(self):
+		# exploit_attempt has no group key: each attempt is distinct, --group lists them all.
+		from secator.cli import _aggregate_streamed
+		from secator.output_types import ExploitAttempt
+		items = [
+			{'_type': 'exploit_attempt', 'name': 't', 'vuln_id': 'CVE-1', 'matched_at': 'a', 'verdict': 'failed'},
+			{'_type': 'exploit_attempt', 'name': 't', 'vuln_id': 'CVE-1', 'matched_at': 'a', 'verdict': 'success'},
+		]
+		rows = _aggregate_streamed(self._stream(items), 'exploit_attempt', ExploitAttempt, group=True)
+		self.assertEqual(len(rows), 2)
+		self.assertFalse(any(getattr(r, '_group_count', None) for r in rows))
+
 	def test_uniq_sort_orders_the_collapsed_set(self):
 		# --uniq --sort must sort the deduped values (bounded), not return first-seen order.
 		from secator.cli import _aggregate_streamed

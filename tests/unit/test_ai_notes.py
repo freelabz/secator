@@ -85,6 +85,33 @@ class TestAddNoteTool(unittest.TestCase):
 		note = e.create_note.call_args.args[0]
 		self.assertEqual(note['target_key'], {'port': '443', 'ip': '1.2.3.4', 'state': 'open'})
 
+	def test_add_note_readable_label(self):
+		# The result names the finding the way a reader would, never by its raw _uuid.
+		uid = 'abf0d02a-b29f-4d36-84c4-91afda7e536d'
+		cases = [
+			({'_type': 'ip', 'ip': '192.0.2.10', 'alive': True}, 'ip 192.0.2.10'),
+			({'_type': 'port', 'port': 443, 'ip': '192.0.2.10', 'state': 'open'}, 'port 192.0.2.10:443'),
+			({'_type': 'port', 'port': 443, 'ip': '192.0.2.10', 'host': 'example.com', 'state': 'open'},
+			 'port example.com:443'),
+			({'_type': 'technology', 'product': 'nginx', 'version': '1.18.0', 'match': 'http://h'},
+			 'technology nginx 1.18.0'),
+			({'_type': 'url', 'url': 'http://h/login'}, 'url http://h/login'),
+		]
+		for finding, expected in cases:
+			e = self._engine({'_uuid': uid, **finding})
+			out = list(dispatch_action({'action': 'add_note', '_uuid': uid, 'body': 'b'}, self._ctx(e)))
+			ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'add_note'][0]
+			self.assertEqual(ai.content, f'Note added to {expected}')
+			self.assertNotIn(uid, ai.content)
+			self.assertEqual(ai.extra_data['finding_uuid'], uid)
+
+	def test_add_note_label_falls_back_to_short_uuid(self):
+		uid = 'abf0d02a-b29f-4d36-84c4-91afda7e536d'
+		e = self._engine({'_uuid': uid, '_type': 'tag', 'name': '', 'value': '', 'match': '', 'category': 'general'})
+		out = list(dispatch_action({'action': 'add_note', '_uuid': uid, 'body': 'b'}, self._ctx(e)))
+		ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'add_note'][0]
+		self.assertEqual(ai.content, 'Note added to tag abf0d02a…')
+
 	def test_add_note_carries_changes(self):
 		finding = {'_uuid': 'u3', '_type': 'url', 'url': 'http://h/a'}
 		e = self._engine(finding)

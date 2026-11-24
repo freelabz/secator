@@ -528,7 +528,9 @@ class Command(Runner):
 			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.default_inputs != '':
 				# self.print_description()
 				# self.print_command()
-				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
+				# A skip is not a problem: report it as an Info (still printed) and record it through
+				# the explicit `skipped` flag (status SKIPPED), never as a Warning.
+				self.add_result(Info(message=f'{self.unique_name} skipped (no inputs)'))
 				for item in self.warnings:
 					self._print_item(item)
 				for item in self.errors:
@@ -1102,6 +1104,7 @@ class Command(Runner):
 		self.debug(f'return code: {self.return_code}', sub='end')
 
 		if self.killed:
+			self.revoked = True  # stopped on purpose (interrupt / revoke), not a failure
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
 
@@ -1444,14 +1447,17 @@ class Command(Runner):
 				shutil.copy(fpath, sudo_fpath)
 				fpath = sudo_fpath
 
+			# Quote the path: the reports folder embeds the workspace name, which may contain shell
+			# metacharacters (e.g. an apostrophe) that would otherwise break shlex.split / the shell.
+			quoted_fpath = shlex.quote(fpath)
 			if self.file_flag == OPT_PIPE_INPUT:
-				cmd = f'cat {fpath} | {cmd}'
+				cmd = f'cat {quoted_fpath} | {cmd}'
 			elif self.file_flag == OPT_SPACE_SEPARATED:
-				cmd += ' ' + ' '.join(inputs)
+				cmd += ' ' + ' '.join(shlex.quote(i) for i in inputs)
 			elif self.file_flag:
-				cmd += f' {self.file_flag} {fpath}'
+				cmd += f' {self.file_flag} {quoted_fpath}'
 			else:
-				cmd += f' {fpath}'
+				cmd += f' {quoted_fpath}'
 
 			self.inputs_path = fpath
 

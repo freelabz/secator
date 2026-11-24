@@ -83,3 +83,44 @@ class TestStopConsumingOnReceive(unittest.TestCase):
 				celery_signals.setup_handlers()
 			self.assertEqual(sig.task_received.connect.called, enabled)
 			sig.task_revoked.connect.assert_called_once_with(celery_signals.task_revoked_handler)
+
+
+class TestKillAfterTaskSignal(unittest.TestCase):
+	"""What the worker actually receives at the end of its one task, on a gevent / threads / solo
+	pool (the task runs in the worker's main process, whose parent is a wrapper or PID 1)."""
+
+	WORKER_PID = 4242
+	PARENT_PID = 1
+
+	def _run(self, *handlers):
+		task = SimpleNamespace(name='secator.celery.run_command', request=SimpleNamespace(is_eager=False))
+		self.addCleanup(celery_signals.clear_task_running)
+		with (
+			_kill_after_task(),
+			mock.patch('billiard.current_process', return_value=SimpleNamespace(name='MainProcess')),
+			mock.patch.object(celery_signals.os, 'getpid', return_value=self.WORKER_PID),
+			mock.patch.object(celery_signals.os, 'getppid', return_value=self.PARENT_PID),
+			mock.patch.object(celery_signals.os, 'kill') as kill,
+		):
+			for handler in handlers:
+				handler(task)
+		return kill
+
+	def test_postrun_warm_stops_the_worker_process_not_its_parent(self):
+		kill = self._run(
+			lambda t: celery_signals.task_prerun_handler(task_id='t1', task=t),
+			lambda t: celery_signals.task_postrun_handler(sender=t, task=t),
+		)
+		# SIGTERM is Celery's warm shutdown: the worker lets the in-flight task finish and its
+		# late ack go out before exiting (a cold SIGQUIT / SIGKILL would lose the ack).
+		kill.assert_called_once_with(self.WORKER_PID, celery_signals.signal.SIGTERM)
+
+	def test_no_signal_before_the_task_has_run(self):
+		consumer = mock.MagicMock()
+		consumer.task_consumer.queues = [SimpleNamespace(name='small-fast')]
+		kill = self._run(
+			lambda t: celery_signals.task_received_handler(sender=consumer, request=SimpleNamespace(name=t.name)),
+			lambda t: celery_signals.task_prerun_handler(task_id='t1', task=t),
+		)
+		kill.assert_not_called()
+		consumer.cancel_task_queue.assert_called_once_with('small-fast')

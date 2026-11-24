@@ -7,14 +7,20 @@ findings, status, input, prompts/steers, the findings side panel — comes from 
 """
 from __future__ import annotations
 
+import asyncio
+
 from rich.markup import escape
 from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from secator.tui.app import TUIApp
+from secator.tui.model_view import (
+	MODEL_VIEW_OFF, MODEL_VIEW_ON, message_signature, model_view_entries, model_view_summary)
 from secator.tui.render import finding_text, markdown_text
-from secator.tui.widgets import ActionPanel, HandbackPanel, RunnerPanel, SelectableStatic, SubagentRow
+from secator.tui.widgets import (
+	ActionPanel, ConversationScroll, HandbackPanel, ModelMessagePanel, RunnerPanel, SelectableStatic, SlashCommand,
+	SubagentRow)
 
 
 def _finding_sig(d: dict) -> tuple:
@@ -42,8 +48,30 @@ _ACTION_VERBS = {
 
 
 class AITUI(TUIApp):
+	SLASH_COMMANDS = {
+		**TUIApp.SLASH_COMMANDS,
+		"/model-view": SlashCommand(
+			"", "toggle the model view: the conversation as the model receives it",
+			"Shows the model-facing history as sent: the system prompt (folded), user turns and "
+			"the loop's injected instructions, assistant replies with their raw tool calls, and "
+			"every tool result. With sensitive-data encryption on, hosts, IPs and emails appear "
+			"as the [TYPE:hash] placeholders the model received. Display only: nothing sent or "
+			"saved changes. Run it again to return to the conversation."),
+	}
+	CSS = TUIApp.CSS + """
+	#model-view { display: none; }
+	.model-banner { color: #c2a0ff; margin: 0 0 1 0; }
+	.model-msg { height: auto; margin: 0 0 1 0; }
+	.model-msg-head { height: 1; }
+	.model-msg-head:hover { text-style: bold; }
+	.model-msg-body { height: auto; margin: 0 0 0 2; padding: 0 0 0 1; border-left: solid #2b3245; }
+	"""
+
 	def __init__(self, runner_builder=None, session="ai", mode="chat", initial_prompt="",
-	             initial_dangerous=False, session_name=""):
+	             initial_dangerous=False, session_name="", resume=False):
+		# On --resume the run first lists the saved sessions for the user to pick: say so (not
+		# a generic "starting…" that reads like the model answering), and keep the input
+		# hidden until a session is picked — there is nothing to type into before that.
 		super().__init__(
 			runner_builder,
 			title="secator ai",
@@ -52,6 +80,8 @@ class AITUI(TUIApp):
 			initial_dangerous=initial_dangerous,
 			initial_mode=mode or "auto",
 			session_name=session_name or str(session),
+			startup_status="Loading sessions…" if resume else "starting…",
+			lock_input=bool(resume),
 		)
 		self._in_subagent: str | None = None          # subagent session we're writing into
 		# sid -> SubagentRow for every spawned subagent still running. A dict (not a single
@@ -65,6 +95,150 @@ class AITUI(TUIApp):
 		# already shown once, as the row.
 		self._pending_finding_sigs: set = set()
 		self._suppressed_finding_sigs: set = set()
+		# ---- model view (/model-view) ----
+		# Display only: a read-only view of the runner's model-facing history (already
+		# encrypted when the encryptor is on). ``_model_source`` is a callable the ai task
+		# registers (``tui_set_model_source``) returning {"messages": [...], "encrypted": bool}.
+		self._model_source = None
+		self._model_view_on = False
+		self._mv_sigs: list = []   # signature of each history message rendered, for incremental refresh
+
+	# ---- model view ----
+	def tui_set_model_source(self, source) -> None:
+		"""Register the callable that snapshots the model-facing history (any thread)."""
+		self._model_source = source
+
+	def on_mount(self) -> None:
+		super().on_mount()
+		self._mv_lock = asyncio.Lock()   # one refresh / toggle at a time (they await mounts)
+		self.query_one("#views").mount(ConversationScroll(id="model-view", classes="subview"))
+		self.set_interval(1.0, self._tick_model_view)   # follow the history while the view is on
+
+	def _model_view(self) -> VerticalScroll:
+		return self.query_one("#model-view", VerticalScroll)
+
+	def _model_snapshot(self) -> "tuple[list, bool]":
+		source = self._model_source
+		if source is None:
+			return [], False
+		try:
+			snap = source() or {}
+		except Exception:  # noqa: BLE001 - display only: a racing history must not crash the UI
+			return None, False
+		msgs = snap.get("messages") or []
+		return [m for m in msgs if isinstance(m, dict)], bool(snap.get("encrypted"))
+
+	def _model_banner(self, messages, encrypted) -> Static:
+		if self._model_source is None:
+			sub = "no conversation with the model yet"
+		else:
+			sub = model_view_summary(messages, encrypted)
+		return Static(Text.assemble(
+			(f"◉ {MODEL_VIEW_ON}", "bold #c2a0ff"), "\n",
+			(f"{sub} · /model-view to turn off", "#6b7187")), classes="model-banner", id="model-banner")
+
+	async def _refresh_model_view(self, full: bool = False) -> None:
+		"""Render the model-facing history into the model view: append the messages added
+		since the last refresh, or re-render everything when the history was rewritten
+		(compaction, a new system prompt) or ``full`` is set."""
+		async with self._mv_lock:
+			if self._model_view_on:
+				await self._refresh_model_view_locked(full)
+
+	async def _refresh_model_view_locked(self, full: bool) -> None:
+		messages, encrypted = self._model_snapshot()
+		if messages is None:
+			return
+		view = self._model_view()
+		try:
+			sigs = [message_signature(m) for m in messages]
+		except Exception:  # noqa: BLE001 - a message mutated mid-read: try again next tick
+			return
+		n = len(self._mv_sigs)
+		at_end = view.max_scroll_y <= 0 or view.scroll_y >= view.max_scroll_y - 1
+		if full or sigs[:n] != self._mv_sigs:
+			await view.remove_children()
+			await view.mount(self._model_banner(messages, encrypted))
+			new = messages
+		else:
+			if len(sigs) == n:
+				return
+			new = messages[n:]
+			try:
+				await self.query_one("#model-banner").remove()
+			except Exception:  # noqa: BLE001
+				pass
+			banner = self._model_banner(messages, encrypted)
+			if view.children:
+				await view.mount(banner, before=0)
+			else:
+				await view.mount(banner)
+		self._mv_sigs = sigs
+		panels = [ModelMessagePanel(e["role"], e["label"], e["body"], e["collapsed"]) for e in model_view_entries(new)]
+		if panels:
+			await view.mount_all(panels)
+		if full or at_end:
+			view.scroll_end(animate=False)
+
+	async def _tick_model_view(self) -> None:
+		if self._model_view_on:
+			await self._refresh_model_view()
+
+	async def _slash_model_view(self, text: str) -> None:
+		"""`/model-view`: toggle the model view (display only — nothing sent or stored changes)."""
+		await self._set_model_view(not self._model_view_on)
+
+	async def _set_model_view(self, on: bool) -> None:
+		view = self._model_view()
+		async with self._mv_lock:
+			self._model_view_on = bool(on)
+			self._mv_sigs = []
+			if self._model_view_on:
+				await self._refresh_model_view_locked(full=True)
+				self._convo().display = False
+				view.display = True
+			else:
+				view.display = False
+				await view.remove_children()
+				self._convo().display = True
+		self._render_meta()
+		if not self._model_view_on:
+			await self._append_note(Text(f"◉ {MODEL_VIEW_OFF}", style="#6b7187"))
+
+	def _show_prompt(self, question, pending, multiple=False, command="", solo=False) -> None:
+		# A choice list or an approval needs the conversation's context (the reply explaining
+		# it renders there): leave the model view so the question isn't answered blind.
+		if self._model_view_on and (pending[3] == "permission" or pending[2]):
+			self.call_later(self._set_model_view, False)
+		super()._show_prompt(question, pending, multiple, command, solo)
+
+	def _meta_extra(self) -> str:
+		return "[b #c2a0ff]◉ model view[/] [#5b6070](/model-view)[/]" if self._model_view_on else ""
+
+	def _show_main(self) -> None:
+		super()._show_main()
+		if self._model_view_on:   # back from a drill-in lands on the model view, not the convo
+			self._convo().display = False
+			self._model_view().display = True
+
+	def _open_subview(self, sid: str) -> None:
+		if sid in self._subviews:
+			self._model_view().display = False
+		super()._open_subview(sid)
+
+	def _active_view(self) -> VerticalScroll:
+		view = self._model_view()
+		return view if view.display else super()._active_view()
+
+	def action_expand_all(self) -> None:
+		# ctrl+o in the model view folds/unfolds its messages instead of the (hidden) runner cards
+		if not self._model_view().display:
+			return super().action_expand_all()
+		panels = list(self._model_view().query(ModelMessagePanel))
+		if panels:
+			expand = any(p._collapsed for p in panels)
+			for p in panels:
+				p.set_collapsed(not expand)
 
 	def _should_skip_finding(self, d: dict) -> bool:
 		# Suppress the standalone card for a finding already shown as an add_finding row.
@@ -327,7 +501,7 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	app = AITUI(
 		None, session=str(session)[:30], mode=_mode,
 		initial_prompt=opts.get("prompt", ""), initial_dangerous=bool(opts.get("dangerous")),
-		session_name=opts.get("session_name") or "")
+		session_name=opts.get("session_name") or "", resume=bool(opts.get("resume")))
 
 	# Tap the item stream via a module-level on_item hook (see `_tui_feed` — it must not be
 	# a local closure or the runner can't pickle its hooks). It renders onto this `app`

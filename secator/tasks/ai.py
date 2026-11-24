@@ -2,6 +2,7 @@
 """AI-powered penetration testing task."""
 import json
 import re
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -32,7 +33,7 @@ from secator.ai.session import (
 	print_session_results)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
-	_decrypt_dict, _build_action_display,
+	_decrypt_dict, _build_action_display, TOOL_ACK_RESULT,
 )
 
 
@@ -103,6 +104,14 @@ def fast_detect_mode(prompt):
 	return None
 
 
+def _is_revoked(task_id):
+	"""Whether this Celery task id was revoked on this worker. The revoke control handler adds
+	the id to the worker's in-memory `revoked` set before terminating, and a gevent pool runs
+	the task in that same process. False without a worker (CLI / sync runs) or a task id."""
+	state = sys.modules.get("celery.worker.state")
+	return bool(task_id and state) and task_id in state.revoked
+
+
 def _truncate_label(text, fallback):
 	"""Truncate ``text`` to 80 chars with an ellipsis; empty text falls back to ``fallback``."""
 	return (text[:80] + '...') if text and len(text) > 80 else (text or fallback)
@@ -165,6 +174,10 @@ def _yield_tool_results(runner, collected):
 			{k: v for k, v in r.items() if k not in strip_fields}
 			for r in group_results
 		]
+		# Secret findings (secret scanners) often hold secrets with no recognizable format the
+		# text patterns would catch; encrypt their value structurally, before serialization.
+		if runner.encryptor:
+			serialized = [runner.encryptor.encrypt_finding(r) for r in serialized]
 		# Uniform runner-scope contract: a runner's findings are ALWAYS scoped by
 		# `_context.<type>_id` == runner.id (the minted {type}_id) — for task/workflow/scan
 		# alike. That single handle is what the model re-reads by. NOT `task_chunk_id`: it
@@ -249,6 +262,41 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def _ack_resultless_calls(runner, actions, collected):
+	"""Record an acknowledged tool result for each dispatched call that produced none.
+
+	Some tools finish without an item the agent loop turns into a tool result (their only
+	output is a display item, e.g. ``update_plan``). Give each such call an explicit
+	acknowledged result in history, and yield it so the driver persists it too. Every
+	dispatched call then has a recorded result, so a restored transcript tells a call that
+	ran apart from one that was interrupted before it returned (which the history repair
+	answers with a "not run" result instead). ``stop`` is skipped: it ends the turn and the
+	user's answer follows it directly.
+	"""
+	answered = {(r.get("_context") or {}).get("tool_call_id") for r in collected if isinstance(r, dict)}
+	for action in actions:
+		tc_id = action.get("tool_call_id")
+		tc_name = action.get("tool_call_name") or ""
+		if not tc_id or tc_id in answered or tc_name == "stop":
+			continue
+		answered.add(tc_id)
+		content = maybe_encrypt(TOOL_ACK_RESULT, runner.encryptor)
+		runner.history.add_tool_result(tc_name, tc_id, content)
+		yield Ai(content=f"[{tc_name}] done",
+		         ai_type="tool_result",
+		         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": content}),
+		         _context=dict(runner.context))
+
+
+def write_system_prompt(prompt, mode):
+	"""Write the rendered system prompt to stdout, byte-for-byte (no Rich markup,
+	emoji, highlighting or wrapping), with its header on stderr so piping stdout to
+	a file captures only the prompt."""
+	console.print(f"[bold orange3]System prompt ({mode})[/]")
+	sys.stdout.write(prompt if prompt.endswith("\n") else prompt + "\n")
+	sys.stdout.flush()
+
+
 def resolve_llm_credentials(
 	caller_api_base, caller_api_key, config_api_base, config_api_key,
 	disallow_config_token=False,
@@ -294,12 +342,13 @@ class ai(PythonRunner):
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
-		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name
-		# (e.g. add_suggestion). Merged with CONFIG.addons.ai.extra_tools; every name must
-		# resolve to a loaded tool (templates dir / SECATOR_AI_TOOLS_DIRS / bundle). Generic
-		# and driver-agnostic — the same option lets any caller (CLI, a chore, the platform)
-		# grant a specific external tool to a run without a core edit.
-		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tool names to add on top of the mode baseline"},  # noqa: E501
+		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name or
+		# fnmatch glob (e.g. add_suggestion, sysreptor_*). Merged with CONFIG.addons.ai.extra_tools;
+		# every exact name must resolve to a loaded tool; a glob expands to the matching external
+		# tools (templates dir / SECATOR_AI_TOOLS_DIRS / bundle) and warns if none match. Generic
+		# and driver-agnostic — the same option lets any caller (CLI, a template, a library call)
+		# grant external tools to a run without a core edit.
+		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor_*,add_suggestion'); globs match external tools only"},  # noqa: E501
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",
@@ -357,7 +406,7 @@ class ai(PythonRunner):
 		"show_prompt": {
 			"is_flag": True,
 			"default": False,
-			"help": "Render and display the system prompt, then exit"
+			"help": "Write the rendered system prompt to stdout, then exit"
 		},
 		"dangerous": {
 			"is_flag": True,
@@ -407,17 +456,23 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
-		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
-		if self._credential_error:
-			yield Error(message=self._credential_error)
-			return
+		# A mode name passed as the model (`--model chat`) is almost always a typo for
+		# `--mode chat`: say so instead of silently using the wrong mode / model.
+		model = getattr(self, "model", None)
+		if isinstance(model, str) and normalize_mode(model) in MODES:
+			yield Warning(message=f'--model "{model}" is a mode name, not an LLM model: did you mean --mode {model}?')
 
-		# Show prompt mode (diagnostic)
+		# Show prompt mode (diagnostic). Rendering the prompt needs no LLM credentials,
+		# so it runs before the credential check.
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "scan"
 			prompt = self._system_prompt_for(show_mode)
-			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
-			console.print(prompt, highlight=False, soft_wrap=True)
+			write_system_prompt(prompt, show_mode)
+			return
+
+		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
+		if self._credential_error:
+			yield Error(message=self._credential_error)
 			return
 
 		# Verify model is configured and reachable
@@ -437,18 +492,22 @@ class ai(PythonRunner):
 			# A frontend that owns the display (the Textual TUI) can't host the plain-console
 			# picker — it drives the terminal directly and collides with Textual. Route the
 			# choice through the backend so that frontend renders the session list instead.
+			from secator.ai.session import list_sessions
+			# Scanning the reports folders can take a moment: say what is happening, so the
+			# wait isn't mistaken for the model answering.
+			with maybe_status("[bold orange3]Loading sessions…[/]", spinner="dots"):
+				sessions = list_sessions()
 			if getattr(self.backend, "owns_display", False):
 				# `show_session_picker` prints its own "no sessions" notice on the console; a
 				# display-owning backend has no console, so surface the same thing as a Warning
 				# (and distinguish "none to resume" from a cancelled pick, both of which the
 				# picker signals as None).
-				from secator.ai.session import list_sessions
-				if not list_sessions():
+				if not sessions:
 					yield Warning(message="No previous AI sessions found.")
 					return
-				session = pick_session_via_backend(self.backend, session_id=self.session_id)
+				session = pick_session_via_backend(self.backend, session_id=self.session_id, sessions=sessions)
 			else:
-				session = show_session_picker()
+				session = show_session_picker(sessions=sessions)
 			if session is None:
 				return
 			self.session_name = session["name"]
@@ -469,9 +528,10 @@ class ai(PythonRunner):
 				# uses — the user's next answer re-detects the real mode and overwrites it.
 				self.mode = self.mode or "chat"
 				self._rebuild_prompt_and_tools()
-				self.history = restore_history_from_db(
-					self.session_id, self._get_query_engine(),
-					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
+					self.history = restore_history_from_db(
+						self.session_id, self._get_query_engine(),
+						model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
 				# Placeholders minted by earlier turns must still decrypt in tool calls/display.
 				self._restore_pii_map()
 				# Show the prior conversation + findings on the console (the unified
@@ -485,10 +545,15 @@ class ai(PythonRunner):
 				# Legacy session: its docs carry no `_context.session_id`, so the unified
 				# restore would rebuild empty history. Fall back to the local
 				# history.json replay instead.
-				self.history = replay_session(session)
+				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
+					self.history = replay_session(session)
 				# This run keeps its fresh session id, so seed the placeholder map from the
 				# PRIOR session's stored map (its id is in the session's runner info).
 				self._restore_pii_map(session_id=session.get("store_session_id"))
+				# Re-key the restored map under THIS run's id right away: the next save points
+				# the session file at this id, so a later resume must find the map here even
+				# if this run ends before minting a new placeholder.
+				self._persist_pii_map()
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
@@ -560,7 +625,7 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _resolve_context_includes(self):
-		"""Resolve the forced AI-context filenames (profiles' ``ai_context``) for this run.
+		"""Resolve the forced AI-context files (profiles' ``ai_context``: names or paths relative to ``ai/``).
 
 		Merges filenames declared by any applied profile with any inherited from the
 		run context (``ai_context_includes``) — a subagent does NOT receive the
@@ -856,7 +921,7 @@ class ai(PythonRunner):
 		"""
 		if self.interactive == "remote":
 			return
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		save_history(self.history, self.reports_folder, debug_fn=self.debug, session_id=self.session_id)
 
 	# -------------------------------------------------------------------------
 	# Turn-level idempotency (remote/Celery redelivery)
@@ -1061,6 +1126,14 @@ class ai(PythonRunner):
 						"context_window": get_context_window(self.model),
 					})
 
+				# Persist the placeholder map BEFORE the call: the prompt (and any steer or
+				# answer drained above) was encrypted into it, and the call can take minutes.
+				# Persisting only after the turn's tool dispatch left the stored map empty
+				# while the first call ran, so a reader of the session's map saw "nothing
+				# encrypted" even though the model only received placeholders. No-op unless
+				# the map grew.
+				self._persist_pii_map()
+
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
 				by_role = self.history.count_tokens_by_role(self.model)
@@ -1197,6 +1270,13 @@ class ai(PythonRunner):
 
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
+					# Revoked while a child runner ran in-process: the runner absorbed the
+					# termination and reported a failed tool. End now (REVOKED): no further LLM
+					# call, no reply wait. A tool that failed for any other reason carries on.
+					if _is_revoked(self._turn_uuid()):
+						self.revoked = True
+						self._save_history()
+						return
 					stop_reason = dispatch_result.get("stop_reason")
 					stop_choices = dispatch_result.get("stop_choices")
 					stop_multiple = dispatch_result.get("stop_multiple", False)
@@ -1441,6 +1521,9 @@ class ai(PythonRunner):
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
 		self.isolated = self.get_opt_value("isolated")
+		# Per-run extra tools (names or globs), merged with CONFIG.addons.ai.extra_tools by
+		# build_tool_schemas.
+		self.extra_tools = self.get_opt_value("extra_tools")
 		self.in_scope = self.get_opt_value("in_scope") or []
 		self.out_of_scope = self.get_opt_value("out_of_scope") or []
 		# Resolve in-scope hostnames to their current IPs so the AI can reach an
@@ -1478,6 +1561,11 @@ class ai(PythonRunner):
 		self._sync = False if self.async_tasks else self.sync
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
+		if self.interactive == "tui":
+			# the TUI's /model-view renders this history read-only (display only)
+			tui = get_tui()
+			if tui is not None and hasattr(tui, "tui_set_model_source"):
+				tui.tui_set_model_source(self._model_view_snapshot)
 		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results else "workspace"
 		self.permission_engine = PermissionEngine(
@@ -1602,7 +1690,11 @@ class ai(PythonRunner):
 		else:
 			try:
 				selection_prompt = load_prompt("modes/_selection.md")
-				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				# The intent model is a model call like any other: send the prompt encrypted.
+				# getattr: a missing encryptor must not raise here (the except below would
+				# silently turn intent detection into "chat").
+				prompt = maybe_encrypt(self.prompt, getattr(self, "encryptor", None))
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
@@ -1656,6 +1748,17 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Mid-flight steering
 	# -------------------------------------------------------------------------
+
+	def _model_view_snapshot(self):
+		"""Display-only copy of the model-facing history, for the TUI's model view.
+
+		The history is stored as sent: when the encryptor is on, every message already carries
+		the ``[TYPE:hash]`` placeholders the model received, so the view shows it as is — no
+		re-encryption, no new placeholder, the encryptor's map is never touched. Shallow copies
+		only: the loop keeps mutating the live history on its own thread.
+		"""
+		msgs = [dict(m) for m in list(self.history.messages) if isinstance(m, dict)]
+		return {"messages": msgs, "encrypted": self.encryptor is not None}
 
 	def _report_tui_meta(self, token_count=None, ctx_window=None):
 		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
@@ -2108,6 +2211,7 @@ class ai(PythonRunner):
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)
+		yield from _ack_resultless_calls(self, actions, collected)
 
 		return {
 			"stop_reason": stop_reason,

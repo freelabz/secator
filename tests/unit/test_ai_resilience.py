@@ -446,3 +446,56 @@ class TestUncappedIterationsRunLoop(unittest.TestCase):
 
 	def test_zero_runs_to_ceiling(self):
 		self._assert_runs(0)
+
+
+# ---------------------------------------------------------------------------
+# 3. Revoked while a tool call runs in-process
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(HAS_AI, "AI addon not installed")
+class TestRevokedDuringToolCall(unittest.TestCase):
+	"""A child runner run in-process absorbs the termination raised by a revoke and
+	reports a failed tool. The loop must end right there when the task's OWN Celery id
+	was revoked, and keep going (the model reacts to the failure) in every other case."""
+
+	TOOL_CALL = _tc("run_task", {"name": "nmap", "targets": ["10.0.0.1"]})
+
+	def _run_failed_tool(self, celery_id=None, revoked_ids=()):
+		import celery.worker.state as state
+		task = _make_loop_task()
+		task.revoked = False
+		if celery_id:
+			task.context["celery_id"] = celery_id
+		tool_context = {"tool_call_id": self.TOOL_CALL.id, "tool_call_name": "run_task"}
+
+		def failed_tool(*a, **k):
+			yield Error(message="nmap GreenletExit", _context=dict(tool_context))
+
+		with patch("secator.tasks.ai.safe_dispatch_action", side_effect=failed_tool), \
+				patch.object(state, "revoked", set(revoked_ids)):
+			_, calls, aborted = _run(task, [_resp(tool_calls=[self.TOOL_CALL])])
+		self.assertIsNone(aborted)
+		return task, calls
+
+	def test_own_id_revoked_ends_without_another_llm_call(self):
+		task, calls = self._run_failed_tool(celery_id="own-id", revoked_ids=["own-id"])
+		self.assertEqual(calls, 1)
+		self.assertTrue(task.revoked)
+
+	def test_failed_tool_not_revoked_continues(self):
+		task, calls = self._run_failed_tool(celery_id="own-id", revoked_ids=["other-id"])
+		self.assertGreaterEqual(calls, 2)
+		self.assertFalse(task.revoked)
+
+	def test_no_celery_context_continues(self):
+		task, calls = self._run_failed_tool(celery_id=None, revoked_ids=["own-id"])
+		self.assertGreaterEqual(calls, 2)
+		self.assertFalse(task.revoked)
+
+	def test_helper_is_false_outside_a_worker(self):
+		import sys
+		from secator.tasks.ai import _is_revoked
+		with patch.dict(sys.modules):
+			sys.modules.pop("celery.worker.state", None)
+			self.assertFalse(_is_revoked("own-id"))
+		self.assertFalse(_is_revoked(None))
