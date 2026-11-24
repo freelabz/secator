@@ -141,7 +141,7 @@ def _in_workspace(doc, workspace_id):
 		return True
 	context = doc.get('context') or {}
 	owners = {str(v) for v in (context.get('workspace_id'), context.get('workspace_name')) if v}
-	return not owners or str(workspace_id) in owners
+	return str(workspace_id) in owners
 
 
 def find_runner_doc(engine, runner_id, runner_type=None, workspace_id=None):

@@ -562,24 +562,19 @@ def _runner_lookup(action, ctx):
 
 
 def _stop_live_runner(runner):
-	"""Best-effort stop of a runner object held by this process: the cooperative stop flag (an
-	``ai`` subagent loop ends at its next iteration), the Celery revoke of its tasks when it
-	runs asynchronously (``Runner.stop_celery_tasks``), and a SIGTERM to its process."""
+	"""Stop a runner object held by this process through the paths that actually end it:
+	the Celery revoke of its tasks when it runs asynchronously (``Runner.stop_celery_tasks``),
+	else a SIGTERM to its running command process. Returns ``(how, revoked_ids)``; ``how`` is
+	"" when neither applies (e.g. an in-process workflow between commands): nothing stopped."""
 	import signal
-	try:
-		runner.stop_requested = True
-	except Exception:  # noqa: BLE001 - stopping is best-effort
-		pass
-	try:
-		if getattr(runner, "celery_ids_map", None) and not getattr(runner, "sync", True):
-			runner.stop_celery_tasks()
-	except Exception:  # noqa: BLE001
-		pass
-	try:
-		if callable(getattr(runner, "stop_process", None)):
-			runner.stop_process(exit_ok=True, sig=signal.SIGTERM)
-	except Exception:  # noqa: BLE001
-		pass
+	if not getattr(runner, "sync", True) and getattr(runner, "celery_ids_map", None):
+		revoked = list(runner.celery_ids_map)
+		runner.stop_celery_tasks()
+		return "revoked its Celery tasks", revoked
+	if getattr(runner, "process", None) is not None and callable(getattr(runner, "stop_process", None)):
+		runner.stop_process(exit_ok=True, sig=signal.SIGTERM)
+		return "killed its running command", []
+	return "", []
 
 
 class GetRunner(BaseTool):
@@ -693,11 +688,11 @@ class StopRunner(BaseTool):
 			                   message=f"{rtype} {name} already finished ({status or 'done'}): nothing to stop.")
 			return
 
-		# Ownership: spawned by this ai task (recorded with its run card), or by a subagent it
-		# spawned (the runner's conversation is that subagent's, or names this one as parent).
+		# Ownership: spawned by this ai task (recorded with its run card), or directly by a
+		# subagent this ai task spawned (the runner belongs to that subagent's conversation).
+		# Anything else (incl. runners of earlier ai runs or nested subagents) asks the user.
 		owned = live is not None or (
-			bool(doc_ctx.get("session_id")) and doc_ctx.get("session_id") in ctx.subagent_sessions) or (
-			bool(ctx.session_id) and doc_ctx.get("parent_session_id") == ctx.session_id)
+			bool(doc_ctx.get("session_id")) and doc_ctx.get("session_id") in ctx.subagent_sessions)
 		if not owned:
 			is_remote = isinstance(ctx.backend, RemoteBackend)
 			denial = yield from _ask_and_check(
@@ -719,10 +714,11 @@ class StopRunner(BaseTool):
 		# its own task id for a top-level runner; a child's celery_id may be its parent's).
 		revoked, how = [], ""
 		if live is not None:
-			if not getattr(live, "sync", True):
-				revoked = list(getattr(live, "celery_ids_map", None) or {})
-			_stop_live_runner(live)
-			how = "stopped in place"
+			try:
+				how, revoked = _stop_live_runner(live)
+			except Exception as e:  # noqa: BLE001 - report the failure, never break the loop
+				yield Warning(message=f"Could not stop {rtype} {name}: {e}", _context=context)
+				return
 		else:
 			from secator.celery import revoke_task
 			celery_ids = list(doc_ctx.get("celery_ids") or [])
@@ -737,9 +733,11 @@ class StopRunner(BaseTool):
 					yield Warning(message=f"Could not revoke Celery task {cid}: {e}", _context=context)
 			how = "revoked its Celery tasks" if revoked else ""
 		if not how:
+			where = ("it runs in this process with no command or Celery task to stop right now"
+			         if live is not None else "it runs inside another process and has no Celery task to revoke")
+			hint = " Stop the runner it runs under instead." if (doc or {}).get("has_parent") else ""
 			yield self._result(context, doc_id, rtype, name, status or "RUNNING", stopped=False, message=(
-				f"Could not stop {rtype} {name}: it runs inside another process and has no Celery task "
-				f"to revoke."))
+				f"Could not stop {rtype} {name}: {where}.{hint}"))
 			return
 		new_status = None
 		if engine is not None:

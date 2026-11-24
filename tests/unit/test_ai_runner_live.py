@@ -43,7 +43,7 @@ def _doc(status="RUNNING", **ctx):
 	return {"name": "httpx", "status": status, "done": status != "RUNNING", "progress": 40,
 	        "targets": ["http://a", "http://b", "http://c", "http://d", "http://e", "http://f"],
 	        "start_time": time.time() - 30, "end_time": None, "last_updated_db": time.time() - 2,
-	        "config": {"type": "task", "name": "httpx", "description": "Probe"}, "context": dict(ctx)}
+	        "config": {"type": "task", "name": "httpx", "description": "Probe"}, "context": {"workspace_id": "ws", **ctx}}
 
 
 def _finding(_type, uuid, **kw):
@@ -118,7 +118,7 @@ class TestGetRunnerPerBackend(unittest.TestCase):
 		self._mocked(ApiBackend)
 
 	def test_workflow_children_and_unknown(self):
-		wf = {"_id": "wf-1", "name": "recon", "status": "RUNNING", "context": {"workflow_id": "wf-1"}}
+		wf = {"_id": "wf-1", "name": "recon", "status": "RUNNING", "context": {"workflow_id": "wf-1", "workspace_id": "ws"}}
 		kids = [{"_id": "k1", "name": "httpx", "status": "SUCCESS", "progress": 100,
 		         "context": {"workflow_id": "wf-1", "task_id": "k1"}},
 		        {"_id": "k2", "name": "nuclei", "status": "RUNNING", "progress": 10,
@@ -162,6 +162,7 @@ class TestStopRunner(unittest.TestCase):
 
 	def test_own_in_process_runner_stops_without_asking(self):
 		runner = _runner(task_chunk_id="chunk-1", task_id="tid-1")
+		runner.process = object()  # a command process is running
 		self.ctx.record_runner(runner, "chunk-1", "tid-1")
 		self._doc("chunk-1", task_chunk_id="chunk-1")
 		self.docs[("chunk-1", "task")]["context"]["task_id"] = "tid-1"
@@ -170,9 +171,16 @@ class TestStopRunner(unittest.TestCase):
 		self.assertEqual(errors, [])
 		backend.ask_user.assert_not_called()
 		self.assertTrue(dicts[0]["stopped"])
-		self.assertIn("stopped in place", dicts[0]["message"])
+		self.assertIn("killed its running command", dicts[0]["message"])
 		runner.stop_process.assert_called()
-		self.assertTrue(runner.stop_requested)
+
+	def test_own_runner_with_nothing_to_stop_says_so(self):
+		runner = _runner(task_chunk_id="chunk-1", task_id="tid-1")  # sync, no process right now
+		self.ctx.record_runner(runner, "chunk-1", "tid-1")
+		self._doc("chunk-1")
+		dicts, _ = self._stop("chunk-1", MagicMock())
+		self.assertFalse(dicts[0]["stopped"])
+		self.assertIn("Could not stop", dicts[0]["message"])
 
 	def test_own_dispatched_runner_revokes_its_celery_tasks(self):
 		runner = _runner(sync=False, celery_ids=["cel-1", "cel-2"], task_chunk_id="chunk-1", task_id="tid-1")
@@ -228,17 +236,29 @@ class TestStopRunner(unittest.TestCase):
 
 	@patch("secator.celery.revoke_task")
 	def test_subagent_runner_is_owned(self, revoke):
-		for ctx in ({"parent_session_id": "sess-1"}, {"session_id": "sub-1"}):
-			self.ctx.subagent_sessions.add("sub-1")
-			self._foreign(**ctx)
-			backend = MagicMock()
-			dicts, _ = self._stop("scan-9", backend)
-			backend.ask_user.assert_not_called()
-			self.assertTrue(dicts[0]["stopped"])
+		self.ctx.subagent_sessions.add("sub-1")
+		self._foreign(session_id="sub-1")
+		backend = MagicMock()
+		dicts, _ = self._stop("scan-9", backend)
+		backend.ask_user.assert_not_called()
+		self.assertTrue(dicts[0]["stopped"])
+
+	@patch("secator.celery.revoke_task")
+	def test_runner_of_another_runs_subagent_asks(self, revoke):
+		"""Same conversation, but a subagent this ai task did not spawn: not ours."""
+		self._foreign(session_id="sub-old", parent_session_id="sess-1")
+		backend = MagicMock()
+		backend.ask_user.return_value = {"answer": "deny"}
+		self._stop("scan-9", backend)
+		backend.ask_user.assert_called_once()
+		revoke.assert_not_called()
 
 	def test_other_workspace_runner_is_not_found(self):
 		self._doc("scan-9", "scan")
 		self.docs[("scan-9", "scan")]["context"]["workspace_id"] = "other-ws"
+		_, errors = self._stop("scan-9", MagicMock())
+		self.assertIn("not found", errors[0].message)
+		del self.docs[("scan-9", "scan")]["context"]["workspace_id"]  # no owner: not ours either
 		_, errors = self._stop("scan-9", MagicMock())
 		self.assertIn("not found", errors[0].message)
 
