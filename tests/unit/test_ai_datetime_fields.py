@@ -127,7 +127,19 @@ class TestOutputTypeDatetimeFields(unittest.TestCase):
 
 	def test_non_utc_aware_datetime_is_converted_not_relabelled(self):
 		local = DT.astimezone(timezone(timedelta(hours=2)))
-		self.assertEqual(Certificate(host='a.com', not_after=local).not_after, DT)
+		out = Certificate(host='a.com', not_after=local).not_after
+		self.assertEqual(out, DT)
+		self.assertEqual(out.utcoffset(), timedelta(0))
+		self.assertEqual(out.hour, 20)
+
+	def test_task_produced_datetimes_are_utc(self):
+		# Naive datetimes from tasks (testssl, whois parsers) are stored as aware UTC.
+		naive = DT.replace(tzinfo=None)
+		cert = Certificate(host='a.com', not_before=naive, not_after=naive)
+		dom = Domain(domain='a.com', creation_date=naive, expiration_date=naive, updated_date=naive)
+		for value in (cert.not_before, cert.not_after, dom.creation_date, dom.expiration_date, dom.updated_date):
+			self.assertEqual(value, DT)
+			self.assertEqual(value.utcoffset(), timedelta(0))
 
 
 class _FakeCursor(list):
@@ -222,7 +234,10 @@ class TestUpdateFindingDatetimePerDriver(unittest.TestCase):
 		return list(tool.run({'action': tool.action, **action}, ctx))
 
 	def _check(self, driver):
-		for name in ('iso_space_offset', 'iso_t_offset', 'epoch_s', 'mongo_date_iso'):
+		# includes non-UTC offsets: the stored value must be the UTC instant, serialized exactly like
+		# a task-produced (UTC) datetime on that driver.
+		for name in ('iso_space_offset', 'iso_t_offset', 'iso_other_offset', 'iso_compact_offset', 'iso_naive',
+		             'epoch_s', 'epoch_ms', 'mongo_date_iso'):
 			with self.subTest(fmt=name):
 				engine = self._engine(driver)
 				out = self._run(engine, 'update_finding', {
@@ -232,6 +247,10 @@ class TestUpdateFindingDatetimePerDriver(unittest.TestCase):
 				self.assertEqual(stored['not_after'], self.reference)
 				self.assertEqual(stored['not_before'], self.reference)
 				self.assertEqual(type(stored['not_after']), type(self.reference))
+				if isinstance(stored['not_after'], str):
+					self.assertTrue(stored['not_after'].endswith('+00:00'), stored['not_after'])
+				else:
+					self.assertEqual(stored['not_after'].utcoffset(), timedelta(0))
 				loaded = Certificate.load(stored)
 				self.assertEqual((loaded.not_before, loaded.not_after), (DT, DT))
 
