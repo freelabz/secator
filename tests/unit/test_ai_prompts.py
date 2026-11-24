@@ -459,14 +459,19 @@ class TestPrompts(unittest.TestCase):
 				self.assertIn("Write every target literally", section, f"{label}: missing literal-target rule")
 				self.assertIn("legal and contractual", section, f"{label}: missing rationale")
 				self.assertIn("listed in scope", section, f"{label}: missing listed-form exception")
+				self.assertIn("False positives on non-target strings", section, f"{label}: missing false-positive item")
+				self.assertIn("justify why in your reply", section, f"{label}: false-positive item must require a justification")
+				self.assertIn("Never use this for a host, IP or URL you will send traffic to", section,
+				              f"{label}: false-positive item must exclude real targets")
 
-	def test_guardrails_isolation_hint_excludes_scope_denials(self):
-		"""The 'retry in an isolated container' hint must not read as a way around a
-		scope denial."""
+	def test_guardrails_has_no_container_retry_hint(self):
+		"""run_shell already runs in the sandbox when --isolated is set (and the model cannot
+		choose it otherwise), so guardrails must not suggest retrying a denied command in a
+		Docker container."""
 		from secator.ai.prompts import load_prompt
 		g = load_prompt("constraints/guardrails.md")
-		self.assertIn("non-scope reason", g)
-		self.assertIn("never applies to a target that is denied or out of scope", g)
+		self.assertNotIn("isolated Docker container", g)
+		self.assertNotIn("<isolation> section", g)
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""
