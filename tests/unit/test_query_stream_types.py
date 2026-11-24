@@ -242,7 +242,8 @@ class _QueryCliBase:
 				self.assert_reads(calls, expected, flags)
 		# the fixture is not trivially empty for the cases above
 		got, _ = self._invoke('technology', ['--group'])
-		self.assertEqual(len(got['technology']), 3)
+		# one row per product:version: 12 distinct pairs, minus the nginx:0 record updated to php:0
+		self.assertEqual(len(got['technology']), 11)
 
 
 class TestQueryCliJson(_QueryCliBase, unittest.TestCase):
