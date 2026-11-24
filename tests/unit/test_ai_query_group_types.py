@@ -94,8 +94,9 @@ EXPECTED = {
 		'10.0.0.2:443': ['po4'], '10.0.0.3:443': ['po5']}),
 	'subdomain': (('host',), '_source', {'x.example.com': ['sd1', 'sd2'], 'y.example.com': ['sd3']}),
 	'url': (('url',), '_source', {'http://a.example.com/': ['ur1', 'ur2'], 'http://a.example.com/login': ['ur3']}),
+	# Technology canonicalizes the product to its catalog display name ('php' -> 'PHP').
 	'technology': ((('{product}:{version}', 'product'),), 'match', {
-		'nginx:1.18': ['te1', 'te2'], 'nginx:1.25': ['te3'], 'php': ['te4']}),
+		'nginx:1.18': ['te1', 'te2'], 'nginx:1.25': ['te3'], 'PHP': ['te4']}),
 	'certificate': (('host', 'fingerprint_sha256'), '_source', {
 		'a.example.com | f1': ['ce1', 'ce2'], 'a.example.com | f2': ['ce3']}),
 	'vulnerability': ((('id', 'name'),), 'matched_at', {'CVE-2021-44228': ['vu1', 'vu2'], 'Weak cipher': ['vu3']}),
