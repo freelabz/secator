@@ -11,7 +11,10 @@ from secator.rich import console
 
 # libyaml's C SafeLoader parses templates ~10x faster than the pure-Python one (templates are
 # loaded at every CLI start); fall back when PyYAML was built without libyaml.
-_YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+try:
+	from yaml import CSafeLoader as _YAML_LOADER
+except ImportError:  # pragma: no cover - PyYAML built without libyaml
+	from yaml import SafeLoader as _YAML_LOADER
 
 
 class TemplateLoader(DotMap):
