@@ -18,15 +18,15 @@ if ADDONS_ENABLED['ai']:
 		_MAX_SUBAGENTS_PER_TURN,
 	)
 	from secator.ai.tools._sandbox import _sandbox_image
-	from secator.ai.tools.run_shell import _MAX_SHELL_OUTPUT_CHARS
+	from secator.ai.tools.runners import _MAX_SHELL_OUTPUT_CHARS
 	from secator.ai.utils import _decrypt_dict, _coerce_finding_fields, _sanitize_child_opts, _truncate
 	# Built-in handlers are now the tools' run() methods (secator/ai/tools/<tool>.py).
-	from secator.ai.tools.stop import Stop
-	from secator.ai.tools.run_shell import RunShell
-	from secator.ai.tools.query_workspace import QueryWorkspace
-	from secator.ai.tools.add_finding import AddFinding
-	from secator.ai.tools.mark_vuln_exploited import MarkVulnExploited
-	from secator.ai.tools.mark_vuln_false_positive import MarkVulnFalsePositive
+	from secator.ai.tools.session import Stop
+	from secator.ai.tools.runners import RunShell
+	from secator.ai.tools.findings import QueryWorkspace
+	from secator.ai.tools.findings import AddFinding
+	from secator.ai.tools.findings import MarkVulnExploited
+	from secator.ai.tools.findings import MarkVulnFalsePositive
 	_handle_stop = Stop().run
 	_handle_shell = RunShell().run
 	_handle_query = QueryWorkspace().run
@@ -910,13 +910,13 @@ class TestRunRunner(unittest.TestCase):
 
 	def test_run_subagent_tool_does_not_expose_or_forward_model(self):
 		"""`run_subagent` has no `model` parameter, and a model passed anyway is dropped."""
-		from secator.ai.tools.run_subagent import RunSubagent
+		from secator.ai.tools.runners import RunSubagent
 		props = RunSubagent.schema['function']['parameters']['properties']
 		self.assertNotIn('model', props)
 		ctx = ActionContext(targets=['t'], model='parent/model', mode='scan', context={})
 		action = {'action': 'subagent', 'objective': 'x', 'targets': ['t'], 'description': 'd',
 				  'model': 'explicit/model'}
-		with patch('secator.ai.tools.run_subagent._run_runner', return_value=iter([])) as mock_run:
+		with patch('secator.ai.tools.runners._run_runner', return_value=iter([])) as mock_run:
 			list(RunSubagent().run(action, ctx))
 		task_action = mock_run.call_args[0][0]
 		self.assertNotIn('model', task_action['opts'])
@@ -1012,10 +1012,10 @@ class TestRunRunner(unittest.TestCase):
 
 	def test_run_task_refuses_ai_aliases(self):
 		"""run_task points every name that runs the `ai` task at run_subagent."""
-		from secator.ai.tools.run_task import RunTask
+		from secator.ai.tools.runners import RunTask
 		ctx = ActionContext(targets=['t'], model='m', context={})
 		for name in ('ai', 'ai/example', 'AI/x'):
-			with patch('secator.ai.tools.run_task._run_runner') as mock_run:
+			with patch('secator.ai.tools.runners._run_runner') as mock_run:
 				results = list(RunTask().run({'action': 'task', 'name': name, 'targets': ['t']}, ctx))
 			mock_run.assert_not_called()
 			self.assertIn('run_subagent', results[0].message)
@@ -2389,14 +2389,14 @@ class TestShellTimeout(unittest.TestCase):
 	the model within [default, CONFIG.celery.task_max_timeout]."""
 
 	def _resolve(self, action, ceiling, default=30):
-		from secator.ai.tools import run_shell
+		from secator.ai.tools import runners
 		import types
 		cfg = types.SimpleNamespace(
 			security=types.SimpleNamespace(shell_default_timeout=default),
 			celery=types.SimpleNamespace(task_max_timeout=ceiling),
 		)
 		with patch('secator.config.CONFIG', cfg):
-			return run_shell._resolve_shell_timeout(action)
+			return runners._resolve_shell_timeout(action)
 
 	def test_default_when_absent(self):
 		# No timeout arg -> the configured per-command default.

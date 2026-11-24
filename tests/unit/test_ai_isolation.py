@@ -77,7 +77,7 @@ class TestIsolatedShellRouting(unittest.TestCase):
 	def test_handle_shell_execs_in_container_but_transcript_shows_original(self):
 		ctx = _ctx(isolated=True)
 		action = {"action": "shell", "command": "id && whoami"}
-		with patch('secator.ai.tools.run_shell._ensure_sandbox_container', return_value="sbx-r123") as ensure, \
+		with patch('secator.ai.tools.runners._ensure_sandbox_container', return_value="sbx-r123") as ensure, \
 		     patch('secator.tasks.command.command') as mock_cmd:
 			fake = mock_cmd.return_value
 			fake.output = "uid=0"

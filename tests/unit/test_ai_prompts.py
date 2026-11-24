@@ -157,7 +157,7 @@ class TestPrompts(unittest.TestCase):
 
 	def test_query_tool_describes_every_group_key(self):
 		"""The grouping keys live in the query_workspace tool description, not in the mode prompt."""
-		from secator.ai.tools.query_workspace import QueryWorkspace
+		from secator.ai.tools.findings import QueryWorkspace
 		desc = QueryWorkspace().schema["function"]["parameters"]["properties"]["group"]["description"]
 		for name in ('port', 'url', 'ip', 'subdomain', 'domain', 'certificate', 'record', 'user_account',
 		             'technology', 'vulnerability', 'tag', 'exploit'):
@@ -511,7 +511,7 @@ class TestPrompts(unittest.TestCase):
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestIsolationPrompts(unittest.TestCase):
 	"""Isolation is a run setting: with --isolated, run_shell already runs in the per-run
-	sandbox container (secator.ai.tools.run_shell). The <shell_environment> block is picked
+	sandbox container (secator.ai.tools.runners). The <shell_environment> block is picked
 	from that runtime state (sandbox vs host), with the sandbox image from config and its
 	package manager derived from the image name."""
 
@@ -573,8 +573,8 @@ class TestIsolationPrompts(unittest.TestCase):
 
 	def test_sandbox_error_string_matches_run_shell(self):
 		import inspect
-		from secator.ai.tools import run_shell
-		self.assertIn("could not start isolation container", inspect.getsource(run_shell))
+		from secator.ai.tools import runners
+		self.assertIn("could not start isolation container", inspect.getsource(runners))
 
 	def test_package_manager_variants(self):
 		"""The default image (Alpine, unprivileged `secator` user with sudo for `apk add`) gets

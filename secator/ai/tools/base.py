@@ -2,11 +2,12 @@
 
 An AI tool is one :class:`BaseTool` subclass carrying everything the registry needs
 (schema, dispatch action, permission auto-allow, handler). Every tool — built-in tools
-one-per-file in this package, and EXTERNAL tools dropped into the templates dir (see
+grouped by resource in this package (``runners.py``, ``findings.py``, ``web.py``,
+``session.py``), and EXTERNAL tools dropped into the templates dir (see
 :func:`secator.loader.discover_ai_tools`) — defines its handler as its own
-``run(action, ctx)`` generator in its file: the handler travels WITH the tool, exactly
-like a custom secator task. Helpers shared by several built-in tools live in
-``_runner.py`` / ``_sandbox.py`` / ``_findings.py``.
+``run(action, ctx)`` generator: the handler travels WITH the tool, exactly like a custom
+secator task. The runner execution machinery shared by the runner tools lives in
+``_runner.py`` / ``_sandbox.py``; the finding helpers live at the top of ``findings.py``.
 
 A tool does NOT declare which modes expose it. Mode exposure is the mode's
 responsibility: each mode prompt's frontmatter ``tools:`` globs (see
