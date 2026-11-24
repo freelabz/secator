@@ -733,11 +733,17 @@ class StopRunner(BaseTool):
 					yield Warning(message=f"Could not revoke Celery task {cid}: {e}", _context=context)
 			how = "revoked its Celery tasks" if revoked else ""
 		if not how:
-			where = ("it runs in this process with no command or Celery task to stop right now"
-			         if live is not None else "it runs inside another process and has no Celery task to revoke")
+			if live is not None and getattr(live, "sync", False):
+				# A synchronous runner (e.g. a Task from run_task) runs its commands inside this
+				# turn: it holds no command process or Celery task this tool can reach.
+				where = "it runs synchronously in this turn and cannot be stopped from here yet"
+			elif live is not None:
+				where = "it runs in this process with no command or Celery task to stop right now"
+			else:
+				where = "it runs inside another process and has no Celery task to revoke"
 			hint = " Stop the runner it runs under instead." if (doc or {}).get("has_parent") else ""
 			yield self._result(context, doc_id, rtype, name, status or "RUNNING", stopped=False, message=(
-				f"Could not stop {rtype} {name}: {where}.{hint}"))
+				f"Could not stop {rtype} {name}: {where}.{hint}"), refused=where)
 			return
 		new_status = None
 		if engine is not None:
@@ -758,9 +764,11 @@ class StopRunner(BaseTool):
 		                   message=msg, revoked=revoked, reason=reason)
 
 	@staticmethod
-	def _result(context, runner_id, rtype, name, status, stopped, message, revoked=None, reason=""):
+	def _result(context, runner_id, rtype, name, status, stopped, message, revoked=None, reason="", refused=""):
 		out = {"_type": "runner_stop", "runner_id": runner_id, "runner_type": rtype, "name": name,
 		       "stopped": stopped, "status": status, "message": message}
+		if refused:
+			out["refused_reason"] = refused
 		if revoked:
 			out["revoked_celery_ids"] = revoked
 		if reason:

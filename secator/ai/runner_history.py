@@ -130,8 +130,12 @@ _MAX_MESSAGE_CHARS = 200
 
 
 def _own_ids(doc, rtype):
+	"""Every id a runner doc answers to: its doc key (``_id``, or the ``_id_str`` a backend's
+	``list_runners`` sets when the doc has no ``_id``, e.g. ``tasks/chunk-1`` on sqlite, which
+	``summarize_runner`` then shows as ``_id``) and its own context ids."""
 	context = doc.get('context') or {}
-	return {str(i) for i in (doc.get('_id'), context.get(f'{rtype}_chunk_id'), context.get(f'{rtype}_id')) if i}
+	ids = (doc.get('_id'), doc.get('_id_str'), context.get(f'{rtype}_chunk_id'), context.get(f'{rtype}_id'))
+	return {str(i) for i in ids if i}
 
 
 def _in_workspace(doc, workspace_id):

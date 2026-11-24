@@ -85,7 +85,7 @@ class TestGetRunnerPerBackend(unittest.TestCase):
 		(run_dir / "results.ndjson").write_text("\n".join(json.dumps(f) for f in self.FINDINGS) + "\n")
 		self._check(_engine(JsonBackend("ws", config={"reports_dir": str(root)}, context={})))
 
-	def test_sqlite(self):
+	def _sqlite_engine(self):
 		from secator.hooks.sqlite import get_sqlite_conn
 		from secator.query.sqlite import SqliteBackend
 		db = Path(tempfile.mkdtemp()) / "secator.db"
@@ -96,7 +96,30 @@ class TestGetRunnerPerBackend(unittest.TestCase):
 			conn.execute("INSERT INTO findings (uuid, type, workspace_id, is_false_positive, _tagged, data) "
 			             "VALUES (?, ?, ?, 0, 0, ?)", (f["_uuid"], f["_type"], "ws", json.dumps(f)))
 		conn.commit()
-		self._check(_engine(SqliteBackend("ws", config={"db_path": str(db)})))
+		return _engine(SqliteBackend("ws", config={"db_path": str(db)}))
+
+	def test_sqlite(self):
+		self._check(self._sqlite_engine())
+
+	def test_sqlite_list_runners_id_resolves(self):
+		# sqlite list_runners rows carry no _id, only _id_str ("tasks/chunk-1"), which the
+		# list_runners tool shows as `_id`: get_runner and stop_runner must resolve it.
+		from secator.ai.runner_history import filter_runners
+		engine = self._sqlite_engine()
+		listed = filter_runners(engine.list_runners(workspace_id="ws", runner_type="task"))
+		self.assertEqual(listed[0]["_id"], "tasks/chunk-1")
+		self._check(engine, ids=("tasks/chunk-1",))
+		ctx = ActionContext(targets=[], model="m", context={"workspace_id": "ws"})
+		ctx._query_engine = engine
+		with patch("secator.celery.revoke_task") as revoke:
+			dicts, errors = _results(StopRunner().run(
+				{"runner_id": "tasks/chunk-1", "reason": "r", "tool_call_id": "t"}, ctx))
+		# Found: it reaches the ownership gate (not started by this run, so a non-interactive
+		# run denies it) instead of "not found".
+		self.assertEqual(dicts, [])
+		self.assertEqual(len(errors), 1)
+		self.assertIn("did not approve stopping task httpx", errors[0].message)
+		revoke.assert_not_called()
 
 	def _mocked(self, cls):
 		"""mongodb/api: get_runner keys on the doc id only; the context id resolves via list_runners."""
@@ -181,6 +204,18 @@ class TestStopRunner(unittest.TestCase):
 		dicts, _ = self._stop("chunk-1", MagicMock())
 		self.assertFalse(dicts[0]["stopped"])
 		self.assertIn("Could not stop", dicts[0]["message"])
+		self.assertIn("runs synchronously in this turn and cannot be stopped from here yet", dicts[0]["message"])
+		self.assertEqual(dicts[0]["refused_reason"],
+		                 "it runs synchronously in this turn and cannot be stopped from here yet")
+		runner.stop_process.assert_not_called()
+
+	def test_own_async_runner_with_nothing_to_stop_says_so(self):
+		runner = _runner(sync=False, task_chunk_id="chunk-1", task_id="tid-1")  # no Celery task yet
+		self.ctx.record_runner(runner, "chunk-1", "tid-1")
+		self._doc("chunk-1")
+		dicts, _ = self._stop("chunk-1", MagicMock())
+		self.assertFalse(dicts[0]["stopped"])
+		self.assertIn("no command or Celery task to stop right now", dicts[0]["refused_reason"])
 
 	def test_own_dispatched_runner_revokes_its_celery_tasks(self):
 		runner = _runner(sync=False, celery_ids=["cel-1", "cel-2"], task_chunk_id="chunk-1", task_id="tid-1")
