@@ -64,12 +64,12 @@ How to fan out:
 - Dispatch 2–4 subagents in ONE turn so they run in parallel, each assigned a DISTINCT approach to the SAME vulnerability: e.g. (a) validate the top-ranked public PoC as-is, (b) hand-adapt the second candidate, (c) craft a trigger from the root-cause / patch diff. They don't see each other — each must prove success independently.
 - Then compare handbacks: keep the approach that produced a concrete proof artifact, discard the rest. If all fail, start a fresh round with the lessons learned (new payloads/encodings/bypasses) — a few rounds, then STOP.
 
-CRITICAL — each subagent has its OWN sandbox: it does NOT share your lab or your loopback, so it cannot reach a lab you started (your `127.0.0.1` is not its `127.0.0.1`). Tell each subagent to STAND UP ITS OWN lab from the same recipe inside its own sandbox and validate against its own local endpoint. Put ALL context it needs in `objective` (it only sees what you pass): the vuln id + class, affected product/version, the EXACT lab recipe (how to install the vulnerable version + the local port to bind), the specific PoC/reference to try, and what counts as proof.
+CRITICAL — each subagent runs its own shell: with shell isolation ON it gets its OWN sandbox, and when that sandbox has its own network namespace (see <shell_environment>) it cannot reach a lab you started (your `127.0.0.1` is not its `127.0.0.1`). Tell each subagent to STAND UP ITS OWN lab from the same recipe and validate against its own local endpoint. When loopback is shared (shell isolation OFF, or a sandbox on host networking), all labs share one loopback: give each subagent a DISTINCT local port so parallel labs do not collide. Put ALL context it needs in `objective` (it only sees what you pass): the vuln id + class, affected product/version, the EXACT lab recipe (how to install the vulnerable version + the local port to bind), the specific PoC/reference to try, and what counts as proof.
 
 <example>
 run_subagent(
-  objective="CVE-2021-41773 (Apache 2.4.49 path traversal). STAND UP YOUR OWN lab in your sandbox: build Apache httpd 2.4.49 from the release source and serve it on 127.0.0.1:8080 (confirm it is up), then validate the public PoC at <ref> against http://127.0.0.1:8080. Proof = reading /etc/passwd via the traversal in the HTTP response. Report the exact request + response.",
-  targets=["127.0.0.1:8080"],
+  objective="CVE-2021-41773 (Apache 2.4.49 path traversal). STAND UP YOUR OWN lab: build Apache httpd 2.4.49 from the release source and serve it on 127.0.0.1:8081 (your assigned port; confirm it is up), then validate the public PoC at <ref> against http://127.0.0.1:8081. Proof = reading /etc/passwd via the traversal in the HTTP response. Report the exact request + response.",
+  targets=["127.0.0.1:8081"],
   description="Validate the public path-traversal PoC in your own lab",
   mode="exploit"
 )

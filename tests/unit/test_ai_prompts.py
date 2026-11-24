@@ -544,11 +544,12 @@ class TestIsolationPrompts(unittest.TestCase):
 		"""The default image (Alpine, unprivileged `secator` user with sudo for `apk add`) gets
 		concrete commands; an overridden image gets a detect-once step (OS, manager, root)."""
 		from secator.ai.prompts import build_sandbox_packages
-		for image in ("freelabz/secator:1.0.0-lite", "freelabz/secator@sha256:abc"):
+		for image in ("freelabz/secator:1.0.0-lite", "freelabz/secator:1.0.0-lite@sha256:abc"):
 			out = build_sandbox_packages(image)
 			self.assertIn("sudo apk add --no-cache openjdk17-jre-headless", out, image)
 			self.assertIn("java -jar", out, image)
-		for image in ("alpine:3.21", "kalilinux/kali-rolling", "myorg/freelabz/secator:1"):
+		# full flavor drops the apk sudo rule -> detect-once, like any non-default image
+		for image in ("freelabz/secator:1.0.0", "alpine:3.21", "kalilinux/kali-rolling", "myorg/freelabz/secator:1-lite"):
 			out = build_sandbox_packages(image)
 			self.assertIn("cat /etc/os-release; id -u", out, image)
 			self.assertNotIn("sudo apk add --no-cache openjdk17", out, image)
@@ -587,6 +588,12 @@ class TestIsolationPrompts(unittest.TestCase):
 			p = self._prompt(mode, True)
 			self.assertNotIn("$runner_dir", p, mode)
 			self.assertNotIn("$workspace_path", p, mode)
+
+	def test_research_subagent_ports_when_loopback_shared(self):
+		from secator.ai.prompts import load_prompt
+		r = load_prompt("modes/research.md")
+		self.assertIn("give each subagent a DISTINCT local port", r)
+		self.assertNotIn("it does NOT share your lab or your loopback", r)  # no longer unconditional
 
 	def test_research_has_no_docker_lab_in_sandbox(self):
 		from secator.ai.prompts import load_prompt

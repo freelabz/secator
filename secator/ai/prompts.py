@@ -570,18 +570,20 @@ def build_session_context(isolated: bool = False) -> str:
 	return "\n".join(lines)
 
 
-# The default sandbox image (freelabz/secator, Alpine) runs as the unprivileged `secator` user with
-# passwordless sudo for `apk add` only (see Dockerfile). Any other configured image is unknown here
+# The default sandbox image (freelabz/secator:<version>-lite, Alpine) runs as the unprivileged
+# `secator` user with passwordless sudo for `apk add` only; the full flavor drops that sudo rule
+# (see Dockerfile). Any other configured image is unknown here
 # (the sandbox starts lazily on the first run_shell, after the prompt is built), so the model is
 # told to detect its OS once.
 _DEFAULT_SANDBOX_REPO = "freelabz/secator"
 
 
 def build_sandbox_packages(image: str) -> str:
-	"""Install guidance for the sandbox image: concrete apk commands for the default secator image,
-	a detect-once step (OS, package manager, root or not) for any overridden image."""
+	"""Install guidance for the sandbox image: concrete apk commands for the default secator lite
+	image, a detect-once step (OS, package manager, root or not) for any other image."""
 	java_run = 'run_shell(command="java -jar $runner_dir/.outputs/<tool>/<tool>.jar")'
-	if image.split(":", 1)[0].split("@", 1)[0] == _DEFAULT_SANDBOX_REPO:
+	repo, _, tag = image.split("@", 1)[0].partition(":")
+	if repo == _DEFAULT_SANDBOX_REPO and tag.endswith("-lite"):
 		return (
 			'- System packages / runtimes (Alpine, unprivileged user: apk via sudo):   '
 			'run_shell(command="sudo apk add --no-cache go rust cargo nmap-scripts")\n'
