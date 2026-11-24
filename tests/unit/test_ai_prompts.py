@@ -160,8 +160,9 @@ class TestPrompts(unittest.TestCase):
 		from secator.ai.tools.query_workspace import QueryWorkspace
 		desc = QueryWorkspace().schema["function"]["parameters"]["properties"]["group"]["description"]
 		for name in ('port', 'url', 'ip', 'subdomain', 'domain', 'certificate', 'record', 'user_account',
-		             'technology', 'vulnerability'):
+		             'technology', 'vulnerability', 'tag', 'exploit'):
 			self.assertIn(f"{name}->", desc)
+		self.assertIn("exploit_attempt is one row per attempt", desc)
 
 	def test_get_system_prompt_invalid_mode_falls_back(self):
 		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
