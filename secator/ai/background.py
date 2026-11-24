@@ -199,19 +199,63 @@ class BackgroundJob:
 			"items": len(self.items),
 			"error": self.error,
 			"runner_ids": self.runner_ids(),
+			"runners": self.runner_refs(),
 			"detached": self.detached,
 			"runner_status": (self.store_status or {}).get("status", ""),
 		}
 
-	def runner_ids(self) -> List[str]:
-		"""Ids of the runners this job spawned (from their runner cards), for later lookup."""
-		ids = []
+	def runner_refs(self, limit: int = 10) -> List[Dict]:
+		"""The runners this job spawned so far, each as ``{id, type, name, query}``.
+
+		Known from the moment a runner is built (its ``on_init`` hook registers it, before it
+		runs), so a running job's partial findings can already be read with
+		``query_workspace(query=<query>)``. ``id`` is the key of the
+		runner doc (its ``{type}_chunk_id`` for an AI-spawned task, else its ``{type}_id``);
+		``query`` scopes findings by ``_context.{type}_id``, the key every finding of that runner
+		carries. Runners seen only through a runner card (none registered) are listed by id."""
+		refs, seen = [], set()
+		with self._lock:
+			runners = list(self.runners)
+		for r in runners:
+			rtype = getattr(getattr(r, "config", None), "type", "") or "task"
+			ctx = getattr(r, "context", None) or {}
+			if not isinstance(ctx, dict):
+				continue
+			scope_id = ctx.get(f"{rtype}_id")
+			rid = ctx.get(f"{rtype}_chunk_id") or scope_id
+			if not rid or rid in seen:
+				continue
+			seen.add(rid)
+			ref = {"id": rid, "type": rtype, "name": getattr(getattr(r, "config", None), "name", "") or ""}
+			if scope_id:
+				ref["query"] = {f"_context.{rtype}_id": scope_id}
+			refs.append(ref)
+		for rid, rtype, name in self._card_refs():
+			if rid not in seen:
+				seen.add(rid)
+				refs.append({"id": rid, "type": rtype, "name": name})
+		return refs[:limit]
+
+	def _card_refs(self) -> List[tuple]:
+		"""``(runner_id, runner_type, name)`` of the runner cards among the job items."""
+		out = []
 		with self._lock:
 			items = list(self.items)
 		for i in items:
+			if _item_type(i) != "ai":
+				continue
 			extra = (i.get("extra_data") if isinstance(i, dict) else getattr(i, "extra_data", None)) or {}
-			rid = extra.get("runner_id") if _item_type(i) == "ai" else None
-			if rid and rid not in ids:
+			rid = extra.get("runner_id")
+			if rid:
+				content = i.get("content") if isinstance(i, dict) else getattr(i, "content", "")
+				out.append((rid, extra.get("runner_type") or "task", (content or "")[:80]))
+		return out
+
+	def runner_ids(self) -> List[str]:
+		"""Ids of the runners this job spawned (from their runner cards), for later lookup."""
+		ids = []
+		for rid, _, _ in self._card_refs():
+			if rid not in ids:
 				ids.append(rid)
 		return ids
 
