@@ -126,7 +126,7 @@ class CLIBackend(InteractivityBackend):
 
 	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
 		if prompt_type == "permission":
-			return self._handle_permission(**context)
+			return self._handle_permission(question=question, **context)
 		return self._handle_end_prompt(choices, **context)
 
 	def _handle_permission(self, **context):
@@ -134,6 +134,15 @@ class CLIBackend(InteractivityBackend):
 		engine = context.get("engine")
 		ptype = context.get("permission_type")
 		value = context.get("value", "")
+		if ptype == "stop_runner":
+			# Stopping a runner this run did not start (see the stop_runner tool): a plain
+			# one-shot yes/no, no rule to remember, so it does not need the permission engine.
+			from secator.rich import InteractiveMenu
+			res = InteractiveMenu(
+				context.get("question") or f"Stop runner {value}?",
+				[{"label": "Stop it"}, {"label": "Deny (keep it running)"}],
+				description=context.get("command") or "").show()
+			return {"answer": "allow" if res is not None and res[0] == 0 else "deny"}
 		if not engine:
 			return None
 

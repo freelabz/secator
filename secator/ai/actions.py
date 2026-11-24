@@ -70,6 +70,18 @@ class ActionContext:
 	# Runs the runner's on_item_update hooks of one driver phase: ``(item, phase=) -> item``.
 	# None (dry-run / library use) skips them.
 	run_item_update_hooks: Optional[Callable] = field(default=None, repr=False)
+	# Runners this ai task spawned: runner id (doc key and run-scope id) -> the runner object,
+	# recorded with each run tool's runner card. Shared by the per-batch copies of the context
+	# (dataclasses.replace keeps the same dict). Read by stop_runner's ownership check.
+	spawned_runners: Dict = field(default_factory=dict, repr=False)
+	# Conversation ids of the subagents this ai task spawned (their runners are its own too).
+	subagent_sessions: set = field(default_factory=set, repr=False)
+
+	def record_runner(self, runner, *ids):
+		"""Remember a runner this ai task spawned, under each of its ids."""
+		for i in ids:
+			if i:
+				self.spawned_runners[str(i)] = runner
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).

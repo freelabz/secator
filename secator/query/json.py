@@ -561,6 +561,34 @@ class JsonBackend(QueryBackend):
 			return {'workspace_id': workspace_id, 'workspace_name': workspace_id, 'path': str(workspace_path)}
 		return None
 
+	def get_runner(self, runner_id: str, runner_type: str):
+		"""Get a single runner by id from the live JSON driver's report files.
+
+		Each runner's info block is rewritten live (on_init/on_start/on_interval/on_end) into
+		``report.json`` (root runner) or ``report_<fqn>.json`` (child runner, in its parent's
+		folder). Match the id against the persisted context ids; scan the run-scoped dir when
+		``context['report_dir']`` is set, else the workspace's runner dirs, newest first."""
+		rtype = (runner_type or '').rstrip('s')
+		if rtype not in ('task', 'workflow', 'scan'):
+			return None
+		keys = (f'{rtype}_chunk_id', f'{rtype}_id')
+		dirs = sorted(self._report_dirs(), key=lambda d: d.stat().st_mtime, reverse=True)
+		for d in dirs:
+			for path in d.glob('report*.json'):
+				try:
+					with open(path, 'r') as f:
+						info = json.load(f).get('info', {})
+				except Exception as e:
+					debug(f'failed to load runner report {path}: {e}', sub='query.json')
+					continue
+				ctx = info.get('context') or {}
+				if (info.get('config') or {}).get('type', rtype) == rtype and runner_id in (ctx.get(keys[0]), ctx.get(keys[1])):
+					info['_id'] = runner_id
+					info['_type'] = f'{rtype}s'
+					info['_path'] = str(path)
+					return info
+		return None
+
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
 					 has_parent: Optional[bool] = None, order: str = 'asc'):
 		"""List runners from local report JSON files.

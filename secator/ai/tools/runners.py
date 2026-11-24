@@ -11,7 +11,7 @@ for ``run_shell``).
 from typing import Dict, Generator
 from secator.output_types import Error, Ai, Info, Warning
 from secator.ai.actions import ActionContext, _get_result_context
-from secator.ai.tools._runner import _run_runner, resolves_to_ai_task, _child_preamble, _child_run_opts
+from secator.ai.tools._runner import _run_runner, resolves_to_ai_task, _child_preamble, _child_run_opts, _record_spawn
 from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
 from secator.runners import Task
 from secator.ai.utils import _denied_secret_read, _sanitized_env, _scrub_secrets, _truncate
@@ -259,6 +259,7 @@ class RunShell(BaseTool):
 			# (would nest and drop `env`); import locally to avoid a circular import.
 			from secator.tasks.command import command as CommandTask
 			runner = CommandTask([exec_command], hooks=hooks, context=context, **run_opts)
+			_record_spawn(ctx, runner, context.get("task_chunk_id"), context.get("task_id"))
 
 			# Per-command timeout. max_timeout is NOT run_opts-settable (Command.__init__ resolves
 			# it from CONFIG.tasks.overrides); setting the instance attribute here is honored by
@@ -530,3 +531,241 @@ class ListRunners(BaseTool):
 			row.setdefault("_type", "runner")
 			row["_context"] = {**context, "ai_query_result": True}
 			yield row
+
+
+# ---------- get_runner / stop_runner ----------
+
+_RUNNER_ID_SCHEMA = {
+	"type": "string",
+	"description": "The runner id: a run card's / run result's runner_id, or `run_id`/`_id` from list_runners.",
+}
+_RUNNER_TYPE_SCHEMA = {
+	"type": "string",
+	"enum": ["task", "workflow", "scan"],
+	"description": "The runner type, if known (faster lookup). Omit to search all types.",
+}
+# Context keys naming the ai task itself or the runners it runs under.
+_SELF_ID_KEYS = ("task_id", "task_chunk_id", "workflow_id", "scan_id")
+
+
+def _runner_lookup(action, ctx):
+	"""``(engine, doc, runner_type, workspace_id)`` for the runner an action names; doc is
+	None when not found (or the run has no store)."""
+	from secator.ai.runner_history import find_runner_doc
+	workspace_id = ctx.context.get("workspace_id", "") or None
+	try:
+		engine = ctx.get_query_engine()
+	except Exception:  # noqa: BLE001 - no store: nothing to look up
+		return None, None, None, workspace_id
+	doc, rtype = find_runner_doc(engine, action.get("runner_id"), action.get("runner_type"), workspace_id)
+	return engine, doc, rtype, workspace_id
+
+
+def _stop_live_runner(runner):
+	"""Best-effort stop of a runner object held by this process: the cooperative stop flag (an
+	``ai`` subagent loop ends at its next iteration), the Celery revoke of its tasks when it
+	runs asynchronously (``Runner.stop_celery_tasks``), and a SIGTERM to its process."""
+	import signal
+	try:
+		runner.stop_requested = True
+	except Exception:  # noqa: BLE001 - stopping is best-effort
+		pass
+	try:
+		if getattr(runner, "celery_ids_map", None) and not getattr(runner, "sync", True):
+			runner.stop_celery_tasks()
+	except Exception:  # noqa: BLE001
+		pass
+	try:
+		if callable(getattr(runner, "stop_process", None)):
+			runner.stop_process(exit_ok=True, sig=signal.SIGTERM)
+	except Exception:  # noqa: BLE001
+		pass
+
+
+class GetRunner(BaseTool):
+	name = "get_runner"
+	action = "get_runner"
+	auto_allow = True  # read-only runner-doc lookup, like list_runners
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "get_runner",
+			"description": (
+				"Get the LIVE status of one task / workflow / scan, running or finished: status, "
+				"progress, targets, timing, child runners (workflows/scans), counts of what it found "
+				"so far by type, its errors/warnings, and the `query` that scopes query_workspace to "
+				"its findings. Example: get_runner(runner_id='<id>', runner_type='scan')."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {"runner_id": _RUNNER_ID_SCHEMA, "runner_type": _RUNNER_TYPE_SCHEMA},
+				"required": ["runner_id"],
+			}
+		}
+	}
+
+	def run(self, action: Dict, ctx: ActionContext) -> Generator:
+		"""Read one runner's doc from the store (every driver persists it during the run) and
+		return a compact live view. Read-only, surfaced to the model only (``ai_query_result``)."""
+		from secator.ai.runner_history import runner_live_view
+		context = _get_result_context(action, ctx)
+		runner_id = str(action.get("runner_id") or "").strip()
+		if not runner_id:
+			yield Error(message="get_runner needs a runner_id.", _context=context)
+			return
+		engine, doc, rtype, workspace_id = _runner_lookup(action, ctx)
+		if doc is None:
+			yield Error(message=(
+				f"Runner {runner_id!r} not found in this workspace. Use a runner_id from a run result "
+				f"or list_runners (`run_id`)."), _context=context)
+			return
+		view = runner_live_view(engine, doc, rtype, workspace_id=workspace_id)
+		yield {"_type": "runner_status", **view, "_context": {**context, "ai_query_result": True}}
+
+
+class StopRunner(BaseTool):
+	name = "stop_runner"
+	action = "stop_runner"
+	# The guardrail layer allows the CALL; the ownership gate lives in the handler, which
+	# needs the store: a runner this ai task (or one of its subagents) started is stopped
+	# directly, any other runner only after the user approves (a permission prompt; a
+	# non-interactive run denies it).
+	auto_allow = True
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "stop_runner",
+			"description": (
+				"Stop a RUNNING task / workflow / scan by id (from a run result, get_runner or "
+				"list_runners). Stopping a runner you started is immediate; stopping any other runner "
+				"asks the user first. What it already found stays stored. "
+				"Example: stop_runner(runner_id='<id>', runner_type='task', reason='no live hosts left to probe')."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"runner_id": _RUNNER_ID_SCHEMA,
+					"runner_type": _RUNNER_TYPE_SCHEMA,
+					"reason": {"type": "string", "description": "Why you stop it (shown to the user)."},
+				},
+				"required": ["runner_id", "reason"],
+			}
+		}
+	}
+
+	def run(self, action: Dict, ctx: ActionContext) -> Generator:
+		from secator.ai.actions import _ask_and_check
+		from secator.ai.interactivity import RemoteBackend
+		from secator.ai.runner_history import TERMINAL_STATUSES, runner_scope, _own_ids
+		context = _get_result_context(action, ctx)
+		runner_id = str(action.get("runner_id") or "").strip()
+		reason = str(action.get("reason") or "").strip()
+		if not runner_id:
+			yield Error(message="stop_runner needs a runner_id.", _context=context)
+			return
+		self_ids = {str(ctx.context.get(k)) for k in _SELF_ID_KEYS if ctx.context.get(k)}
+		if runner_id in self_ids:
+			yield Error(message="That runner is this AI run itself (or runs it): end your turn with stop instead.",
+			            _context=context)
+			return
+		live = ctx.spawned_runners.get(runner_id)
+		engine, doc, rtype, _ = _runner_lookup(action, ctx)
+		if doc is None and live is None:
+			yield Error(message=(
+				f"Runner {runner_id!r} not found in this workspace. Use a runner_id from a run result, "
+				f"get_runner or list_runners (`run_id`)."), _context=context)
+			return
+		rtype = rtype or getattr(getattr(live, "config", None), "type", "") or "task"
+		doc_ctx = (doc or {}).get("context") or {}
+		own_ai_celery = ctx.context.get("celery_id")
+		runs_me = bool(own_ai_celery) and doc_ctx.get("celery_id") == own_ai_celery and not (doc or {}).get("has_parent")
+		if doc is not None and (_own_ids(doc, rtype) & self_ids or runs_me):
+			yield Error(message="That runner is this AI run itself (or runs it): end your turn with stop instead.",
+			            _context=context)
+			return
+		if live is None and doc is not None:  # found by another of its ids
+			live = next((ctx.spawned_runners[i] for i in _own_ids(doc, rtype) if i in ctx.spawned_runners), None)
+		doc_id = runner_scope(doc, rtype)[0] if doc else runner_id
+		name = (doc or {}).get("name") or getattr(getattr(live, "config", None), "name", "") or runner_id
+		status = str((doc or {}).get("status") or "").upper()
+		if status in TERMINAL_STATUSES or (live is not None and getattr(live, "done", False) is True):
+			yield self._result(context, doc_id, rtype, name, status or "DONE", stopped=False,
+			                   message=f"{rtype} {name} already finished ({status or 'done'}): nothing to stop.")
+			return
+
+		# Ownership: spawned by this ai task (recorded with its run card), or by a subagent it
+		# spawned (the runner's conversation is that subagent's, or names this one as parent).
+		owned = live is not None or (
+			bool(doc_ctx.get("session_id")) and doc_ctx.get("session_id") in ctx.subagent_sessions) or (
+			bool(ctx.session_id) and doc_ctx.get("parent_session_id") == ctx.session_id)
+		if not owned:
+			is_remote = isinstance(ctx.backend, RemoteBackend)
+			denial = yield from _ask_and_check(
+				ctx, is_remote,
+				question=(f"Stop {rtype} {name} ({doc_id})? It was not started by this AI run. "
+				          f"Reason: {reason or 'none given'}"),
+				permission_type="stop_runner",
+				value=doc_id,
+				deny_message=f"Not stopped: the user did not approve stopping {rtype} {name}.",
+				command=f"stop_runner {rtype} {name} ({doc_id})",
+				reason=reason)
+			if denial:
+				yield Warning(message=denial, _context=context)
+				return
+
+		# Stop through the existing paths: a runner object this process holds is stopped in
+		# place (stop flag, Celery revoke of its tasks, process kill); a runner known only from
+		# the store gets its Celery tasks revoked (what Runner.stop_celery_tasks revokes, plus
+		# its own task id for a top-level runner; a child's celery_id may be its parent's).
+		revoked, how = [], ""
+		if live is not None:
+			if not getattr(live, "sync", True):
+				revoked = list(getattr(live, "celery_ids_map", None) or {})
+			_stop_live_runner(live)
+			how = "stopped in place"
+		else:
+			from secator.celery import revoke_task
+			celery_ids = list(doc_ctx.get("celery_ids") or [])
+			if not doc.get("has_parent") and doc_ctx.get("celery_id"):
+				celery_ids.append(doc_ctx["celery_id"])
+			celery_ids = [i for i in dict.fromkeys(celery_ids) if i and i != own_ai_celery]
+			for cid in celery_ids:
+				try:
+					revoke_task(cid, name)
+					revoked.append(cid)
+				except Exception as e:  # noqa: BLE001 - report what could not be revoked
+					yield Warning(message=f"Could not revoke Celery task {cid}: {e}", _context=context)
+			how = "revoked its Celery tasks" if revoked else ""
+		if not how:
+			yield self._result(context, doc_id, rtype, name, status or "RUNNING", stopped=False, message=(
+				f"Could not stop {rtype} {name}: it runs inside another process and has no Celery task "
+				f"to revoke."))
+			return
+		new_status = None
+		if engine is not None:
+			from secator.ai.runner_history import find_runner_doc
+			try:
+				after, _ = find_runner_doc(engine, doc_id, rtype, ctx.context.get("workspace_id") or None)
+				new_status = str((after or {}).get("status") or "").upper() or None
+			except Exception:  # noqa: BLE001
+				new_status = None
+		msg = f"Stop requested for {rtype} {name}: {how}"
+		if revoked:
+			msg += f" ({len(revoked)} Celery task(s) revoked)"
+		msg += "."
+		if new_status and new_status not in TERMINAL_STATUSES:
+			msg += (f" Its stored status still reads {new_status}: it updates once the runner "
+			        f"handles the stop, so check again with get_runner before relying on it.")
+		yield self._result(context, doc_id, rtype, name, new_status or "STOPPING", stopped=True,
+		                   message=msg, revoked=revoked, reason=reason)
+
+	@staticmethod
+	def _result(context, runner_id, rtype, name, status, stopped, message, revoked=None, reason=""):
+		out = {"_type": "runner_stop", "runner_id": runner_id, "runner_type": rtype, "name": name,
+		       "stopped": stopped, "status": status, "message": message}
+		if revoked:
+			out["revoked_celery_ids"] = revoked
+		if reason:
+			out["reason"] = reason
+		out["_context"] = {**context, "ai_query_result": True}
+		return out
