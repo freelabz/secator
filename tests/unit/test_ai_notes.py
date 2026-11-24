@@ -3,7 +3,7 @@
 A note is an append-only annotation attached to a finding by its STABLE dedup identity
 (``target_type`` + ``target_key``), stored in a dedicated notes store — never on the finding,
 never keyed by the mutable ``_uuid``. Persistence follows the active driver: mongodb/sqlite/json
-write locally, the api driver POSTs to the platform notes endpoint. These tests mock the query
+write locally, the api driver POSTs to the remote notes endpoint. These tests mock the query
 engine (handler behaviour) and exercise the backend ``create_note`` scoping directly.
 """
 

@@ -1,5 +1,6 @@
 # secator/query/_base.py
 
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import lru_cache
@@ -58,6 +59,64 @@ class QueryBackendError(click.ClickException):
 		super().__init__(message)
 		self.backend = backend
 		self.status_code = status_code
+
+
+# Leading inline flag groups (``(?i)``, ``(?is)``, ...), kept in front of a stripped glob.
+_INLINE_FLAGS = re.compile(r'^(?:\(\?[aiLmsux]+\))*')
+
+# ``$options`` flags folded into an inline group: json/sqlite only read the pattern itself.
+_REGEX_OPTION_FLAGS = 'imsx'
+
+
+def strip_leading_glob(pattern):
+	"""Drop a leading ``*`` glob from a regex pattern, keeping leading inline flags (``(?i)``) in front.
+
+	``~= *foo`` is a common shell-glob habit, but a leading ``*`` is an invalid regex ("nothing
+	to repeat"). Since regex matching is unanchored, ``foo`` already means "contains foo".
+	A number becomes its string form; any other non-string pattern (e.g. a compiled regex) is
+	returned unchanged.
+	"""
+	if isinstance(pattern, (int, float)):
+		pattern = str(pattern)
+	if not isinstance(pattern, str):
+		return pattern
+	flags = _INLINE_FLAGS.match(pattern).group(0)
+	return flags + pattern[len(flags):].lstrip('*')
+
+
+def normalize_query_operators(query):
+	"""Rewrite query operators into the subset every backend implements identically.
+
+	- ``$regex`` (also under ``$not``): leading glob stripped (see :func:`strip_leading_glob`).
+	- ``$options`` next to a string ``$regex``: folded into an inline flag group (``(?i)``), which
+	  every backend honours (json/sqlite ignore ``$options``).
+	- ``$contains``: rewritten to a case-insensitive ``$regex`` of the escaped value, i.e. a
+	  literal substring match (``%``/``_``/regex metacharacters in the value are literal).
+
+	Returns a new query; the input is not modified.
+	"""
+	if isinstance(query, list):
+		return [normalize_query_operators(q) for q in query]
+	if not isinstance(query, dict):
+		return query
+	out = {}
+	for key, value in query.items():
+		if key == '$regex':
+			out[key] = strip_leading_glob(value)
+		elif key == '$contains':
+			continue
+		else:
+			out[key] = normalize_query_operators(value)
+	if isinstance(out.get('$regex'), str) and isinstance(out.get('$options'), str):
+		flags = ''.join(f for f in _REGEX_OPTION_FLAGS if f in out['$options'])
+		if flags:
+			out['$regex'] = f'(?{flags})' + out['$regex']
+		del out['$options']
+	if '$contains' in query:
+		if '$regex' in query:
+			raise ValueError('Cannot combine $contains and $regex on the same field; use a single $regex.')
+		out['$regex'] = '(?i)' + re.escape(str(query['$contains']))
+	return out
 
 
 class QueryBackend(ABC):
@@ -138,7 +197,7 @@ class QueryBackend(ABC):
 		Internal ai docs (see ``INTERNAL_AI_TYPES``) are excluded unless ``include_internal``.
 		The exclusion is ANDed in (never overwrites the caller's own ``$or``/``$and``/``ai_type``).
 		"""
-		merged = query.copy()
+		merged = normalize_query_operators(query)
 
 		for field in self.PROTECTED_FIELDS:
 			if field in merged:
