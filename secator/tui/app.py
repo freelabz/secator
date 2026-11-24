@@ -1481,14 +1481,50 @@ class TUIApp(App):
 			out, self._steers = self._steers, []
 		return out
 
+	def tui_has_steers(self) -> bool:
+		"""Whether the user sent a message that the agent has not picked up yet."""
+		with self._steers_lock:
+			return bool(self._steers)
+
 	def tui_ask_user(self, question, choices, prompt_type="stopped", multiple=False, command="", **context):
 		ev = threading.Event()
 		holder: dict = {}
 		self.call_from_thread(
 			self._show_prompt, question, (ev, holder, list(choices or []), prompt_type), bool(multiple),
 			command or "", bool(context.get("solo", False)))
-		ev.wait()
+		wake = context.get("wake")
+		if wake is None:
+			ev.wait()
+		else:
+			# Background jobs running: while waiting, let a finished background job hand the
+			# turn back to the model (only while the user is not typing, see _wake_pending).
+			while not ev.wait(self.WAKE_CHECK_EVERY):
+				if wake():
+					try:
+						self.call_from_thread(self._wake_pending, ev)
+					except Exception:  # noqa: BLE001 - the app is gone: keep waiting like ev.wait()
+						pass
 		return {"answer": holder.get("value")}
+
+	# Seconds between two background wake checks while an end-of-turn prompt waits.
+	WAKE_CHECK_EVERY = 2.0
+
+	def _wake_pending(self, ev) -> bool:
+		"""Resolve the pending prompt waited on with ``ev`` as BACKGROUND_WAKE, unless the user
+		is typing (non-empty input box) or already answered it. Runs on the UI thread."""
+		from secator.ai.interactivity import BACKGROUND_WAKE
+		pend = self._pending_ask
+		if pend is None or pend[0] is not ev:
+			return False
+		try:
+			if self.query_one("#prompt-input", PromptInput).text.strip():
+				return False
+		except Exception:  # noqa: BLE001 - no input box: nothing is being typed
+			pass
+		if self._active_choice is not None:
+			self._restore_input()
+		self._resolve_pending(BACKGROUND_WAKE)
+		return True
 
 	def _show_prompt(self, question, pending, multiple=False, command="", solo=False) -> None:
 		self._pending_ask = pending

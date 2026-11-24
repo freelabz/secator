@@ -217,8 +217,9 @@ class TestBackgroundDispatch(unittest.TestCase):
 		self.gate.release.set()
 		self.mgr.get("bg-1").thread.join(5)
 		block = self.mgr.status_block()
-		self.assertIn("FINISHED since you last read them: bg-1", block)
+		self.assertIn("FINISHED and not read yet: bg-1", block)
 		self.assertIn("your analysis", block)
+		self.assertIn("Jobs still running need no comment", block)
 		self.mgr.poll(["bg-1"])  # read: no longer listed
 		self.assertEqual(self.mgr.status_block(), "")
 
@@ -480,6 +481,128 @@ class TestStoreBackedJobs(unittest.TestCase):
 			_THREAD_JOBS.pop(threading.get_ident(), None)
 		self.assertFalse(mock_task_cls.call_args.kwargs["run_opts"].get("no_poll"))
 		self.assertFalse(job.detached)
+
+
+class _Clock:
+	"""Fake clock + condition: a wait advances the clock instead of sleeping."""
+
+	def __init__(self):
+		self.now = 1000.0
+		self.waits = []
+		self.on_wait = None
+
+	def time(self):
+		return self.now
+
+	# threading.Condition API used by BackgroundJobs
+	def __enter__(self):
+		return self
+
+	def __exit__(self, *a):
+		return False
+
+	def wait(self, timeout=None):
+		self.waits.append(timeout)
+		self.now += timeout or 0
+		if self.on_wait is not None:
+			self.on_wait()
+
+	def notify_all(self):
+		pass
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestPollNoChangeGuard(unittest.TestCase):
+	"""A no-wait poll with nothing new since the last check blocks until the next event."""
+
+	def setUp(self):
+		from secator.ai.background import BackgroundJob
+		self.clock = _Clock()
+		patcher = patch("secator.ai.background.time", self.clock)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+		self.mgr = BackgroundJobs(max_jobs=3, max_wait=600)
+		self.mgr._cond = self.clock
+		self.job = BackgroundJob(id="bg-1", action={"action": "task", "name": "nuclei"})
+		self.job.notify = self.mgr._notify
+		self.mgr.jobs["bg-1"] = self.job
+
+	def test_first_poll_returns_at_once(self):
+		self.mgr.poll(["bg-1"])
+		self.assertFalse(self.mgr.last_poll["blocked"])
+		self.assertEqual(self.clock.waits, [])
+
+	def test_unchanged_poll_blocks_until_max_wait(self):
+		self.mgr.poll(["bg-1"])
+		self.mgr.poll(["bg-1"])
+		self.assertTrue(self.mgr.last_poll["blocked"])
+		self.assertEqual(self.mgr.last_poll["waited"], 600)
+		self.assertFalse(self.mgr.last_poll["changed"])
+
+	def test_blocked_poll_returns_on_new_item(self):
+		self.mgr.poll(["bg-1"])
+		self.clock.on_wait = lambda: self.job.append(Url(url="http://example.com/a"))
+		(_, items), = self.mgr.poll(["bg-1"])
+		self.assertTrue(self.mgr.last_poll["blocked"])
+		self.assertEqual(self.mgr.last_poll["waited"], 1)  # the first wait step, then the item ended it
+		self.assertEqual([i.url for i in items], ["http://example.com/a"])
+
+	def test_blocked_poll_returns_on_finish(self):
+		self.mgr.poll(["bg-1"])
+
+		def finish():
+			self.job.status = DONE
+		self.clock.on_wait = finish
+		(job, _), = self.mgr.poll(["bg-1"])
+		self.assertEqual(self.mgr.last_poll["waited"], 1)
+		self.assertEqual(job.status, DONE)
+
+	def test_blocked_poll_returns_on_user_message(self):
+		self.mgr.poll(["bg-1"])
+		pending = []
+		self.mgr.interrupt = lambda: bool(pending)
+		self.clock.on_wait = lambda: pending.append("hello")
+		self.mgr.poll(["bg-1"])
+		self.assertEqual(self.mgr.last_poll["waited"], 1)
+
+	def test_blocked_poll_returns_on_new_store_result(self):
+		from secator.ai.background import BackgroundJob
+		store = _FakeStore()
+		self.mgr = BackgroundJobs(max_jobs=3, max_wait=600, store=store)
+		self.mgr._cond = self.clock
+		self.mgr.REFRESH_EVERY = 0
+		job = BackgroundJob(id="bg-1", action={"action": "task"}, can_detach=True, detached=True)
+		job.runners.append(SimpleNamespace(config=SimpleNamespace(type="task"), context={"task_chunk_id": "rid-1"}))
+		self.mgr.jobs["bg-1"] = job
+		self.mgr.poll(["bg-1"])
+		self.clock.on_wait = lambda: store.findings.append({"_type": "url", "_uuid": "u1", "url": "http://x"})
+		(_, items), = self.mgr.poll(["bg-1"])
+		self.assertEqual(self.mgr.last_poll["waited"], 1)
+		self.assertEqual([i["_uuid"] for i in items], ["u1"])
+
+	def test_change_between_polls_returns_at_once(self):
+		self.mgr.poll(["bg-1"])
+		self.job.append(Url(url="http://example.com/b"))
+		self.mgr.poll(["bg-1"])
+		self.assertFalse(self.mgr.last_poll["blocked"])
+		self.assertEqual(self.clock.waits, [])
+
+	def test_explicit_wait_unchanged(self):
+		self.mgr.poll(["bg-1"])
+		self.mgr.poll(["bg-1"], wait=5)
+		self.assertFalse(self.mgr.last_poll["blocked"])
+		self.assertEqual(sum(self.clock.waits), 5)
+
+	def test_tool_tells_the_model_to_end_its_turn(self):
+		ctx = ActionContext(targets=["example.com"], model="m", results=[], background=self.mgr)
+		tool = CheckBackgroundJobs()
+		first = list(tool.run({"job_ids": ["bg-1"], "tool_call_id": "tc-1"}, ctx))
+		self.assertFalse([d for d in first if d.get("status") == "throttled"])
+		second = list(tool.run({"job_ids": ["bg-1"], "tool_call_id": "tc-2"}, ctx))
+		notes = [d["message"] for d in second if d.get("status") == "throttled"]
+		self.assertEqual(len(notes), 1)
+		self.assertIn("Nothing new (waited 600s); you can end your turn, you'll be woken when a job finishes "
+		              "or the user writes.", notes[0])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

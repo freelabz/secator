@@ -587,7 +587,9 @@ class CheckBackgroundJobs(BaseTool):
 			               "each job's status and the results it produced SINCE YOUR LAST CHECK (partial results "
 			               "while running, the rest once finished; a subagent returns its handback). Pass `wait` "
 			               "to block up to that many seconds until one of the jobs finishes, instead of polling "
-			               "in a loop. Example: check_background_jobs(job_ids=['bg-1'], wait=120).",
+			               "in a loop. You do not need it to learn that a job finished: end your turn and you are "
+			               "woken with its results. A check with nothing new since the last one waits for the "
+			               "next event. Example: check_background_jobs(job_ids=['bg-1'], wait=120).",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -635,6 +637,23 @@ class CheckBackgroundJobs(BaseTool):
 			yield _status_item(job, context)
 			for item in items:
 				yield _result_item(item, context)
+		note = _throttle_note(mgr, wait) if reports else ""
+		if note:
+			yield {"_type": "background_job", "status": "throttled", "message": note,
+			       "_context": {**context, "ai_query_result": True}}
+
+
+def _throttle_note(mgr, wait):
+	"""Tell the model the no-change guard blocked this poll (see ``BackgroundJobs.poll``), or ""."""
+	info = getattr(mgr, "last_poll", None) or {}
+	if wait or not isinstance(info, dict) or not info.get("blocked"):
+		return ""
+	if info.get("changed"):
+		return (f"Nothing was new at this check, so it waited {info.get('waited', 0)}s for the next event. "
+		        f"You do not need to poll: end your turn, you'll be woken when a job finishes or the user "
+		        f"writes.")
+	return (f"Nothing new (waited {info.get('waited', 0)}s); you can end your turn, you'll be woken when a job "
+	        f"finishes or the user writes.")
 
 
 class CancelBackgroundJob(BaseTool):
