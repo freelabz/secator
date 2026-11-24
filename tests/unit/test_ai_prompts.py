@@ -506,7 +506,21 @@ class TestIsolationPrompts(unittest.TestCase):
 		self.assertNotIn("in your sandbox: `docker run", r)
 		self.assertIn("no Docker daemon", r)
 
+	def test_isolation_keeps_loopback_and_task_warning(self):
+		from secator.ai.prompts import load_prompt
+		b = load_prompt("constraints/isolation.md")
+		self.assertIn("its loopback (127.0.0.1, ::1,\nlocalhost) is its own", b)
+		self.assertIn("Tasks and workflows do NOT run in the sandbox", b)
 
+	def test_isolation_install_command_matches_session_context(self):
+		"""The sandbox image runs as the unprivileged secator user (Dockerfile USER secator,
+		NOPASSWD only for `apk add`), so both blocks must use `sudo apk add`."""
+		from secator.ai.prompts import load_prompt, build_session_context
+		self.assertIn("sudo apk add --no-cache", load_prompt("constraints/isolation.md"))
+		self.assertIn("sudo apk add --no-cache", build_session_context(isolated=True))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestScopeInPrompt(unittest.TestCase):
 	"""Authorized scope is surfaced in the system prompt so the model stays in
 	scope up front (fewer guardrail-denied retries), and is omitted when absent."""
@@ -754,11 +768,12 @@ class TestSessionContext(unittest.TestCase):
 		for iso in (True, False):
 			self.assertEqual(self._build(iso), self._build(iso))
 
-	def test_isolated_describes_alpine_sandbox_root(self):
+	def test_isolated_describes_alpine_sandbox_user(self):
 		blk = self._build(True)
 		self.assertIn("apk", blk)
 		self.assertIn("sandbox", blk.lower())
-		self.assertIn("root", blk.lower())
+		self.assertIn("unprivileged `secator` user", blk)
+		self.assertNotIn("running as root", blk)
 		self.assertNotIn("sudo requires a password", blk)
 
 	def test_host_describes_os_pm_and_sudo(self):
@@ -766,7 +781,7 @@ class TestSessionContext(unittest.TestCase):
 		self.assertIn("Package manager:", blk)
 		self.assertIn("Privileges:", blk)
 		# Host block must NOT falsely claim the Alpine sandbox.
-		self.assertNotIn("disposable, network-isolated Alpine sandbox", blk)
+		self.assertNotIn("disposable Alpine sandbox container", blk)
 
 	def test_package_manager_override_is_a_bare_string(self):
 		# get_distro_config returns a bare string when SECATOR_PACKAGE_MANAGER is set.

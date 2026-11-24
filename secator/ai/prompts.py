@@ -540,7 +540,7 @@ def build_session_context(isolated: bool = False) -> str:
 	Two things the model otherwise guesses wrong:
 	- the current date (it has no clock);
 	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
-	  Alpine sandbox (apk, root) when ``--isolated``, otherwise THIS host's OS + package
+	  Alpine sandbox (apk via sudo, unprivileged user) when ``--isolated``, otherwise THIS host's OS + package
 	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
 	  host, and stops it issuing a sudo command that can only stall/fail.
 
@@ -559,9 +559,9 @@ def build_session_context(isolated: bool = False) -> str:
 	]
 	if isolated:
 		lines += [
-			"Shell environment: a disposable, network-isolated Alpine sandbox container — run_shell runs there, not on the host.",  # noqa: E501
-			"Package manager: apk — install packages with `apk add --no-cache <pkg>`.",
-			"Privileges: running as root in the sandbox — no sudo needed.",
+			"Shell environment: a disposable Alpine sandbox container, separate from the host — run_shell runs there, not on the host.",  # noqa: E501
+			"Package manager: apk — install packages with `sudo apk add --no-cache <pkg>`.",
+			"Privileges: running as the unprivileged `secator` user; passwordless sudo is allowed for `apk add` only.",
 		]
 	else:
 		if isolated not in _SHELL_ENV_CACHE:
