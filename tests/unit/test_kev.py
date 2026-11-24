@@ -110,15 +110,17 @@ class TestKevLoading(unittest.TestCase):
 				return feed
 
 		with patch('requests.get', return_value=FakeResp()):
-			ids = kev.refresh_kev()
+			ids, error = kev.refresh_kev()
+		self.assertEqual(error, '')
 		self.assertEqual(ids, {'CVE-1999-9999'})  # memo busted, reloaded from fresh feed
 		self.assertIn('CVE-1999-9999', self._cache.read_text())    # cache updated
 		self.assertIn('CVE-1999-9999', self._bundle.read_text())   # bundled mirror updated
 
 	def test_refresh_offline_is_noop(self):
 		kev.CONFIG.offline_mode = True
-		ids = kev.refresh_kev()  # no download, falls back to the seeded cache
+		ids, error = kev.refresh_kev()  # no download, falls back to the seeded cache
 		self.assertIn('CVE-2021-44228', ids)
+		self.assertEqual(error, 'offline mode')
 
 
 if __name__ == '__main__':

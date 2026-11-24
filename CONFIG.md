@@ -26,6 +26,7 @@ Secator's configuration lives in `~/.secator/config.yml`. Every option can also 
 | [workspace](#workspace) | Workspace settings |
 | [addons](#addons) | Optional integrations |
 | [providers](#providers) | Data providers |
+| [cve_names](#cve_names) | Readable CVE names dataset |
 | [security](#security) | Security controls |
 | [offline_mode](#offline_mode) | Offline operation |
 
@@ -762,6 +763,31 @@ providers:
     cve: vulners
     exploit: exploitdb
 ```
+
+---
+
+## cve_names
+
+**Type:** `object`
+
+Readable names for vulnerabilities that a tool reports with a bare CVE id as name, from the
+[vulnamer](https://github.com/freelabz/vulnamer) dataset. The dataset ships with secator as a sorted
+TSV (`secator/data/cve_names.tsv`, refreshed nightly on the main branch like the CISA KEV mirror), so
+an install without internet access names CVEs with the data of its release. `secator update` (or
+`secator update --data-only`) downloads the latest dataset and rewrites the bundled file, or writes
+`<dirs.cves>/cve_names.tsv` when the package dir is read-only; lookups use the larger of the two files
+(names are append-only, so the larger file is the newer one). It is never downloaded automatically at
+run time. The file is memory-mapped on use. The community name (e.g. `SIGRed`) prefixes the
+"Product - Flaw" name when there is one. Names never change once published.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cve_names.url` | `str` | vulnamer `dataset` release (`vuln_names.min.jsonl.gz`) | Dataset to download |
+| `cve_names.path` | `str` | `''` (bundled file, or the cache file if larger) | Use only this TSV file (read and refresh) |
+
+In offline mode, `secator update --data-only` prints a warning and keeps the bundled files.
+
+A process that started without a usable file checks for it again every 5 minutes.
 
 ---
 
