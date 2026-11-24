@@ -53,7 +53,7 @@ class TestWorker(unittest.TestCase):
 		self.assertTrue(
 			any(
 				t._type == 'technology'
-				and t._source == 'nuclei'
+				and t._source.startswith('nuclei')  # task node name, e.g. 'nuclei_url'
 				and t.product == 'nginx'
 				and t.match == 'https://secator.cloud'
 				and t.version
