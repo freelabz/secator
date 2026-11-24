@@ -216,5 +216,81 @@ class TestApproveThenRecheck(unittest.TestCase):
 		self.assertIn(('target', '[::1]'), prompts)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestContainerCommandTargets(unittest.TestCase):
+	"""Scope checks also apply to the command a docker/podman invocation runs in its container."""
+
+	def _targets(self, command):
+		with patch('secator.ai.guardrails._resolves', side_effect=lambda h: h.endswith('.example')):
+			return extract_command_targets(command)
+
+	def test_container_command_targets_are_extracted(self):
+		cases = {
+			'docker run --rm curlimages/curl https://out-of-scope.example': ['https://out-of-scope.example'],
+			'podman run alpine wget http://10.0.0.9/': ['http://10.0.0.9/'],
+			'docker run --rm -it -e A=1 --name x alpine nmap 10.0.0.9': ['10.0.0.9'],
+			'docker exec -it lab curl http://10.0.0.5': ['http://10.0.0.5'],
+			'docker container run alpine nc out-of-scope.example 80': ['out-of-scope.example'],
+			'docker run --entrypoint curl curlimages/curl out-of-scope.example': ['out-of-scope.example'],
+			'docker run alpine sh -c "curl out-of-scope.example && ping -c1 10.1.1.1"':
+				['out-of-scope.example', '10.1.1.1'],
+			'docker run --rm alpine true && curl https://other.example': ['https://other.example'],
+			# global options / sub-command groups before run/exec
+			'docker -H tcp://10.0.0.9:2375 run alpine curl http://10.0.0.7': ['10.0.0.9:2375', 'http://10.0.0.7'],
+			'docker --context lab run alpine curl out-of-scope.example': ['out-of-scope.example'],
+			'docker compose -f lab.yml run svc curl out-of-scope.example': ['out-of-scope.example'],
+			'docker compose exec svc nmap 10.0.0.7': ['10.0.0.7'],
+			# glued / combined / unknown options do not swallow the image
+			'docker run -u0 alpine curl out-of-scope.example': ['out-of-scope.example'],
+			'docker exec -w/tmp ctr curl out-of-scope.example': ['out-of-scope.example'],
+			'docker run -itp 127.0.0.1:80:80 alpine curl out-of-scope.example': ['out-of-scope.example'],
+			'docker run --some-new-flag alpine curl out-of-scope.example': ['out-of-scope.example'],
+			'podman exec -l curl out-of-scope.example': ['out-of-scope.example'],
+			# shell / env wrappers
+			'docker run alpine bash -lc "curl out-of-scope.example"': ['out-of-scope.example'],
+			'docker run alpine sh -c \'curl "$0"\' out-of-scope.example': ['out-of-scope.example'],
+			'docker run alpine env A=1 sh -c "curl out-of-scope.example"': ['out-of-scope.example'],
+		}
+		for command, expected in cases.items():
+			with self.subTest(command=command):
+				self.assertCountEqual(self._targets(command), expected)
+
+	def test_local_lab_usage_has_no_targets(self):
+		for command in (
+			'docker run -p 127.0.0.1:8080:80 vulnerable/app',
+			'docker run -d --publish=127.0.0.1:8080:80 --name lab vulnerable/app',
+			'docker run --rm 127.0.0.1:5000/lab/app:1.0',
+			'docker pull ghcr.io/org/image:latest',
+			'podman pull docker.io/library/nginx:1.27',
+			'docker compose up -d',
+			'docker build -t lab .',
+			'docker ps -a',
+			'docker run -itp 127.0.0.1:8080:80 vulnerable/app',
+			'docker run -d --network host --name lab -v /tmp/lab:/data vulnerable/app',
+		):
+			with self.subTest(command=command):
+				self.assertEqual(self._targets(command), [])
+
+	def test_lab_exemption_only_covers_the_docker_tokens(self):
+		cases = {
+			'python3 -c \'socket.create_connection(("10.0.0.9",22))\' && docker pull 10.0.0.9:5000/img':
+				['10.0.0.9'],
+			'docker run -p 11.2.3.45:80:80 app && curl http://1.2.3.4/': ['http://1.2.3.4/'],
+		}
+		for command, expected in cases.items():
+			with self.subTest(command=command):
+				self.assertEqual(self._targets(command), expected)
+
+	def test_out_of_scope_container_command_is_not_auto_allowed(self):
+		perms = {k: list(v) for k, v in dict(CONFIG.addons.ai.permissions).items()}
+		perms['allow'] = perms.get('allow', []) + ['shell(docker)']
+		engine = PermissionEngine(perms, targets=['10.0.0.5'], workspace='/tmp/ws')
+		with patch('secator.ai.guardrails._resolves', return_value=False):
+			res = engine.check_action({
+				'action': 'shell', 'command': 'docker run --rm curlimages/curl https://out-of-scope.example'})
+		self.assertNotEqual(res.decision, 'allow')
+		self.assertIn('https://out-of-scope.example', res.targets)
+
+
 if __name__ == '__main__':
 	unittest.main()

@@ -3,6 +3,7 @@ import fnmatch
 import ipaddress
 import os
 import re
+import shlex
 import socket
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -584,6 +585,174 @@ def _cmd_basename(cmd: str) -> str:
 	return cmd.rsplit('/', 1)[-1].lower()
 
 
+_CONTAINER_CLIS = ('docker', 'podman')
+# Sub-commands that run a user-chosen command inside a container (`docker run IMG CMD...`,
+# `docker exec CTR CMD...`, `docker compose run SVC CMD...`). Everything else
+# (pull/build/compose up/ps/...) runs no such command, so it has no target to scope-check:
+# image names and registry hosts (docker.io, ghcr.io, ...) are infrastructure, not targets.
+_CONTAINER_RUN_SUBCMDS = ('run', 'create', 'exec')
+# Words that introduce a sub-command group (`docker container run`, `docker compose run`).
+_CONTAINER_GROUPS = ('container', 'compose')
+# Global (pre-sub-command) docker/podman/compose options that take a value.
+_CONTAINER_GLOBAL_VALUE_FLAGS = frozenset((
+	'-H', '--host', '--url', '-c', '--context', '--connection', '--config', '-l', '--log-level',
+	'--tlscacert', '--tlscert', '--tlskey', '--identity', '--root', '--runroot', '--storage-driver',
+	'--storage-opt', '--cgroup-manager', '--events-backend', '--network-cmd-path', '--tmpdir',
+	'--module', '--ssh', '--remote-host', '-f', '--file', '-p', '--project-name',
+	'--project-directory', '--env-file', '--profile', '--parallel', '--progress', '--ansi',
+))
+# Global options naming a remote daemon: the daemon host is reached, so it is a target.
+_CONTAINER_DAEMON_FLAGS = ('-H', '--host', '--url', '--remote-host')
+# run/create/exec options that take a value. Any other option is treated as a boolean, so
+# the next token is read as the image: an unknown value option then leaves its value in the
+# command slot, which is still scope-checked (fail closed) rather than hidden.
+_CONTAINER_VALUE_FLAGS = frozenset((
+	'-a', '--attach', '--add-host', '--annotation', '--arch', '--blkio-weight', '--blkio-weight-device',
+	'--cap-add', '--cap-drop', '--cgroup-parent', '--cgroupns', '--cgroups', '--cidfile', '-c', '--cpu-shares',
+	'--cpu-period', '--cpu-quota', '--cpu-rt-period', '--cpu-rt-runtime', '--cpus', '--cpuset-cpus',
+	'--cpuset-mems', '--detach-keys', '--device', '--device-cgroup-rule', '--device-read-bps',
+	'--device-read-iops', '--device-write-bps', '--device-write-iops', '--dns', '--dns-option',
+	'--dns-search', '--domainname', '--entrypoint', '-e', '--env', '--env-file', '--expose', '--gidmap',
+	'--gpus', '--group-add', '--health-cmd', '--health-interval', '--health-retries',
+	'--health-start-period', '--health-start-interval', '--health-timeout', '-h', '--hostname',
+	'--hostuser', '--index', '--init-path', '--ip', '--ip6', '--ipc', '--isolation', '--kernel-memory',
+	'-l', '--label', '--label-file', '--link', '--link-local-ip', '--log-driver', '--log-opt',
+	'--mac-address', '-m', '--memory', '--memory-reservation', '--memory-swap', '--memory-swappiness',
+	'--mount', '--name', '--net', '--network', '--network-alias', '--oom-score-adj', '--os', '--pid',
+	'--pidfile', '--pids-limit', '--platform', '--pod', '-p', '--publish', '--pull', '--requires',
+	'--restart', '--runtime', '--sdnotify', '--seccomp-policy', '--secret', '--security-opt',
+	'--shm-size', '--stop-signal', '--stop-timeout', '--storage-opt', '--subgidname', '--subuidname',
+	'--sysctl', '--systemd', '--timeout', '--tmpfs', '--tz', '--uidmap', '--ulimit', '--umask', '-u',
+	'--user', '--userns', '--uts', '--variant', '-v', '--volume', '--volume-driver', '--volumes-from',
+	'-w', '--workdir',
+))
+_CONTAINER_PUBLISH_FLAGS = ('-p', '--publish')
+_SHELLS = ('sh', 'bash', 'ash', 'dash', 'zsh')
+_SHELL_META_RE = re.compile(r'[;&|$`()<>\n]')
+_ENV_ASSIGN_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*=')
+
+
+def _split_container_opt(tok: str, nxt: Optional[str]) -> Tuple[str, Optional[str], bool]:
+	"""Parse one run/create/exec option -> (flag, value, consumes_next_token)."""
+	if tok.startswith('--'):
+		flag, eq, value = tok.partition('=')
+		if eq:
+			return flag, value, False
+		return (flag, nxt, True) if flag in _CONTAINER_VALUE_FLAGS else (flag, None, False)
+	# Short options: `-it`, `-p 80:80`, glued `-p8080:80` / `-u0`, combined `-itp 80:80`.
+	for j, ch in enumerate(tok[1:], start=1):
+		flag = '-' + ch
+		if flag in _CONTAINER_VALUE_FLAGS:
+			glued = tok[j + 1:]
+			return (flag, glued, False) if glued else (flag, nxt, True)
+	return tok, None, False
+
+
+def _parse_container_cmd(args: List[str]) -> Tuple[List[str], List[str], List[str]]:
+	"""Split a ``docker``/``podman`` invocation into (inner command, local tokens, daemon hosts).
+
+	``docker [GLOBAL] run [OPTS] IMAGE CMD...`` / ``exec [OPTS] CONTAINER CMD...`` /
+	``compose run [OPTS] SERVICE CMD...``: the inner command is ``CMD...`` (prefixed by
+	``--entrypoint`` when given). The local tokens are the image / container / service name
+	and the ``-p``/``--publish`` values (``127.0.0.1:8080:80``): they name or bind local lab
+	resources and are never targets. A sub-command that runs no command (``pull``,
+	``compose up``, ``build``, ...) has no inner command and all its tokens are local.
+	Daemon hosts are the values of ``-H``/``--host``-style global options.
+	"""
+	rest = list(args[1:])
+	daemons = []
+	i = 0
+	while i < len(rest):
+		tok = rest[i]
+		if tok.startswith('-'):
+			flag, eq, value = tok.partition('=')
+			if not eq and flag in _CONTAINER_GLOBAL_VALUE_FLAGS:
+				value = rest[i + 1] if i + 1 < len(rest) else ''
+				i += 1
+			if flag in _CONTAINER_DAEMON_FLAGS and value:
+				daemons.append(value)
+			i += 1
+			continue
+		if tok in _CONTAINER_GROUPS:
+			i += 1
+			continue
+		break
+	if i >= len(rest) or rest[i] not in _CONTAINER_RUN_SUBCMDS:
+		return [], rest[i:], daemons  # pull/build/compose up/...: images and registries are infra
+	is_exec = rest[i] == 'exec'
+	rest = rest[i + 1:]
+	local = []
+	entrypoint = []
+	latest = False  # `podman exec -l/--latest CMD`: no container name before the command
+	i = 0
+	while i < len(rest):
+		tok = rest[i]
+		if tok == '--':
+			i += 1
+			break
+		if not tok.startswith('-') or tok == '-':
+			break
+		if is_exec and tok in ('-l', '--latest'):
+			latest = True
+			i += 1
+			continue
+		flag, value, consumes = _split_container_opt(tok, rest[i + 1] if i + 1 < len(rest) else None)
+		if flag in _CONTAINER_PUBLISH_FLAGS and value:
+			local.append(value)
+		elif flag == '--entrypoint' and value:
+			entrypoint = [value]  # `--entrypoint curl IMG https://x` runs `curl https://x`
+		i += 2 if consumes else 1
+	if latest:
+		return entrypoint + rest[i:], local, daemons
+	if i < len(rest):
+		local.append(rest[i])  # the image / container / service name
+	return entrypoint + rest[i + 1:], local, daemons
+
+
+def _container_targets(args: List[str]) -> List[str]:
+	"""Targets reached by a ``docker``/``podman`` invocation: the command it runs in the
+	container (which shares the host's network reach) and any remote daemon host.
+
+	``env [VAR=x]`` wrappers are skipped and ``sh -c 'SCRIPT' [ARGS]`` (also ``-lc``, ``-ec``)
+	is unwrapped so the script itself is parsed, on top of the plain argument check.
+	"""
+	inner, _, daemons = _parse_container_cmd(args)
+	targets = []
+	commands = ['curl ' + shlex.quote(d) for d in daemons] + ([shlex.join(inner)] if inner else [])
+	for cmd in commands:
+		targets.extend(t for t in extract_command_targets(cmd) if t not in targets)
+	while inner and (_cmd_basename(inner[0]) == 'env' or _ENV_ASSIGN_RE.match(inner[0])):
+		inner = inner[1:]
+	if inner and _cmd_basename(inner[0]) in _SHELLS:
+		for j, tok in enumerate(inner[1:-1], start=1):
+			if re.fullmatch(r'-[a-z]*c[a-z]*', tok):
+				script, script_args = inner[j + 1], inner[j + 2:]
+				found = extract_command_targets(script)
+				for arg in script_args:  # `sh -c 'curl "$0"' host`: the args feed the script
+					found += extract_command_targets('curl ' + shlex.quote(arg))
+				targets.extend(t for t in found if t not in targets)
+				break
+	return targets
+
+
+def _in_spans(span: Tuple[int, int], spans: List[Tuple[int, int]]) -> bool:
+	"""True when ``span`` lies entirely inside one of ``spans``."""
+	return any(s <= span[0] and span[1] <= e for s, e in spans)
+
+
+def _token_spans(command: str, tokens: List[str]) -> List[Tuple[int, int]]:
+	"""(start, end) spans of every occurrence of each token in ``command``."""
+	spans = []
+	for tok in set(tokens):
+		if not tok:
+			continue
+		pos = command.find(tok)
+		while pos != -1:
+			spans.append((pos, pos + len(tok)))
+			pos = command.find(tok, pos + 1)
+	return spans
+
+
 def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
@@ -600,11 +769,9 @@ def extract_command_targets(command: str) -> List[str]:
 	targets = []
 	seen = set()
 
-	# Docker/podman commands run in a sandbox — skip target detection
-	top_cmd = command.strip().split()[0] if command.strip() else ""
-	if top_cmd in ('docker', 'podman'):
-		return targets
-
+	# Docker/podman image names and `-p` publish values name local lab resources, not
+	# targets: the raw IP/URL sweep below skips them (`docker run -p 127.0.0.1:8080:80 app`).
+	container_local = []
 	paths = detect_paths(command)
 	cmd_names = set(_extract_cmd_names(command))
 
@@ -697,8 +864,11 @@ def extract_command_targets(command: str) -> List[str]:
 		for args in parsed_cmds:
 			if not args:
 				continue
-			# Skip docker/podman sub-commands
-			if args[0] in ('docker', 'podman'):
+			# Docker/podman sub-commands: check the command run inside the container
+			if _cmd_basename(args[0]) in _CONTAINER_CLIS:
+				container_local.extend(_parse_container_cmd(args)[1])
+				for target in _container_targets(args):
+					_add_target(target)
 				continue
 			cmd_base = _cmd_basename(args[0])
 			is_network_cmd = cmd_base in _NETWORK_CMDS
@@ -707,8 +877,18 @@ def extract_command_targets(command: str) -> List[str]:
 	except Exception:
 		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
 		# host sweep too (the IP/URL sweep below runs unconditionally).
+		if not _SHELL_META_RE.search(command):  # a single plain docker/podman command
+			try:
+				plain_args = shlex.split(command)
+			except ValueError:
+				plain_args = []
+			if plain_args and _cmd_basename(plain_args[0]) in _CONTAINER_CLIS:
+				container_local.extend(_parse_container_cmd(plain_args)[1])
+		local_spans = _token_spans(command, container_local)
 		for match in PII_PATTERNS["host"].finditer(command):
 			host = match.group()
+			if _in_spans(match.span(), local_spans):
+				continue
 			if host not in cmd_names and host not in seen and _resolves(host):
 				_add_target(host)
 
@@ -722,10 +902,14 @@ def extract_command_targets(command: str) -> List[str]:
 	# the pre-#949 behaviour this restores. (A bare HOSTNAME buried in a code string
 	# stays a documented residual: resolving it here is DNS-rebinding- and FP-prone.)
 	# ponytail: IP+URL only; hostname-in-code residual, add a quoted-region host sweep if it bites.
+	local_spans = _token_spans(command, container_local)
 	for match in URL_PATTERN.finditer(command):
-		_add_target(_strip_trailing_delims(match.group()))
+		if not _in_spans(match.span(), local_spans):
+			_add_target(_strip_trailing_delims(match.group()))
 	for match in PII_PATTERNS["ipv4"].finditer(command):
 		ip = match.group()
+		if _in_spans(match.span(), local_spans):
+			continue
 		if not any(ip in t for t in targets) and not any(ip in p for p in paths):
 			_add_target(ip)
 
