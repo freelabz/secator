@@ -40,7 +40,7 @@ from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vul
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
 from secator.runners import Command
-from secator.technology import cpe23, cpe_attrs
+from secator.cpe import create_cpe_string, cpe23, match_cpes
 from secator.utils import debug, find_system_browser, process_wordlist, headers_to_dict, parse_raw_http_request
 
 
@@ -332,53 +332,10 @@ class Vuln(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
 	output_types = [Vulnerability]
 
-	@staticmethod
-	def create_cpe_string(product_name, version):
-		"""
-		Generate a CPE string for a given product and version.
-
-		Args:
-			product_name (str): The name of the product.
-			version (str): The version of the product.
-
-		Returns:
-			str: A CPE string formatted according to the CPE 2.3 specification.
-		"""
-		cpe_version = '2.3'  # CPE Specification version
-		part = 'a'  # 'a' for application
-		vendor = product_name.lower()  # Vendor name, using product name
-		product = product_name.lower()  # Product name
-		version = version  # Product version
-		cpe_string = f'cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*'
-		return cpe_string
-
-	@staticmethod
-	def match_cpes(fs1, fs2):
-		"""Check if two CPEs match. Partial matches consisting of <vendor>:<product>:<version> are considered a match.
-
-		Args:
-			fs1 (str): Format string 1.
-			fs2 (str): Format string 2.
-
-		Returns:
-			bool: True if the two CPEs match, False otherwise.
-		"""
-		if fs1 == fs2:
-			return True
-		attrs1, attrs2 = cpe_attrs(fs1), cpe_attrs(fs2)  # escape-aware, tolerates a short CPE
-		return bool(attrs1 and attrs2) and attrs1[1:4] == attrs2[1:4]
-
-	@staticmethod
-	def get_cpe_fs(cpe):
-		""" "Return formatted string for given CPE.
-
-		Args:
-			cpe (string): Input CPE
-
-		Returns:
-			string: CPE formatted string.
-		"""
-		return cpe23(cpe)
+	# CPE helpers live in secator/cpe.py; kept here for tasks that call them on the class.
+	create_cpe_string = staticmethod(create_cpe_string)
+	match_cpes = staticmethod(match_cpes)
+	get_cpe_fs = staticmethod(cpe23)
 
 	@cache
 	@staticmethod

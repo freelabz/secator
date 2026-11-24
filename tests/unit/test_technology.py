@@ -4,8 +4,8 @@ import tempfile
 import unittest
 
 from secator.output_types import Port, Technology
-from secator.technology import (
-	catalog, cpe23, cpe_attrs, cpe_vendor_product, lookup, normalize_technology, split_version, version_cpe)
+from secator.cpe import cpe23, cpe_attrs, cpe_vendor_product, version_cpe
+from secator.technology import catalog, lookup, normalize_technology, split_version
 
 # (expected key, expected display name, raw spellings from different tools / advisories)
 CASES = [

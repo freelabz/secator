@@ -39,7 +39,8 @@ class Technology(OutputType):
 		super().__post_init__()
 		# One identity whatever tool found it: catalog display name, split-off version,
 		# CPE-style `vendor:product` key (see secator/data/technologies.yaml).
-		from secator.technology import normalize_technology, version_cpe
+		from secator.cpe import version_cpe
+		from secator.technology import normalize_technology
 		cpes = (self.extra_data or {}).get('cpe')
 		norm = normalize_technology(self.product, self.version, self.vendor, cpes)
 		if norm['product'] and norm['product'] != self.product:

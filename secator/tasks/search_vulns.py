@@ -10,7 +10,7 @@ from secator.definitions import (
 from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
-from secator.technology import cpe23
+from secator.cpe import cpe23
 
 # search_vulns match reason for a CVE whose only link to the query is the general product.
 UNCERTAIN_MATCH = 'general_product_uncertain'
