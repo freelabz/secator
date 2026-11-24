@@ -64,6 +64,16 @@ class TestIsHeavyRunner(unittest.TestCase):
 			self.assertFalse(_is_heavy_runner('task', 'httpx', {}, ['a', 'b']))
 			self.assertTrue(_is_heavy_runner('task', 'httpx', {}, ['a', 'b', 'c']))
 
+	def test_task_with_targets_extractor_dispatched(self):
+		with self._cfg():
+			self.assertTrue(_is_heavy_runner('task', 'httpx', {'targets_': [{'type': 'url', 'field': 'url'}]}, ['a']))
+
+	def test_runtime_chunk_rule_dispatched(self):
+		with self._cfg():
+			# fping takes a file of hosts, but a CIDR range runs alone (-g): one chunk per target
+			self.assertFalse(_is_heavy_runner('task', 'fping', {}, ['10.0.0.1', '10.0.0.2']))
+			self.assertTrue(_is_heavy_runner('task', 'fping', {}, ['10.0.0.0/30', '10.0.0.2']))
+
 	def test_many_targets_dispatched(self):
 		with self._cfg(max_targets=3):
 			self.assertFalse(_is_heavy_runner('task', 'httpx', {}, ['a', 'b', 'c']))
@@ -81,42 +91,170 @@ class TestIsHeavyRunner(unittest.TestCase):
 class TestChunkingRuleShared(unittest.TestCase):
 	"""The ai dispatch rule and the runners' needs_chunking() use one chunking rule."""
 
+	# The rules needs_chunking() inlined before they moved to chunking_needed(), copied verbatim
+	# (secator/runners/command.py and secator/runners/python.py), as the reference.
 	@staticmethod
-	def _legacy(count, sync, chunk_size, file_flag, is_chunk):
-		# The rule needs_chunking() inlined before it was moved to chunking_needed().
-		many = count > 1
-		over = chunk_size and chunk_size != -1 and count > chunk_size
-		return bool((sync and many and file_flag is None and not is_chunk) or (not sync and many and over and not is_chunk))
+	def _legacy_command(inputs, sync, input_chunk_size, file_flag, chunk):
+		many_targets = len(inputs) > 1
+		targets_over_chunk_size = input_chunk_size and input_chunk_size != -1 and len(inputs) > input_chunk_size  # noqa: E501
+		has_file_flag = file_flag is not None
+		is_chunk = chunk
+		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
+		return chunk_it
+
+	@staticmethod
+	def _legacy_python(inputs, sync, input_chunk_size, chunk):
+		many_targets = len(inputs) > 1
+		targets_over_chunk_size = input_chunk_size and input_chunk_size != -1 and len(inputs) > input_chunk_size  # noqa: E501
+		is_chunk = chunk
+		chunk_it = (sync and many_targets and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
+		return chunk_it
 
 	def test_chunking_needed_matches_previous_rule(self):
+		"""Truth table: chunking_needed() agrees with both previous inline rules on every
+		combination (callers only use the result's truthiness)."""
 		from itertools import product
 		from secator.runners._helpers import chunking_needed
-		for count, sync, size, flag, is_chunk in product(
-				(0, 1, 2, 5, 101), (True, False), (None, 0, -1, 1, 2, 100), (None, '-l'), (None, 1)):
-			with self.subTest(count=count, sync=sync, size=size, flag=flag, is_chunk=is_chunk):
+		combos = 0
+		for count, sync, size, flag, chunk in product(
+				range(0, 25), (True, False, 1, 0, None), (None, 0, -1, 1, 2, 5, 20, 100),
+				(None, '', '-l'), (None, False, 0, 1, True)):
+			inputs = [f'h{i}' for i in range(count)]
+			combos += 1
+			with self.subTest(count=count, sync=sync, size=size, flag=flag, chunk=chunk):
 				self.assertEqual(
-					chunking_needed(count, sync, size, flag, is_chunk),
-					self._legacy(count, sync, size, flag, is_chunk))
-
-	def test_would_chunk_matches_needs_chunking_on_built_task(self):
-		from secator.runners import Task
-		for name in ('nmap', 'httpx', 'whois', 'dnsx', 'search_vulns'):
-			cls = Task.get_task_class(name)
-			for targets in (['a.com'], ['a.com', 'b.com'], [f'h{i}.com' for i in range(120)]):
-				task = cls(targets, sync=True, print_line=False, print_item=False, enable_hooks=False)
-				for sync in (True, False):
-					with self.subTest(task=name, n=len(targets), sync=sync):
-						self.assertEqual(cls.would_chunk(len(targets), sync), task.needs_chunking(sync))
+					bool(chunking_needed(count, sync, size, flag, chunk)),
+					bool(self._legacy_command(inputs, sync, size, flag, chunk)))
+				self.assertEqual(
+					bool(chunking_needed(count, sync, size, is_chunk=chunk)),
+					bool(self._legacy_python(inputs, sync, size, chunk)))
+		self.assertEqual(combos, 25 * 5 * 8 * 3 * 5)
 
 	def test_would_chunk_honors_overrides(self):
 		from secator.runners import Task
 		cls = Task.get_task_class('httpx')
 		cfg = SimpleNamespace(tasks=SimpleNamespace(overrides={'httpx': {'file_flag': None, 'input_chunk_size': 2}}))
-		self.assertFalse(cls.would_chunk(2, sync=True))
+		self.assertFalse(cls.would_chunk(['a', 'b'], sync=True))
 		with mock.patch('secator.runners._helpers.CONFIG', cfg):
-			self.assertTrue(cls.would_chunk(2, sync=True))
-			self.assertTrue(cls.would_chunk(3, sync=False))
-			self.assertFalse(cls.would_chunk(2, sync=False))
+			self.assertTrue(cls.would_chunk(['a', 'b'], sync=True))
+			self.assertTrue(cls.would_chunk(['a', 'b', 'c'], sync=False))
+			self.assertFalse(cls.would_chunk(['a', 'b'], sync=False))
+
+	def test_would_chunk_follows_runtime_rule(self):
+		# fping: a CIDR range is passed with -g, one range per run
+		from secator.runners import Task
+		cls = Task.get_task_class('fping')
+		self.assertFalse(cls.would_chunk(['10.0.0.1', '10.0.0.2'], sync=True))
+		self.assertTrue(cls.would_chunk(['10.0.0.0/30', '10.0.0.2'], sync=True))
+		self.assertTrue(cls.would_chunk(['10.0.0.0/30', '10.0.0.2'], sync=False))
+		self.assertFalse(cls.would_chunk(['10.0.0.0/30', '10.0.0.0/30'], sync=False))
+
+
+class TestWouldChunkParity(unittest.TestCase):
+	"""``would_chunk`` (the task class, before the child exists) agrees with ``needs_chunking`` on
+	the runner built from the same inputs, opts and ``tasks.overrides``, for every task.
+
+	Exact whenever every input is of a type the task takes. Otherwise the built runner drops the
+	unsupported inputs after its hooks ran, and ``would_chunk`` (which counts them) may only say
+	yes where the runner says no: it never misses a runner that chunks.
+	"""
+
+	CASES = {
+		'one host': ['example.com'],
+		'hosts': ['a.example.com', 'b.example.com', 'c.example.com'],
+		'duplicates': ['a.example.com', 'a.example.com'],
+		'urls': ['http://a.example.com', 'https://b.example.com/x'],
+		'ips': ['10.0.0.1', '10.0.0.2'],
+		'one cidr': ['10.0.0.0/30'],
+		'cidrs': ['10.0.0.0/30', '10.0.1.0/30'],
+		'cidr and ip': ['10.0.0.0/30', '10.0.0.5'],
+		'mixed': ['10.0.0.0/30', '10.0.0.5', 'example.com', 'http://example.com/a'],
+		'host then url': ['a.example.com', 'http://b.example.com'],
+		'over chunk size': [f'h{i}.example.com' for i in range(25)],
+		'over chunk size, urls': [f'http://h{i}.example.com' for i in range(25)],
+		'emails': ['a@example.com', 'b@example.com'],
+	}
+	OVERRIDES = (
+		{},
+		{'input_chunk_size': 2},
+		{'file_flag': None},
+		{'file_flag': '-x', 'input_chunk_size': -1},
+	)
+	# Options a task's runtime chunking depends on (see runtime_chunk_attrs / before_init).
+	TASK_OPTS = {
+		'dnsx': ({'wordlist': 'words.txt'}, {'wordlist': 'words.txt', 'wildcard_domain': 'example.com'}),
+	}
+
+	@classmethod
+	def setUpClass(cls):
+		import tempfile
+		cls._tmp = tempfile.TemporaryDirectory()
+		paths = []
+		for name in ('a.txt', 'b.txt'):
+			path = f'{cls._tmp.name}/{name}'
+			open(path, 'w').close()
+			paths.append(path)
+		cls.CASES = dict(cls.CASES, paths=paths, folder=[cls._tmp.name])
+
+	@classmethod
+	def tearDownClass(cls):
+		cls._tmp.cleanup()
+
+	def test_every_task(self):
+		from secator.loader import discover_tasks
+		from secator.runners import Runner
+		from secator.utils import autodetect_type
+		tasks = discover_tasks()
+		self.assertGreater(len(tasks), 30)
+		checked = exact = 0
+		with (
+			# Driver hooks persist runner state; they never touch inputs or chunk attributes.
+			mock.patch.object(Runner, '_apply_context_drivers', lambda self: None),
+			# No network / downloads while building: dnsx probes wildcard DNS, wordlists download.
+			mock.patch('secator.tasks.dnsx.check_dns_response', return_value=False),
+			mock.patch('secator.utils.download_file', side_effect=lambda val, **_: val),
+		):
+			for task_cls in tasks:
+				name = task_cls.__name__
+				for overrides in self.OVERRIDES:
+					cfg = SimpleNamespace(tasks=SimpleNamespace(overrides={name: overrides}))
+					with mock.patch('secator.runners._helpers.CONFIG', cfg):
+						for opts in ({},) + self.TASK_OPTS.get(name, ()):
+							for case, inputs in self.CASES.items():
+								runner = task_cls(
+									list(inputs), sync=True, print_line=False, print_item=False, quiet=True, **opts)
+								supported = all(
+									not task_cls.input_types or autodetect_type(i) in task_cls.input_types for i in inputs)
+								for sync in (True, False):
+									with self.subTest(task=name, case=case, opts=opts, overrides=overrides, sync=sync):
+										predicted = task_cls.would_chunk(list(inputs), sync, opts)
+										built = bool(runner.needs_chunking(sync))
+										checked += 1
+										if supported:
+											exact += 1
+											self.assertEqual(predicted, built)
+										else:
+											self.assertTrue(predicted or not built, 'would_chunk missed a runner that chunks')
+		self.assertGreater(exact, checked // 4)
+
+	def test_runtime_chunk_changes_are_declared(self):
+		"""A task that changes input_chunk_size / file_flag at runtime declares the rule in
+		runtime_chunk_attrs, so would_chunk sees it."""
+		import inspect
+		import re
+		from secator.loader import discover_tasks
+		from secator.runners import Command
+		# dnsx: a wordlist switches the input flag to -d; it keeps a file flag and its chunk size,
+		# so chunking is unchanged (covered by test_every_task with a wordlist).
+		unchanged = {'dnsx'}
+		for task_cls in discover_tasks():
+			if not issubclass(task_cls, Command) or task_cls.__name__ in unchanged:
+				continue
+			source = inspect.getsource(task_cls)
+			if re.search(r'self\.(file_flag|input_chunk_size)\s*=', source):
+				with self.subTest(task=task_cls.__name__):
+					self.assertIsNot(
+						task_cls.runtime_chunk_attrs.__func__, Command.runtime_chunk_attrs.__func__)
 
 
 class TestRunRunnerDispatch(unittest.TestCase):

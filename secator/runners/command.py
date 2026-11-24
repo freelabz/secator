@@ -308,13 +308,30 @@ class Command(Runner):
 		return chunking_needed(len(self.inputs), sync, self.input_chunk_size, self.file_flag, self.chunk)
 
 	@classmethod
-	def would_chunk(cls, count, sync):
-		"""``needs_chunking`` for a task that is not built yet: ``count`` targets, class attributes
-		with ``tasks.overrides`` applied (as ``Command.__init__`` does)."""
+	def runtime_chunk_attrs(cls, inputs, opts):
+		"""The ``input_chunk_size`` / ``file_flag`` this task sets at runtime for ``inputs`` and
+		``opts`` (empty: its class attributes stand).
+
+		A task whose ``before_init`` changes either attribute overrides this with that rule and
+		applies it from ``before_init``, so ``would_chunk`` sees the same values as the built runner.
+		"""
+		return {}
+
+	@classmethod
+	def would_chunk(cls, inputs, sync, opts=None):
+		"""``needs_chunking`` for a task that is not built yet, on ``inputs`` and ``opts``.
+
+		Mirrors ``__init__``: the class attributes, then the task's ``runtime_chunk_attrs`` (its
+		``before_init``), then ``tasks.overrides`` (applied last, so they win). Counts the distinct
+		inputs: the built runner then drops the ones of an unsupported type, so this never says
+		no to a runner that chunks (at worst yes to one whose dropped inputs leave a single one).
+		"""
+		inputs = list(dict.fromkeys(inputs if isinstance(inputs, list) else [inputs]))
+		attrs = {'input_chunk_size': cls.input_chunk_size, 'file_flag': cls.file_flag}
+		attrs.update(cls.runtime_chunk_attrs(inputs, opts or {}))
 		overrides = get_task_overrides(cls.__name__)
-		chunk_size = overrides.get('input_chunk_size', cls.input_chunk_size)
-		file_flag = overrides.get('file_flag', cls.file_flag)
-		return chunking_needed(count, sync, chunk_size, file_flag)
+		attrs.update({k: overrides[k] for k in attrs if k in overrides})
+		return chunking_needed(len(inputs), sync, attrs['input_chunk_size'], attrs['file_flag'])
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

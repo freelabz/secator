@@ -51,13 +51,20 @@ class fping(ReconIp):
 	install_pre = {'*': ['fping']}
 	ignore_return_code = True
 
+	@classmethod
+	def runtime_chunk_attrs(cls, inputs, opts):
+		# -g (generate targets from a CIDR range) takes a single range: one run per target
+		if any(validate_cidr_range(input) for input in inputs):
+			return {'file_flag': None, 'input_chunk_size': 1}
+		return {}
+
 	@staticmethod
 	def before_init(self):
-		for input in self.inputs:
-			if validate_cidr_range(input):
-				self.file_flag = None
-				self.input_chunk_size = 1
-				self.input_flag = '-g'
+		attrs = fping.runtime_chunk_attrs(self.inputs, self.run_opts)
+		if attrs:
+			self.file_flag = attrs['file_flag']
+			self.input_chunk_size = attrs['input_chunk_size']
+			self.input_flag = '-g'
 
 	@staticmethod
 	def item_loader(self, line):

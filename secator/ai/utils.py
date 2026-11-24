@@ -233,10 +233,14 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: li
 	count = len(targets or [])
 	if count > CONFIG.addons.ai.inline_max_targets:
 		return True
+	# Inputs a `targets_` extractor pulls from earlier results are only known once the child is
+	# built: they can make it wide, so dispatch.
+	if any(str(k).endswith('_') and str(k).rstrip('_') == 'targets' for k in (opts or {})):
+		return True
 	# Same rule as the task's own needs_chunking(), evaluated before the child is built: it would
 	# chunk in-process (sync rule) or once dispatched (async rule, input_chunk_size).
 	would_chunk = getattr(cls, 'would_chunk', None)
-	if would_chunk and (would_chunk(count, sync=True) or would_chunk(count, sync=False)):
+	if would_chunk and (would_chunk(targets or [], True, opts) or would_chunk(targets or [], False, opts)):
 		return True
 	from secator.runners._helpers import resolve_task_queue
 	try:

@@ -139,9 +139,11 @@ class PythonRunner(Runner):
 		return chunking_needed(len(self.inputs), sync, self.input_chunk_size, is_chunk=self.chunk)
 
 	@classmethod
-	def would_chunk(cls, count, sync):
-		"""``needs_chunking`` for a task that is not built yet, on ``count`` targets."""
-		return chunking_needed(count, sync, cls.input_chunk_size)
+	def would_chunk(cls, inputs, sync, opts=None):
+		"""``needs_chunking`` for a task that is not built yet, on its distinct ``inputs`` (see
+		``Command.would_chunk``). A Python task has no input-file flag."""
+		inputs = inputs if isinstance(inputs, list) else [inputs]
+		return chunking_needed(len(dict.fromkeys(inputs)), sync, cls.input_chunk_size)
 
 	def get_opt_value(self, opt_name):
 		"""Get option value with fallback to default from opts definition.
