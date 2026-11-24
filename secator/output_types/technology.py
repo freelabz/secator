@@ -13,6 +13,7 @@ class Technology(OutputType):
 	version: str = None
 	vendor: str = field(default='', compare=False)
 	key: str = field(default='', compare=False)
+	cpe: str = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	tags: list = field(default_factory=list, compare=False)
 	confidence: str = field(default='high', compare=False)
@@ -38,6 +39,7 @@ class Technology(OutputType):
 		super().__post_init__()
 		# One identity whatever tool found it: catalog display name, split-off version,
 		# CPE-style `vendor:product` key (see secator/data/technologies.yaml).
+		from secator.cpe import version_cpe
 		from secator.technology import normalize_technology
 		cpes = (self.extra_data or {}).get('cpe')
 		norm = normalize_technology(self.product, self.version, self.vendor, cpes)
@@ -49,6 +51,9 @@ class Technology(OutputType):
 		self.key = norm['key'] or self.key
 		if norm['method'] == 'fuzzy':  # approximate identity: consumers should not trust it fully
 			self.extra_data = {**(self.extra_data or {}), 'key_match': 'fuzzy'}
+		# CPE 2.3 of this product at this version (vulnerability lookups match it exactly, unlike a
+		# free-text name). Not built from a fuzzy key: a wrong CPE would be trusted as exact.
+		self.cpe = self.cpe or version_cpe(self.version, norm['key'] if norm['method'] != 'fuzzy' else '', cpes)
 
 	def __str__(self) -> str:
 		return self.match
