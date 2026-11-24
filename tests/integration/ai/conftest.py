@@ -145,12 +145,14 @@ def lab():
 # Isolated secator dirs
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope='session', autouse=True)
+@pytest.fixture(scope='package', autouse=True)
 def _ai_dirs():
-	"""Reports + data dirs in a temp folder (a workspace per test session)."""
+	"""Reports + data dirs in a temp folder (a workspace per run of this package), restored when
+	the package is done so the rest of the pytest session is untouched."""
 	from secator.config import CONFIG
 	# Child commands inherit fd 0: httpx reads an inherited open stdin (a pipe/socket) and waits
 	# on it forever. Point it at /dev/null for the session.
+	saved_stdin = os.dup(0)
 	devnull = os.open(os.devnull, os.O_RDONLY)
 	os.dup2(devnull, 0)
 	os.close(devnull)
@@ -167,6 +169,8 @@ def _ai_dirs():
 	yield root
 	allow.remove(EXTRA_ALLOW)
 	CONFIG.dirs.reports, CONFIG.dirs.templates = old, old_templates
+	os.dup2(saved_stdin, 0)
+	os.close(saved_stdin)
 	import shutil
 	shutil.rmtree(root, ignore_errors=True)
 

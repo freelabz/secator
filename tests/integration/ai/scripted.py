@@ -345,7 +345,9 @@ _LOOPBACK = ('127.', '::1', 'localhost', '0.0.0.0')
 
 
 class NetworkGuard:
-	"""Block every outbound connection except loopback and unix sockets; record attempts."""
+	"""Block every outbound connection of THIS Python process except loopback and unix sockets;
+	record attempts. Child processes (shell commands, tool binaries) are not covered: scenarios
+	only point them at the local lab, or at targets the scope check denies before they run."""
 
 	def __init__(self, on_block: Optional[Callable[[str], None]] = None):
 		self.blocked: List[str] = []

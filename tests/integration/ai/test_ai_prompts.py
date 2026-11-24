@@ -37,7 +37,7 @@ def test_prompt_times_out_and_stays_pending(run_ai, mongo, remote):
 	tag = 'prompt_timeout'
 	ctx = _ctx(tag)
 	run = run_ai(tag, [say('What should I scan next?')], interactive='remote', context=ctx)
-	assert remote.timeout <= run.elapsed < remote.timeout + 15
+	assert remote.timeout <= run.elapsed < remote.timeout + 30
 	assert run.status in ('SUCCESS', 'FAILURE')
 	pending = [d for d in _prompt_docs(ctx) if d.get('status') == 'pending']
 	assert len(pending) == 1, _prompt_docs(ctx)

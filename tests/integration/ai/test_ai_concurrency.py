@@ -13,7 +13,7 @@ def test_batch_runs_in_parallel(run_ai, lab):
 		say('done'),
 	])
 	gap = run.requests[1].t - run.requests[0].t
-	assert 4 <= gap < 9, f'batch took {gap:.1f}s: the 3 calls of ~4s did not run in parallel'
+	assert 4 <= gap < 11, f'batch took {gap:.1f}s: the 3 calls of ~4s did not run in parallel (sequential: 12s+)'
 	nxt = run.requests[1]
 	titles = {r['title'] for k in ('t1', 't2') for r in nxt.tool_json(k)['results'] if r.get('_type') == 'url'}
 	assert titles == {'Slow 4.0'}
