@@ -6,12 +6,14 @@ import os
 import random
 import re
 from dataclasses import fields
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG, mask_secret, mask_url
 from secator.output_types import Warning, Error
+from secator.output_types._base import to_datetime
 from secator.rich import console, maybe_status
 from secator.runners import Task
 from secator.utils import format_token_count
@@ -358,7 +360,7 @@ def _resolve_field_type(f) -> Optional[type]:
 		name = t.split('[', 1)[0].strip().lower()
 		return {
 			'bool': bool, 'int': int, 'float': float,
-			'str': str, 'list': list, 'dict': dict,
+			'str': str, 'list': list, 'dict': dict, 'datetime': datetime,
 		}.get(name)
 	return None
 
@@ -405,6 +407,14 @@ def _coerce_finding_fields(cls, data: Dict) -> Dict:
 					data[key] = parsed[0]
 				# else: a non-string element (None, dict, ...) — leave the value unchanged so
 				# validate_fields rejects the malformed type instead of storing "None"/a dict repr.
+			continue
+		# datetime fields: the model can only send JSON, so accept ISO 8601 strings, epoch numbers
+		# and Mongo extended JSON ({'$date': ...}) and coerce to an aware UTC datetime. Unparseable
+		# values are left as-is so validate_fields rejects them with the expected format.
+		if expected is datetime:
+			parsed = to_datetime(value)
+			if parsed is not None:
+				data[key] = parsed
 			continue
 		# Already the right type (note: bool is a subclass of int, so guard it).
 		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):

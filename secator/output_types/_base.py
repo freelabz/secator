@@ -1,5 +1,7 @@
 import logging
+import math
 import re
+from datetime import date, datetime, timezone
 from functools import lru_cache
 from dataclasses import _MISSING_TYPE, dataclass, fields
 from secator.definitions import DEBUG
@@ -11,6 +13,88 @@ logger = logging.getLogger(__name__)
 # `confidence_nb`. Shared so every finding type derives it identically; mirrors the
 # order the vulnerability type used historically.
 CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
+
+# Human-readable format hint for datetime fields, shown in validation errors and schemas so a
+# caller (e.g. the ai task's add_finding / update_finding tools) knows what to send.
+DATETIME_FORMAT_HINT = "ISO 8601 string, e.g. '2026-01-31T12:00:00Z'"
+
+# Epoch values above this are taken as milliseconds (1e11 s is year ~5138; 1e11 ms is 1973).
+_EPOCH_MS_THRESHOLD = 1e11
+# A string is an epoch only when it is a plain >= 9-digit number (1e9 s = 2001), so a basic ISO
+# date ('20261121') or a bare year is never misread as seconds since 1970.
+_EPOCH_STR_RE = re.compile(r'^-?\d{9,}(\.\d+)?$')
+# Sub-microsecond fraction digits (e.g. nanoseconds), which datetime cannot hold.
+_EXTRA_FRACTION_RE = re.compile(r'(\.\d{6})\d+')
+
+
+def to_datetime(value):
+	"""Coerce a loosely-typed datetime value to a timezone-aware UTC ``datetime``.
+
+	Accepts a ``datetime`` (naive is taken as UTC), a ``date`` (midnight UTC), an ISO 8601
+	string (``T`` or space separator, ``Z`` / ``+HH:MM`` / ``+HHMM`` offset or naive, date-only),
+	an epoch int / float / numeric string (seconds, or milliseconds when clearly ms), and Mongo
+	extended JSON (``{'$date': <iso | ms>}``, ``{'$date': {'$numberLong': '<ms>'}}``).
+
+	Returns:
+		datetime | None: the UTC datetime, or None when the value is not a datetime.
+	"""
+	if isinstance(value, datetime):
+		if value.tzinfo is None:
+			return value.replace(tzinfo=timezone.utc)
+		return value.astimezone(timezone.utc)
+	if isinstance(value, date):
+		return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+	if isinstance(value, dict):
+		if set(value) == {'$date'}:
+			inner = value['$date']
+			if isinstance(inner, dict) and set(inner) == {'$numberLong'}:
+				inner = inner['$numberLong']
+			if isinstance(inner, str) and _EPOCH_STR_RE.match(inner.strip()):
+				inner = float(inner)
+			if isinstance(inner, (int, float)) and not isinstance(inner, bool):
+				return _from_epoch(inner, ms=True)  # extended JSON numeric $date is always ms
+			return to_datetime(inner)
+		return None
+	if isinstance(value, bool):
+		return None
+	if isinstance(value, (int, float)):
+		return _from_epoch(value)
+	if isinstance(value, str):
+		s = value.strip()
+		if not s:
+			return None
+		if _EPOCH_STR_RE.match(s):
+			return to_datetime(float(s))
+		if s[-1] in 'Zz':
+			s = s[:-1] + '+00:00'
+		s = _EXTRA_FRACTION_RE.sub(r'\1', s, count=1)
+		try:
+			dt = datetime.fromisoformat(s)
+		except ValueError:
+			dt = None
+			for fmt in ('%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%d %H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%f%z', '%Y-%m-%d %H:%M:%S.%f%z'):
+				try:
+					dt = datetime.strptime(s, fmt)
+					break
+				except ValueError:
+					continue
+			if dt is None:
+				return None
+		return to_datetime(dt)
+	return None
+
+
+def _from_epoch(ts, ms=False):
+	"""Epoch seconds (or ms: when ``ms`` is set, or the value is clearly ms) -> UTC datetime."""
+	try:
+		ts = float(ts)
+		if not math.isfinite(ts):
+			return None
+		if ms or abs(ts) >= _EPOCH_MS_THRESHOLD:
+			ts /= 1000
+		return datetime.fromtimestamp(ts, tz=timezone.utc)
+	except (OverflowError, OSError, ValueError):
+		return None
 
 
 @dataclass
@@ -197,7 +281,7 @@ class OutputType:
 		"""
 		type_map = {
 			'bool': bool, 'int': int, 'float': float,
-			'str': str, 'list': list, 'dict': dict,
+			'str': str, 'list': list, 'dict': dict, 'datetime': datetime,
 		}
 		resolved = {}
 		for f in fields(cls):
@@ -228,7 +312,8 @@ class OutputType:
 		of raising a raw ``TypeError`` at instantiation.
 		"""
 		errors = []
-		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool',
+		              datetime: f'datetime ({DATETIME_FORMAT_HINT})'}
 		expected_types = cls.field_types()
 		for f in fields(cls):
 			if f.name.startswith('_'):
@@ -254,7 +339,8 @@ class OutputType:
 	def schema(cls) -> str:
 		"""Get a human-readable schema string for this OutputType class."""
 		lines = [f"{cls.__name__}("]
-		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool',
+		              datetime: f'datetime ({DATETIME_FORMAT_HINT})'}
 		for f in fields(cls):
 			if f.name.startswith('_'):
 				continue

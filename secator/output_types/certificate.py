@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
 from secator.output_types import OutputType, Vulnerability
+from secator.output_types._base import to_datetime
 from secator.utils import rich_to_ansi
 
 
@@ -69,15 +70,9 @@ class Certificate(OutputType):
 
 	@staticmethod
 	def get_datetime(date):
-		if isinstance(date, datetime):
-			date = date.replace(tzinfo=timezone.utc)
-			return date
-		try:
-			dt = datetime.strptime(date, '%Y-%m-%dT%H:%M:%SZ')
-			dt = dt.replace(tzinfo=timezone.utc)
-			return dt
-		except (ValueError, TypeError):
-			return None
+		# Shared parser: also reads back what each driver stores (ISO 'T' / space-separated
+		# strings from json/sqlite/api, aware datetimes from mongodb), not just '...Z' strings.
+		return to_datetime(date)
 
 	def get_vulnerabilities(self):
 		if self.is_expired():
