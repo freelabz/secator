@@ -3,6 +3,7 @@ import fnmatch
 import ipaddress
 import os
 import re
+import shlex
 import socket
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -584,6 +585,82 @@ def _cmd_basename(cmd: str) -> str:
 	return cmd.rsplit('/', 1)[-1].lower()
 
 
+_CONTAINER_CLIS = ('docker', 'podman')
+# Sub-commands that run a command inside a container (`docker run IMG CMD...`,
+# `docker exec CTR CMD...`). Everything else (pull/build/compose/ps/...) runs no
+# user-chosen command, so it has no target to scope-check: image names and registry
+# hosts (docker.io, ghcr.io, ...) are infrastructure, not targets.
+_CONTAINER_RUN_SUBCMDS = ('run', 'create', 'exec')
+# Value-less run/create/exec options. Any other option without an inline `=value`
+# is assumed to take the next token as its value (true for most docker/podman options).
+_CONTAINER_BOOL_FLAGS = frozenset((
+	'--rm', '--detach', '--interactive', '--tty', '--privileged', '--init', '--publish-all',
+	'--read-only', '--no-healthcheck', '--oom-kill-disable', '--quiet', '--replace', '--rmi',
+	'--sig-proxy', '--help',
+))
+_CONTAINER_BOOL_SHORT = frozenset('ditPq')
+_SHELLS = ('sh', 'bash', 'ash', 'dash', 'zsh')
+_SHELL_META_RE = re.compile(r'[;&|$`()<>\n]')
+
+
+def _parse_container_cmd(args: List[str]) -> Tuple[List[str], List[str]]:
+	"""Split a ``docker``/``podman`` invocation into (inner command, local-only tokens).
+
+	``docker run [OPTS] IMAGE CMD...`` / ``docker exec [OPTS] CONTAINER CMD...``: the
+	inner command is ``CMD...`` (prefixed by ``--entrypoint`` when given). The local-only
+	tokens are the image / container name and the ``-p``/``--publish`` values
+	(``127.0.0.1:8080:80``): they bind or name local lab resources and are never
+	targets. A sub-command that runs no command (``pull``,
+	``compose up``, ``build``, ...) has no inner command and all its tokens are local.
+	"""
+	rest = list(args[1:])
+	if rest and rest[0] == 'container':
+		rest = rest[1:]
+	if not rest or rest[0] not in _CONTAINER_RUN_SUBCMDS:
+		return [], rest  # pull/build/compose/...: registries and images are infra, not targets
+	rest = rest[1:]
+	local = []
+	entrypoint = []
+	i = 0
+	while i < len(rest):
+		tok = rest[i]
+		if tok == '--':
+			i += 1
+			break
+		if not tok.startswith('-') or tok == '-':
+			break
+		flag, eq, value = tok.partition('=')
+		takes_value = not (
+			eq
+			or tok in _CONTAINER_BOOL_FLAGS
+			or (not tok.startswith('--') and set(tok[1:]) <= _CONTAINER_BOOL_SHORT)
+		)
+		if takes_value and i + 1 < len(rest):
+			value = rest[i + 1]
+		if flag in ('-p', '--publish') and value:
+			local.append(value)
+		elif flag == '--entrypoint' and value:
+			entrypoint = [value]  # `--entrypoint curl IMG https://x` runs `curl https://x`
+		i += 2 if takes_value else 1
+	if i < len(rest):
+		local.append(rest[i])  # the image / container name
+	return entrypoint + rest[i + 1:], local
+
+
+def _container_targets(args: List[str]) -> List[str]:
+	"""Targets reached by the command a ``docker``/``podman`` invocation runs in its container.
+
+	A container shares the host's network reach, so its command is scope-checked like
+	any other. ``sh -c 'SCRIPT'`` is unwrapped so the script itself is parsed.
+	"""
+	inner, _ = _parse_container_cmd(args)
+	if not inner:
+		return []
+	if _cmd_basename(inner[0]) in _SHELLS and '-c' in inner[1:-1]:
+		return extract_command_targets(inner[inner.index('-c', 1) + 1])
+	return extract_command_targets(shlex.join(inner))
+
+
 def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
@@ -600,11 +677,9 @@ def extract_command_targets(command: str) -> List[str]:
 	targets = []
 	seen = set()
 
-	# Docker/podman commands run in a sandbox — skip target detection
-	top_cmd = command.strip().split()[0] if command.strip() else ""
-	if top_cmd in ('docker', 'podman'):
-		return targets
-
+	# Docker/podman image names and `-p` publish values name local lab resources, not
+	# targets: the raw IP/URL sweep below skips them (`docker run -p 127.0.0.1:8080:80 app`).
+	container_local = []
 	paths = detect_paths(command)
 	cmd_names = set(_extract_cmd_names(command))
 
@@ -697,8 +772,11 @@ def extract_command_targets(command: str) -> List[str]:
 		for args in parsed_cmds:
 			if not args:
 				continue
-			# Skip docker/podman sub-commands
-			if args[0] in ('docker', 'podman'):
+			# Docker/podman sub-commands: check the command run inside the container
+			if _cmd_basename(args[0]) in _CONTAINER_CLIS:
+				container_local.extend(_parse_container_cmd(args)[1])
+				for target in _container_targets(args):
+					_add_target(target)
 				continue
 			cmd_base = _cmd_basename(args[0])
 			is_network_cmd = cmd_base in _NETWORK_CMDS
@@ -707,8 +785,17 @@ def extract_command_targets(command: str) -> List[str]:
 	except Exception:
 		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
 		# host sweep too (the IP/URL sweep below runs unconditionally).
+		if not _SHELL_META_RE.search(command):  # a single plain docker/podman command
+			try:
+				plain_args = shlex.split(command)
+			except ValueError:
+				plain_args = []
+			if plain_args and _cmd_basename(plain_args[0]) in _CONTAINER_CLIS:
+				container_local.extend(_parse_container_cmd(plain_args)[1])
 		for match in PII_PATTERNS["host"].finditer(command):
 			host = match.group()
+			if any(host in tok for tok in container_local):
+				continue
 			if host not in cmd_names and host not in seen and _resolves(host):
 				_add_target(host)
 
@@ -723,9 +810,13 @@ def extract_command_targets(command: str) -> List[str]:
 	# stays a documented residual: resolving it here is DNS-rebinding- and FP-prone.)
 	# ponytail: IP+URL only; hostname-in-code residual, add a quoted-region host sweep if it bites.
 	for match in URL_PATTERN.finditer(command):
-		_add_target(_strip_trailing_delims(match.group()))
+		url = _strip_trailing_delims(match.group())
+		if not any(url in tok for tok in container_local):
+			_add_target(url)
 	for match in PII_PATTERNS["ipv4"].finditer(command):
 		ip = match.group()
+		if any(ip in tok for tok in container_local):
+			continue
 		if not any(ip in t for t in targets) and not any(ip in p for p in paths):
 			_add_target(ip)
 

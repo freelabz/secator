@@ -216,5 +216,54 @@ class TestApproveThenRecheck(unittest.TestCase):
 		self.assertIn(('target', '[::1]'), prompts)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestContainerCommandTargets(unittest.TestCase):
+	"""Scope checks also apply to the command a docker/podman invocation runs in its container."""
+
+	def _targets(self, command):
+		with patch('secator.ai.guardrails._resolves', side_effect=lambda h: h.endswith('.example')):
+			return extract_command_targets(command)
+
+	def test_container_command_targets_are_extracted(self):
+		cases = {
+			'docker run --rm curlimages/curl https://out-of-scope.example': ['https://out-of-scope.example'],
+			'podman run alpine wget http://10.0.0.9/': ['http://10.0.0.9/'],
+			'docker run --rm -it -e A=1 --name x alpine nmap 10.0.0.9': ['10.0.0.9'],
+			'docker exec -it lab curl http://10.0.0.5': ['http://10.0.0.5'],
+			'docker container run alpine nc out-of-scope.example 80': ['out-of-scope.example'],
+			'docker run --entrypoint curl curlimages/curl out-of-scope.example': ['out-of-scope.example'],
+			'docker run alpine sh -c "curl out-of-scope.example && ping -c1 10.1.1.1"':
+				['out-of-scope.example', '10.1.1.1'],
+			'docker run --rm alpine true && curl https://other.example': ['https://other.example'],
+		}
+		for command, expected in cases.items():
+			with self.subTest(command=command):
+				self.assertEqual(self._targets(command), expected)
+
+	def test_local_lab_usage_has_no_targets(self):
+		for command in (
+			'docker run -p 127.0.0.1:8080:80 vulnerable/app',
+			'docker run -d --publish=127.0.0.1:8080:80 --name lab vulnerable/app',
+			'docker run --rm 127.0.0.1:5000/lab/app:1.0',
+			'docker pull ghcr.io/org/image:latest',
+			'podman pull docker.io/library/nginx:1.27',
+			'docker compose up -d',
+			'docker build -t lab .',
+			'docker ps -a',
+		):
+			with self.subTest(command=command):
+				self.assertEqual(self._targets(command), [])
+
+	def test_out_of_scope_container_command_is_not_auto_allowed(self):
+		perms = {k: list(v) for k, v in dict(CONFIG.addons.ai.permissions).items()}
+		perms['allow'] = perms.get('allow', []) + ['shell(docker)']
+		engine = PermissionEngine(perms, targets=['10.0.0.5'], workspace='/tmp/ws')
+		with patch('secator.ai.guardrails._resolves', return_value=False):
+			res = engine.check_action({
+				'action': 'shell', 'command': 'docker run --rm curlimages/curl https://out-of-scope.example'})
+		self.assertNotEqual(res.decision, 'allow')
+		self.assertIn('https://out-of-scope.example', res.targets)
+
+
 if __name__ == '__main__':
 	unittest.main()
