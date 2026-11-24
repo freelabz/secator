@@ -174,6 +174,10 @@ def _yield_tool_results(runner, collected):
 			{k: v for k, v in r.items() if k not in strip_fields}
 			for r in group_results
 		]
+		# Secret findings (secret scanners) often hold secrets with no recognizable format the
+		# text patterns would catch; encrypt their value structurally, before serialization.
+		if runner.encryptor:
+			serialized = [runner.encryptor.encrypt_finding(r) for r in serialized]
 		# Uniform runner-scope contract: a runner's findings are ALWAYS scoped by
 		# `_context.<type>_id` == runner.id (the minted {type}_id) — for task/workflow/scan
 		# alike. That single handle is what the model re-reads by. NOT `task_chunk_id`: it
