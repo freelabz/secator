@@ -555,8 +555,12 @@ def _ctx_for(action, ctx):
 
 
 def _status_item(job, context):
-	"""Model-facing status entry (a plain dict: reported in the tool result, not persisted)."""
-	return {"_type": "background_job", **job.to_dict(), "_context": dict(context)}
+	"""Model-facing status entry (a plain dict: reported in the tool result, not persisted).
+
+	Tagged ``ai_query_result`` so the loop only collects it for the tool result: yielded, the
+	runner would try to load it as an output type (there is none for it) and log a warning.
+	"""
+	return {"_type": "background_job", **job.to_dict(), "_context": {**context, "ai_query_result": True}}
 
 
 def _result_item(item, context):
