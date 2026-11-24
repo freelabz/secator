@@ -735,8 +735,13 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# then append the subagent persona so it carries out its objective itself. Strips are
 	# resilient no-ops when a block is absent (e.g. chat mode has no vulnerability_handling).
 	if is_subagent:
-		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
-		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
+		# Anchor the tags to line starts: prompts also mention them inline (e.g. "see
+		# <vulnerability_handling>"), and an unanchored match would strip everything from
+		# that mention to the closing tag.
+		result = re.sub(r'\n*^<subagents>$.*?^</subagents>$\n*', '\n\n', result, flags=re.DOTALL | re.MULTILINE)
+		result = re.sub(r'\n*^<vulnerability_handling>$.*?^</vulnerability_handling>$\n*', '\n\n', result, flags=re.DOTALL | re.MULTILINE)
+		# Scan's role line delegates to that block inline; drop the clause with it.
+		result = re.sub(r'; and hand [^;.]*?\(see <vulnerability_handling>\)[^;.]*', '', result)
 		result += "\n\n" + load_prompt("constraints/subagent.md")
 
 	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in

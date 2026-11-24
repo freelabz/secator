@@ -183,6 +183,10 @@ class TestPrompts(unittest.TestCase):
 		self.assertNotIn("run_subagent", sub)
 		self.assertNotIn("<subagents>", sub)
 		self.assertNotIn("<vulnerability_handling>", sub)
+		# The strip removes only the delegation blocks, not everything between an inline
+		# mention of the tag and the block's closing tag.
+		for block in ("<tool_calling>", "<guardrails>", "<scope_respect>", "<arsenal>"):
+			self.assertIn(block, sub, f"subagent strip removed {block}")
 		# Persona wired in, with the explicit no-nesting rule.
 		self.assertIn("<subagent>", sub)
 		self.assertIn("CANNOT spawn subagents", sub)
@@ -436,6 +440,38 @@ class TestPrompts(unittest.TestCase):
 			self.assertIn("scope is matched literally", p, f"{mode}: missing scope hostname/IP rule")
 		# chat is read-only and carries no guardrails block
 		self.assertNotIn("</guardrails>", get_system_prompt("chat"))
+
+	@patch("secator.ai.context.load_context_blocks", return_value=[])
+	def test_every_mode_has_single_scope_respect_section(self, _load_context):
+		"""Every mode (and its subagent variant) renders exactly one <scope_respect>
+		block: never bypass a scope/guardrail denial, and write targets literally so
+		target extraction sees them."""
+		from secator.ai.prompts import MODES
+		for mode in MODES:
+			for is_subagent in (False, True):
+				p = get_system_prompt(mode, is_subagent=is_subagent)
+				label = f"{mode} (subagent={is_subagent})"
+				self.assertEqual(p.count("<scope_respect>"), 1, f"{label}: expected one scope_respect block")
+				self.assertEqual(p.count("</scope_respect>"), 1, f"{label}: unterminated scope_respect block")
+				self.assertNotIn("${scope_respect}", p, f"{label}: unresolved include")
+				section = p.split("<scope_respect>", 1)[1].split("</scope_respect>", 1)[0]
+				self.assertIn("Never bypass a denial", section, f"{label}: missing no-bypass rule")
+				self.assertIn("Write every target literally", section, f"{label}: missing literal-target rule")
+				self.assertIn("legal and contractual", section, f"{label}: missing rationale")
+				self.assertIn("listed in scope", section, f"{label}: missing listed-form exception")
+				self.assertIn("False positives on non-target strings", section, f"{label}: missing false-positive item")
+				self.assertIn("justify why in your reply", section, f"{label}: false-positive item must require a justification")
+				self.assertIn("Never use this for a host, IP or URL you will send traffic to", section,
+				              f"{label}: false-positive item must exclude real targets")
+
+	def test_guardrails_has_no_container_retry_hint(self):
+		"""run_shell already runs in the sandbox when --isolated is set (and the model cannot
+		choose it otherwise), so guardrails must not suggest retrying a denied command in a
+		Docker container."""
+		from secator.ai.prompts import load_prompt
+		g = load_prompt("constraints/guardrails.md")
+		self.assertNotIn("isolated Docker container", g)
+		self.assertNotIn("<isolation> section", g)
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""
