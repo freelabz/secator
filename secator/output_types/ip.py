@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from secator.definitions import ALIVE, IP
+from secator.definitions import ALIVE, HOST, IP
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, format_object
 
@@ -36,6 +36,8 @@ class Ip(OutputType):
 	_table_fields = [IP, ALIVE]
 	_sort_by = (IP,)
 	_target_fields = ['ip']
+	_group_by = (IP,)            # one row per address; duplicates across runs/tools collapse
+	_group_aggregate = HOST      # the hostnames it was seen with
 
 	def __str__(self) -> str:
 		return self.ip

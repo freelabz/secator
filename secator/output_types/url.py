@@ -62,8 +62,8 @@ class Url(OutputType):
 	]
 	_sort_by = (URL,)
 	_target_fields = ['url']
-	_group_by = ('host',)        # collapse a host's URLs into one row
-	_group_aggregate = URL
+	_group_by = (URL,)           # one row per URL
+	_group_aggregate = '_source'
 
 	def __post_init__(self):
 		super().__post_init__()
