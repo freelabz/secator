@@ -209,29 +209,48 @@ def _format_action_error(e: Exception, max_chars: int = 400) -> str:
 	)
 
 
-_HEAVY_PROFILES = {'large', 'extra_large'}
+def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: list = None) -> bool:
+	"""Whether a sub-runner must be dispatched to its own queue instead of running sync
+	in-process inside the ai worker.
 
+	Workflows/scans fan out across multiple pools, so they are always dispatched. An AI
+	subagent stays in-process. A task is dispatched when it is:
 
-def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
-	"""Whether a sub-runner is too heavy to run sync in-process inside the ai worker.
-
-	Workflows/scans fan out across multiple pools, so they should always be
-	dispatched rather than run in-process. A task is heavy if its (possibly
-	opts-dependent) profile maps to a large worker pool (``large``/``extra_large``).
+	- heavy: its queue profile (dynamic profile or ``tasks.overrides.<task>.profile``) is one
+	  of ``addons.ai.dispatch_profiles``;
+	- wide: it would be split into chunks for these targets, or it has more than
+	  ``addons.ai.inline_max_targets`` targets. In-process work then never chunks, and the
+	  chunks run in parallel on the worker pools.
 	"""
 	if runner_type != 'task':
 		return True
+	from secator.ai.tools._runner import resolves_to_ai_task  # lazy: _runner imports this module
+	if resolves_to_ai_task(name):  # `ai` and `ai/<suffix>`
+		return False
 	try:
 		cls = Task.get_task_class(name)
 	except Exception:
 		return False
-	profile = getattr(cls, 'profile', 'small')
-	if callable(profile):
-		try:
-			profile = profile(opts or {})  # resolve dynamic profile (mirrors Command.s/si)
-		except Exception:
-			return True  # can't resolve — be conservative and dispatch
-	return profile in _HEAVY_PROFILES
+	targets = list(dict.fromkeys(targets or []))
+	if len(targets) > CONFIG.addons.ai.inline_max_targets:
+		return True
+	# Inputs the child pulls from earlier results at build time (a `targets_` extractor, or the
+	# targets tagged with a `parent_scope`) are unknown here and can make it wide: dispatch.
+	opts = opts or {}
+	if opts.get('parent_scope') or any(str(k).endswith('_') and str(k).rstrip('_') == 'targets' for k in opts):
+		return True
+	# Same rule as the task's own needs_chunking(), evaluated before the child is built. In a
+	# worker the chunk check runs with the async rule (input_chunk_size); the sync rule is checked
+	# too so the decision does not depend on where that check runs (at worst: one more dispatch).
+	would_chunk = getattr(cls, 'would_chunk', None)
+	if would_chunk and (would_chunk(targets, True, opts) or would_chunk(targets, False, opts)):
+		return True
+	from secator.runners._helpers import resolve_task_queue
+	try:
+		profile = resolve_task_queue(cls, opts)
+	except Exception:
+		return True  # can't resolve — be conservative and dispatch
+	return profile in set(CONFIG.addons.ai.dispatch_profiles or [])
 
 
 # Framework control/security keys the LLM must never set on a spawned sub-runner

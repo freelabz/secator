@@ -9,6 +9,36 @@ from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
 
 
+def get_task_overrides(task_name):
+	"""Return ``tasks.overrides.<task_name>`` as a plain dict (empty when unset).
+
+	``CONFIG.tasks.overrides`` auto-vivifies missing keys to a truthy empty object, so it is
+	normalized here before any lookup.
+	"""
+	overrides = CONFIG.tasks.overrides.get(task_name, {})
+	if hasattr(overrides, 'toDict'):
+		overrides = overrides.toDict()
+	return overrides
+
+
+def chunking_needed(count, sync, input_chunk_size, file_flag=None, is_chunk=False):
+	"""Whether a task run on ``count`` targets is split into chunks.
+
+	The single chunking rule, used by ``Command.needs_chunking`` / ``PythonRunner.needs_chunking``
+	on a built runner and by ``would_chunk`` on a task class that is not built yet:
+
+	- sync: several targets and no input-file flag (the command takes one target per run);
+	- async: more targets than ``input_chunk_size`` (``-1`` or unset: never).
+
+	A runner that is itself a chunk never chunks again.
+	"""
+	if is_chunk or count <= 1:
+		return False
+	if sync:
+		return file_flag is None
+	return bool(input_chunk_size) and input_chunk_size != -1 and count > input_chunk_size
+
+
 def apply_task_overrides(target, task_name=None):
 	"""Apply ``tasks.overrides.<task>.<attr>`` config overrides onto a task.
 
@@ -32,12 +62,7 @@ def apply_task_overrides(target, task_name=None):
 		The same ``target`` (mutated), for convenience.
 	"""
 	name = task_name or (target.__name__ if isinstance(target, type) else target.__class__.__name__)
-	# CONFIG.tasks.overrides auto-vivifies missing keys to a truthy empty object;
-	# normalize to a plain dict before iterating.
-	overrides = CONFIG.tasks.overrides.get(name, {})
-	if hasattr(overrides, 'toDict'):
-		overrides = overrides.toDict()
-	for attr, value in overrides.items():
+	for attr, value in get_task_overrides(name).items():
 		setattr(target, attr, value)
 	return target
 
@@ -61,12 +86,7 @@ def resolve_task_queue(task_cls, opts):
 	"""
 	if callable(task_cls.profile):
 		return task_cls.profile(opts)
-	# CONFIG.tasks.overrides is a DotMap-like Config that auto-vivifies missing keys to a truthy
-	# empty object (not None), so normalize to a plain dict before lookups.
-	task_overrides = CONFIG.tasks.overrides.get(task_cls.__name__, {})
-	if hasattr(task_overrides, 'toDict'):
-		task_overrides = task_overrides.toDict()
-	override = task_overrides.get('profile')
+	override = get_task_overrides(task_cls.__name__).get('profile')
 	return override if override else task_cls.profile
 
 

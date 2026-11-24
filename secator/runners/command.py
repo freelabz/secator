@@ -21,7 +21,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
-from secator.runners._helpers import apply_task_overrides
+from secator.runners._helpers import apply_task_overrides, chunking_needed, get_task_overrides
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -305,12 +305,33 @@ class Command(Runner):
 		return res
 
 	def needs_chunking(self, sync):
-		many_targets = len(self.inputs) > 1
-		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
-		has_file_flag = self.file_flag is not None
-		is_chunk = self.chunk
-		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
-		return chunk_it
+		return chunking_needed(len(self.inputs), sync, self.input_chunk_size, self.file_flag, self.chunk)
+
+	@classmethod
+	def runtime_chunk_attrs(cls, inputs, opts):
+		"""The ``input_chunk_size`` / ``file_flag`` this task sets at runtime for ``inputs`` and
+		``opts`` (empty: its class attributes stand).
+
+		A task whose ``before_init`` changes either attribute overrides this with that rule and
+		applies it from ``before_init``, so ``would_chunk`` sees the same values as the built runner.
+		"""
+		return {}
+
+	@classmethod
+	def would_chunk(cls, inputs, sync, opts=None):
+		"""``needs_chunking`` for a task that is not built yet, on ``inputs`` and ``opts``.
+
+		Mirrors ``__init__``: the class attributes, then the task's ``runtime_chunk_attrs`` (its
+		``before_init``), then ``tasks.overrides`` (applied last, so they win). Counts the distinct
+		inputs: the built runner then drops the ones of an unsupported type, so this never says
+		no to a runner that chunks (at worst yes to one whose dropped inputs leave a single one).
+		"""
+		inputs = list(dict.fromkeys(inputs if isinstance(inputs, list) else [inputs]))
+		attrs = {'input_chunk_size': cls.input_chunk_size, 'file_flag': cls.file_flag}
+		attrs.update(cls.runtime_chunk_attrs(inputs, opts or {}))
+		overrides = get_task_overrides(cls.__name__)
+		attrs.update({k: overrides[k] for k in attrs if k in overrides})
+		return chunking_needed(len(inputs), sync, attrs['input_chunk_size'], attrs['file_flag'])
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
