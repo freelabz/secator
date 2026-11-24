@@ -1553,6 +1553,10 @@ class TestQueryWithNoMatchGetsAnEmptyResult(unittest.TestCase):
 		                 ("query_workspace", "success", 0, []))
 		self.assertIn("No findings match", data["message"])
 		self.assertEqual(stored["p1"], TOOL_ACK_RESULT)
+		# a page past the end says so
+		list(_ack_resultless_calls(runner, [{"tool_call_id": "q2", "tool_call_name": "query_workspace",
+		                                     "offset": 100}], []))
+		self.assertIn("at offset 100", json.loads(stored["q2"])["message"])
 
 
 # =============================================================================

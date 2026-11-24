@@ -228,7 +228,7 @@ class TestJsonDriverTaskWrapperPath(JsonDriverTestBase):
 		runner.name = 'httpx'
 		runner.chunk = None
 		runner.has_parent = has_parent
-		runner.reports_folder = self.temp_dir
+		runner._reports_folder = self.temp_dir
 		return runner
 
 	def test_child_task_wrapper_writes_its_command_report(self):

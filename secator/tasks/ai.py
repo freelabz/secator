@@ -280,15 +280,18 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
-def _empty_tool_result(tc_name):
+def _empty_tool_result(tc_name, action):
 	"""Tool result for a dispatched call that produced no result item.
 
 	A query that matched nothing yields no finding, but it did run: answer with an explicit
 	empty result (count 0) so the model can tell "no match" apart from a bare acknowledgement.
 	Any other result-less tool gets the generic acknowledgement."""
 	if tc_name == "query_workspace":
+		message = "No findings match this query."
+		if action.get("offset"):
+			message = f"No findings match this query at offset {action['offset']}."
 		return json.dumps({"task": tc_name, "status": "success", "count": 0, "results": [],
-		                   "message": "No findings match this query."}, separators=(',', ':'))
+		                   "message": message}, separators=(',', ':'))
 	return TOOL_ACK_RESULT
 
 
@@ -310,7 +313,7 @@ def _ack_resultless_calls(runner, actions, collected):
 		if not tc_id or tc_id in answered or tc_name == "stop":
 			continue
 		answered.add(tc_id)
-		content = maybe_encrypt(_empty_tool_result(tc_name), runner.encryptor)
+		content = maybe_encrypt(_empty_tool_result(tc_name, action), runner.encryptor)
 		runner.history.add_tool_result(tc_name, tc_id, content)
 		yield Ai(content=f"[{tc_name}] done",
 		         ai_type="tool_result",
