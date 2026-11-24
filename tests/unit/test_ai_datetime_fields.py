@@ -222,7 +222,7 @@ class TestUpdateFindingDatetimePerDriver(unittest.TestCase):
 					_apply_set(docs[0], body)
 					resp.json.return_value = {'success': True}
 				return resp
-			patcher = patch('secator.query.api.requests.request', side_effect=fake_request)
+			patcher = patch('secator.query.api._session.request', side_effect=fake_request)
 			patcher.start()
 			self.addCleanup(patcher.stop)
 		return engine

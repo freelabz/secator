@@ -9,6 +9,8 @@ Configuration:
 	- addons.api.url: Base URL of the external API
 	- addons.api.api_key: API key for authentication
 	- addons.api.force_ssl: Enable/disable SSL certificate verification
+	- addons.api.retries: Retries on gateway errors / connections not established
+	- addons.api.retry_backoff: Backoff factor (s) between retries
 """
 
 import json
@@ -18,7 +20,8 @@ import requests
 from functools import cache
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, Error, Info
+from secator.output_types import FINDING_TYPES, Info
+from secator.requests import get_api_session
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
@@ -37,11 +40,16 @@ API_WORKSPACE_CREATE_ENDPOINT = CONFIG.addons.api.workspace_create_endpoint
 API_ORG_ID = CONFIG.addons.api.org_id
 FORCE_SSL = CONFIG.addons.api.force_ssl
 API_TIMEOUT = CONFIG.addons.api.timeout
+API_RETRIES = CONFIG.addons.api.retries
+API_RETRY_BACKOFF = CONFIG.addons.api.retry_backoff
 
 
 def get_runner_dbg(runner):
 	"""Runner debug object"""
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
+
+
+_session = get_api_session(retries=API_RETRIES, backoff=API_RETRY_BACKOFF)
 
 
 def _make_request(method, endpoint, data=None):
@@ -61,14 +69,33 @@ def _make_request(method, endpoint, data=None):
 	if json_data:
 		logged = json.dumps({**data, 'extra_data': '<redacted>'}, cls=DataclassEncoder) if internal else json_data
 		debug('API data', sub='hooks.api', verbose=True, obj=logged, obj_after=True)
-	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
-	result = response.json()
+	response = _session.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
+	if not response.ok:
+		# Check the status before decoding: an error page from a gateway is not JSON.
+		raise requests.HTTPError(f'API {method} {endpoint} failed: HTTP {response.status_code}: {_error_detail(response)}', response=response)  # noqa: E501
+	if not response.text.strip():
+		return None  # e.g. 204 No Content
+	try:
+		result = response.json()
+	except ValueError:
+		raise requests.exceptions.InvalidJSONError(
+			f'API {method} {endpoint} returned HTTP {response.status_code} with a non-JSON body: {_error_detail(response)}',
+			response=response,
+		) from None
 	debug('API response', sub='hooks.api', verbose=True,
 	      obj='<redacted>' if internal else result)
-	if not response.ok and result.get('detail'):
-		console.print(Error(message=f'API error: {result["detail"]}'))
-	response.raise_for_status()
 	return result
+
+
+def _error_detail(response, size=200):
+	"""The error `detail` of a JSON error response, else a short one-line snippet of the body."""
+	try:
+		body = response.json()
+		detail = body.get('detail') if isinstance(body, dict) else None
+	except ValueError:
+		detail = None
+	text = ' '.join(str(detail or response.text or '<empty body>').split())
+	return text if len(text) <= size else text[:size] + '...'
 
 
 def update_runner(self):
@@ -185,7 +212,12 @@ def resolve_workspace(value):
 	if API_ORG_ID is not None:
 		endpoint += f'?org_id={API_ORG_ID}'
 	result = _make_request('GET', endpoint)
-	items = result if isinstance(result, list) else (result.get('items') or result.get('results') or [])
+	if isinstance(result, list):
+		items = result
+	elif isinstance(result, dict):
+		items = result.get('items') or result.get('results') or []
+	else:
+		items = []  # e.g. an empty body
 	match = next((w for w in items if w.get('name') == value), None)
 	if not match:
 		raise Exception(f'Workspace "{value}" not found in remote API.')

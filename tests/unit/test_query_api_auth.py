@@ -30,14 +30,14 @@ class TestQueryBackendErrors(unittest.TestCase):
 		return backend
 
 	def test_missing_key_401_explains_how_to_configure_one(self):
-		with mock.patch('secator.query.api.requests.request', return_value=_response(401)):
+		with mock.patch('secator.query.api._session.request', return_value=_response(401)):
 			with self.assertRaises(QueryBackendError) as cm:
 				self._backend('')._make_request('GET', 'workspaces')
 		self.assertIn('no API key is configured', cm.exception.message)
 		self.assertIn('addons.api.key', cm.exception.message)
 
 	def test_rejected_key_403_says_the_key_is_invalid(self):
-		with mock.patch('secator.query.api.requests.request', return_value=_response(403)):
+		with mock.patch('secator.query.api._session.request', return_value=_response(403)):
 			with self.assertRaises(QueryBackendError) as cm:
 				self._backend('bad')._make_request('GET', 'workspaces')
 		self.assertIn('(403)', cm.exception.message)
@@ -55,7 +55,7 @@ class TestQueryBackendErrors(unittest.TestCase):
 			'search': lambda: backend.search({}),
 			'count': lambda: backend.count({}),
 		}
-		with mock.patch('secator.query.api.requests.request', return_value=_response(401)):
+		with mock.patch('secator.query.api._session.request', return_value=_response(401)):
 			for name, call in calls.items():
 				with self.subTest(call=name):
 					with self.assertRaises(QueryBackendError):
@@ -63,7 +63,7 @@ class TestQueryBackendErrors(unittest.TestCase):
 
 	def test_other_http_errors_stay_best_effort(self):
 		payload = {'items': [{'_id': 'a' * 24, 'name': 'ws'}]}
-		request = mock.patch('secator.query.api.requests.request', return_value=_response(500, payload))
+		request = mock.patch('secator.query.api._session.request', return_value=_response(500, payload))
 		with request, mock.patch('secator.query.api.console') as console:
 			self.assertEqual(self._backend('k').list_workspaces(), [])
 			self.assertEqual(self._backend('k').search({}), [])
@@ -87,7 +87,7 @@ class TestQueryBackendErrors(unittest.TestCase):
 
 	def test_ok_response_is_returned(self):
 		items = [{'_id': 'a' * 24, 'name': 'ws'}]
-		with mock.patch('secator.query.api.requests.request', return_value=_response(200, items)):
+		with mock.patch('secator.query.api._session.request', return_value=_response(200, items)):
 			self.assertEqual(self._backend('k').list_workspaces(), items)
 
 	def test_steer_poll_reports_auth_error_without_raising(self):
@@ -111,7 +111,7 @@ class TestWorkspaceListAuthError(unittest.TestCase):
 
 	def test_ws_list_fails_clearly_without_a_valid_key(self):
 		from secator.cli import cli
-		with mock.patch('secator.query.api.requests.request', return_value=_response(401)):
+		with mock.patch('secator.query.api._session.request', return_value=_response(401)):
 			with mock.patch('secator.query.api.CONFIG.addons.api.key', ''):
 				result = CliRunner().invoke(cli, ['ws', 'list', '--driver', 'api'])
 		self.assertEqual(result.exit_code, 1)

@@ -332,7 +332,8 @@ class TestReportShowApiBackend(unittest.TestCase):
 		if query_expr:
 			args += ['-q', query_expr]
 
-		with mock.patch('requests.request', side_effect=mock_request), \
+		with mock.patch('secator.hooks.api._session.request', side_effect=mock_request), \
+				mock.patch('secator.query.api._session.request', side_effect=mock_request), \
 				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
 			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
@@ -378,7 +379,8 @@ class TestReportShowApiBackend(unittest.TestCase):
 		def capture_send(report_self):
 			captured['results'] = report_self.data['results']
 
-		with mock.patch('requests.request', side_effect=Exception('connection refused')), \
+		with mock.patch('secator.hooks.api._session.request', side_effect=Exception('connection refused')), \
+				mock.patch('secator.query.api._session.request', side_effect=Exception('connection refused')), \
 				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
 			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
