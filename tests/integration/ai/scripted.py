@@ -23,6 +23,7 @@ import copy
 import itertools
 import json
 import re
+import ipaddress
 import socket
 import threading
 import time
@@ -341,7 +342,15 @@ def _forbidden(name):
 # Network guard
 # ---------------------------------------------------------------------------
 
-_LOOPBACK = ('127.', '::1', 'localhost', '0.0.0.0')
+def _is_loopback(host) -> bool:
+	"""A loopback IP (127.0.0.0/8, ::1) or exactly ``localhost``; nothing matched by prefix."""
+	host = str(host)
+	if host == 'localhost':
+		return True
+	try:
+		return ipaddress.ip_address(host.split('%', 1)[0]).is_loopback
+	except ValueError:
+		return False
 
 
 class NetworkGuard:
@@ -359,7 +368,7 @@ class NetworkGuard:
 		if sock.family == getattr(socket, 'AF_UNIX', None):
 			return True
 		host = address[0] if isinstance(address, tuple) else str(address)
-		return str(host).startswith(_LOOPBACK)
+		return _is_loopback(host)
 
 	def _block(self, address):
 		self.blocked.append(repr(address))

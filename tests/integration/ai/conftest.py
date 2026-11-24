@@ -91,8 +91,12 @@ class _LabHandler(BaseHTTPRequestHandler):
 	def do_GET(self):  # noqa: N802
 		url = urlparse(self.path)
 		if url.path == '/slow':
-			delay = float(parse_qs(url.query).get('s', ['3'])[0])
+			query = parse_qs(url.query)
+			delay = float(query.get('s', ['3'])[0])
+			start = time.time()
 			time.sleep(delay)
+			if 'id' in query:  # an id'ed hit records when it was served (overlap checks)
+				self.server.hits.setdefault(query['id'][0], []).append((start, time.time()))
 			status, body = 200, f'<html><head><title>Slow {delay}</title></head><body>slow</body></html>'
 		else:
 			status, body = PAGES.get(url.path, (404, '<html><head><title>Not found</title></head></html>'))
@@ -110,6 +114,10 @@ class _LabHandler(BaseHTTPRequestHandler):
 class _LabServer(ThreadingHTTPServer):
 	daemon_threads = True
 
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.hits = {}  # /slow?id=<id> -> [(start, end)]
+
 	def handle_error(self, request, client_address):
 		pass  # a client hanging up mid-response (timeouts, cancels) is expected here
 
@@ -118,6 +126,11 @@ class _LabServer(ThreadingHTTPServer):
 class Lab:
 	port: int
 	port2: int
+	servers: list = field(default_factory=list, repr=False)
+
+	def hits(self, hit_id):
+		"""(start, end) of each /slow?id=<hit_id> request served, on either port."""
+		return [h for srv in self.servers for h in srv.hits.get(hit_id, [])]
 
 	@property
 	def url(self):
@@ -135,7 +148,7 @@ def lab():
 		srv = _LabServer(('127.0.0.1', 0), _LabHandler)
 		threading.Thread(target=srv.serve_forever, daemon=True).start()
 		servers.append(srv)
-	yield Lab(servers[0].server_address[1], servers[1].server_address[1])
+	yield Lab(servers[0].server_address[1], servers[1].server_address[1], servers)
 	for srv in servers:
 		srv.shutdown()
 		srv.server_close()
@@ -169,6 +182,9 @@ def _ai_dirs():
 	yield root
 	allow.remove(EXTRA_ALLOW)
 	CONFIG.dirs.reports, CONFIG.dirs.templates = old, old_templates
+	from secator import loader  # templates were loaded from the temp dir: forget them
+	loader.find_templates.cache_clear()
+	loader.get_configs_by_type.cache_clear()
 	os.dup2(saved_stdin, 0)
 	os.close(saved_stdin)
 	import shutil

@@ -39,4 +39,4 @@ def test_batch_with_a_failing_call(run_ai, lab):
 	assert any(r.get('_type') == 'url' for r in nxt.tool_json('good')['results'])
 	assert 'ok' in nxt.tool_json('ok')['results'][0]['content']
 	# one tool result per call, in a single follow-up request
-	assert {m['tool_call_id'] for m in nxt.tool_messages()} == {'bad', 'fail', 'good', 'ok'}
+	assert sorted(m['tool_call_id'] for m in nxt.tool_messages()) == ['bad', 'fail', 'good', 'ok']

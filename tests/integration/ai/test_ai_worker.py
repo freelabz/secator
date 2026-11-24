@@ -319,13 +319,16 @@ def wrun(workers):
 # Scenarios
 # ---------------------------------------------------------------------------
 
-def test_batch_inprocess_and_dispatched(wrun):
+def test_batch_inprocess_and_dispatched(wrun, workers, lab):
 	"""In-process task + shell + dispatched workflow in one turn: parallel, all results back."""
 	run = wrun('batch')
 	assert run.status == 'SUCCESS', run.summary
-	r0, r1 = run.requests[:2]
-	gap = r1.t - r0.t
-	assert 3 <= gap < 25, f'the 3 calls of ~3s took {gap:.1f}s'
+	r1 = run.requests[1]
+	# the three ~3s lab hits overlapped in time (the lab records when it served each)
+	hits = {k: lab.hits(f'{k}@{workers.pool}') for k in ('inproc', 'sh', 'wf')}
+	assert all(hits.values()), hits
+	spans = [h[0] for h in hits.values()]
+	assert max(s for s, _ in spans) < min(e for _, e in spans), f'the calls did not overlap: {hits}'
 	assert 'Slow 3.0' in r1.tool_result('inproc')
 	assert 'worker-shell' in r1.tool_result('sh')
 	assert 'Slow 3.0' in r1.tool_result('wf')
@@ -371,7 +374,7 @@ def test_revoke_ai_task_mid_run(wrun, workers):
 	assert run.status == 'REVOKED', (run.status, errors)
 	# The ai task really stopped in the worker (not just the client giving up on it): had it kept
 	# running, it would call the model again once its children end (REVOKE_CHILD_S).
-	time.sleep(max(0, REVOKE_CHILD_S + 10 - run.summary['wall']))
+	time.sleep(REVOKE_CHILD_S + 10)  # from the client's return: the children started before it
 	assert len([r for r in load_requests(workers.record) if r.tag == run.tag and not r.side]) == 1, \
 		'the model was called after the revoke'
 
