@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import datetime
 from functools import lru_cache
 from dataclasses import _MISSING_TYPE, dataclass, fields
 from secator.definitions import DEBUG
@@ -11,6 +12,10 @@ logger = logging.getLogger(__name__)
 # `confidence_nb`. Shared so every finding type derives it identically; mirrors the
 # order the vulnerability type used historically.
 CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
+
+# Human-readable format hint for datetime fields, shown in validation errors and schemas so a
+# caller (e.g. the ai task's add_finding / update_finding tools) knows what to send.
+DATETIME_FORMAT_HINT = "ISO 8601 string, e.g. '2026-01-31T12:00:00Z'"
 
 
 @dataclass
@@ -197,7 +202,7 @@ class OutputType:
 		"""
 		type_map = {
 			'bool': bool, 'int': int, 'float': float,
-			'str': str, 'list': list, 'dict': dict,
+			'str': str, 'list': list, 'dict': dict, 'datetime': datetime,
 		}
 		resolved = {}
 		for f in fields(cls):
@@ -228,7 +233,8 @@ class OutputType:
 		of raising a raw ``TypeError`` at instantiation.
 		"""
 		errors = []
-		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool',
+		              datetime: f'datetime ({DATETIME_FORMAT_HINT})'}
 		expected_types = cls.field_types()
 		for f in fields(cls):
 			if f.name.startswith('_'):
@@ -254,7 +260,8 @@ class OutputType:
 	def schema(cls) -> str:
 		"""Get a human-readable schema string for this OutputType class."""
 		lines = [f"{cls.__name__}("]
-		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool',
+		              datetime: f'datetime ({DATETIME_FORMAT_HINT})'}
 		for f in fields(cls):
 			if f.name.startswith('_'):
 				continue

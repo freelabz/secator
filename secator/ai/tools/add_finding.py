@@ -35,7 +35,8 @@ class AddFinding(BaseTool):
 							"here, e.g. {\"name\": \"SQLi in login\", \"matched_at\": \"http://x/login\", "
 							"\"severity\": \"high\"}). MUST be a nested object — passing these as top-level args "
 							"makes strict function-calling providers drop them. List fields must be JSON arrays; "
-							"`extra_data` must be an object."
+							"`extra_data` must be an object; datetime fields (e.g. a certificate's not_after) take "
+							"an ISO 8601 string, e.g. \"2026-01-31T12:00:00Z\"."
 						),
 						"additionalProperties": True
 					}

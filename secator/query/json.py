@@ -3,9 +3,11 @@
 import json
 import orjson
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from secator.utils import to_datetime
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
@@ -95,6 +97,39 @@ def get_nested_field(item, key: str) -> Any:
 	return value
 
 
+def _has_datetime_operand(condition) -> bool:
+	if isinstance(condition, datetime):
+		return True
+	if isinstance(condition, dict):
+		return any(
+			isinstance(v, datetime) or (isinstance(v, list) and any(isinstance(x, datetime) for x in v))
+			or (k == '$not' and _has_datetime_operand(v))
+			for k, v in condition.items())
+	return False
+
+
+def _datetime_condition(condition):
+	"""Parse the value operands of ``condition`` to datetimes (unparseable ones are kept)."""
+	def conv(v):
+		if isinstance(v, (str, dict)):
+			dt = to_datetime(v)
+			return v if dt is None else dt
+		return v
+	if isinstance(condition, dict) and any(str(k).startswith('$') for k in condition):
+		out = {}
+		for op, v in condition.items():
+			if op in ('$in', '$nin') and isinstance(v, list):
+				out[op] = [conv(x) for x in v]
+			elif op in ('$eq', '$ne', '$gt', '$gte', '$lt', '$lte'):
+				out[op] = conv(v)
+			elif op == '$not' and isinstance(v, dict):
+				out[op] = _datetime_condition(v)
+			else:
+				out[op] = v
+		return out
+	return conv(condition)
+
+
 def match_query(item: dict, query: dict) -> bool:
 	"""Check if item matches MongoDB-style query."""
 	if '$and' in query:
@@ -111,6 +146,14 @@ def match_query(item: dict, query: dict) -> bool:
 		return or_result
 	for key, condition in query.items():
 		value = get_nested_field(item, key)
+		# A datetime operand (a date filter on a datetime field, see QueryBackend._merge_query):
+		# parse the stored value (an ISO string in the json store) so it compares by instant.
+		if _has_datetime_operand(condition):
+			value = to_datetime(value)
+		elif isinstance(value, datetime):
+			# The reverse: an in-memory datetime (a live OutputType or its toDict()) matched against a
+			# raw, un-normalized filter (string operands) — parse the operands instead.
+			condition = _datetime_condition(condition)
 
 		if isinstance(condition, dict):
 			for op, op_value in condition.items():
@@ -125,8 +168,11 @@ def match_query(item: dict, query: dict) -> bool:
 					continue
 				if op not in OPERATORS:
 					continue
-				if not OPERATORS[op](value, op_value):
-					return False
+				try:
+					if not OPERATORS[op](value, op_value):
+						return False
+				except TypeError:
+					return False  # incomparable types (e.g. a date vs an unparseable string): no match
 		else:
 			if value != condition:
 				return False

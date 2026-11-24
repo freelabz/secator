@@ -104,7 +104,9 @@ class MongoDBBackend(QueryBackend):
 		"""Update documents matching query in MongoDB."""
 		client = self._get_client()
 		result = client.main.findings.update_one(_seek_by_native_id(query), update)
-		return result.modified_count
+		# matched, not modified: a finding already in the requested state counts as written (as on
+		# the json/sqlite/api backends), so an idempotent re-write is not reported as "not found".
+		return result.matched_count
 
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into the dedicated ``notes`` collection (NOT findings).
