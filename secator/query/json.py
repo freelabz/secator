@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from secator.query._base import QueryBackend, sort_runners_chronologically
+from secator.query._base import QueryBackend, sort_runners_chronologically, validate_runner_order
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
 from secator.utils import debug
@@ -491,6 +491,7 @@ class JsonBackend(QueryBackend):
 		(False = outermost runners only, True = nested children only).
 		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
+		validate_runner_order(order)
 		from secator.utils import list_reports, get_info_from_report_path
 		paths = list_reports(workspace=workspace_id, type=runner_type)
 		runners = []

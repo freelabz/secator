@@ -86,10 +86,13 @@ def summarize_runner(runner):
 
 def filter_runners(runners, since=None, status=None, limit=50, now=None):
 	"""Filter runners by ``since`` (cutoff on start_time, else end_time) and ``status``,
-	sort newest-first, cap to ``limit``, and return compact summaries.
+	cap to ``limit``, and return compact summaries.
 
-	Runners with no parseable timestamp are dropped when a ``since`` filter is set (they
-	can't be shown to satisfy a time window) and sorted last otherwise."""
+	The incoming order is kept: the caller asks the query layer for the order it wants
+	(``list_runners(order='desc')`` for most recent first), which also applies a backend's
+	fallback timestamp (e.g. a local report's file mtime), so the cap keeps the first
+	``limit`` runners of that order. Runners with no parseable timestamp are dropped when
+	a ``since`` filter is set (they can't be shown to satisfy a time window)."""
 	cutoff = parse_since(since, now=now)
 	# A non-empty `since` that can't be parsed must be rejected, not silently ignored:
 	# returning unfiltered history under the requested-window label would let the model
@@ -106,10 +109,6 @@ def filter_runners(runners, since=None, status=None, limit=50, now=None):
 		if cutoff is not None and (dt is None or dt < cutoff):
 			continue
 		rows.append((dt, r))
-	# Most recent first (the query layer's 'desc' order, re-applied here so the cap below
-	# always keeps the most recent runs); unknown-timestamp runners sort last (only
-	# reachable when no `since`).
-	rows.sort(key=lambda t: (t[0] is not None, t[0] or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 	try:
 		limit = int(limit)
 	except (TypeError, ValueError):

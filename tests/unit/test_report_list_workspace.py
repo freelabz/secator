@@ -328,3 +328,13 @@ class TestSortRunnersChronologically(unittest.TestCase):
 		with mock.patch.object(engine, 'backend') as backend, self.assertRaises(ValueError):
 			engine.list_runners(order='newest')
 		backend.list_runners.assert_not_called()
+
+	def test_invalid_order_raises_on_every_backend(self):
+		# Raised before each backend's broad error handling, not swallowed into [].
+		from secator.query.api import ApiBackend
+		from secator.query.json import JsonBackend
+		from secator.query.mongodb import MongoDBBackend
+		from secator.query.sqlite import SqliteBackend
+		for cls in (JsonBackend, SqliteBackend, MongoDBBackend, ApiBackend):
+			with self.assertRaises(ValueError, msg=cls.__name__):
+				cls('').list_runners(order='newest')

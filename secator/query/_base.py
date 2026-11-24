@@ -241,6 +241,12 @@ RUNNER_ORDER_DESC = 'desc'
 RUNNER_ORDERS = (RUNNER_ORDER_ASC, RUNNER_ORDER_DESC)
 
 
+def validate_runner_order(order):
+	"""Raise ValueError unless ``order`` is a supported list_runners order."""
+	if order not in RUNNER_ORDERS:
+		raise ValueError(f'invalid runner order {order!r}: use one of {", ".join(RUNNER_ORDERS)}')
+
+
 def sort_runners_chronologically(runners, fallback=None, order=RUNNER_ORDER_ASC):
 	"""Sort runner dicts by time, in the requested ``order`` ('asc' or 'desc').
 
@@ -252,8 +258,7 @@ def sort_runners_chronologically(runners, fallback=None, order=RUNNER_ORDER_ASC)
 	The sort is stable in both orders, so ties keep the backend's order. Never relies on
 	the store or a remote endpoint's order. Raises ValueError on an unknown ``order``.
 	"""
-	if order not in RUNNER_ORDERS:
-		raise ValueError(f'invalid runner order {order!r}: use one of {", ".join(RUNNER_ORDERS)}')
+	validate_runner_order(order)
 	from datetime import datetime, timezone
 	from secator.ai.runner_history import parse_dt
 	floor = datetime.min.replace(tzinfo=timezone.utc)

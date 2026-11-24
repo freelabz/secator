@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import requests
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend, QueryBackendError, sort_runners_chronologically
+from secator.query._base import QueryBackend, QueryBackendError, sort_runners_chronologically, validate_runner_order
 from secator.config import CONFIG
 from secator.rich import console
 
@@ -253,6 +253,7 @@ class ApiBackend(QueryBackend):
         (False = outermost runners only, True = nested children only).
         order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
         """
+        validate_runner_order(order)
         try:
             endpoint = CONFIG.addons.api.runners_list_endpoint
             # Build params as a dict and url-encode them (workspace names may contain

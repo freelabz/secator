@@ -3,7 +3,7 @@
 from typing import List, Dict, Any, Optional
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend, sort_runners_chronologically
+from secator.query._base import QueryBackend, sort_runners_chronologically, validate_runner_order
 from secator.rich import console
 
 RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
@@ -220,6 +220,7 @@ class MongoDBBackend(QueryBackend):
 		(False = outermost runners only, True = nested children only).
 		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
+		validate_runner_order(order)
 		try:
 			client = self._get_client()
 			db = client.main

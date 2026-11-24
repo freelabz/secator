@@ -5,7 +5,7 @@ import re
 from typing import List, Dict, Any, Optional
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend, sort_runners_chronologically
+from secator.query._base import QueryBackend, sort_runners_chronologically, validate_runner_order
 from secator.rich import console
 
 # Query fields that map to real indexed columns instead of json_extract.
@@ -221,6 +221,7 @@ class SqliteBackend(QueryBackend):
 		True only nested children.
 		order: 'asc' (default) = oldest first, most recent last; 'desc' = most recent first.
 		"""
+		validate_runner_order(order)
 		if runner_type:
 			table = runner_type.rstrip('s') + 's'
 			tables = [table] if table in RUNNER_TABLES else []
