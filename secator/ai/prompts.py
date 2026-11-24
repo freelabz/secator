@@ -540,7 +540,7 @@ def build_session_context(isolated: bool = False) -> str:
 	Two things the model otherwise guesses wrong:
 	- the current date (it has no clock);
 	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
-	  Alpine sandbox (apk via sudo, unprivileged user) when ``--isolated``, otherwise THIS host's OS + package
+	  per-run sandbox when ``--isolated`` (details in ``<shell_environment>``), otherwise THIS host's OS + package
 	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
 	  host, and stops it issuing a sudo command that can only stall/fail.
 
@@ -559,9 +559,8 @@ def build_session_context(isolated: bool = False) -> str:
 	]
 	if isolated:
 		lines += [
-			"Shell environment: a disposable Alpine sandbox container, separate from the host — run_shell runs there, not on the host.",  # noqa: E501
-			"Package manager: apk — install packages with `sudo apk add --no-cache <pkg>`.",
-			"Privileges: running as the unprivileged `secator` user; passwordless sudo is allowed for `apk add` only.",
+			"Shell environment: this run's sandbox container — run_shell runs there, not on the host "
+			"(image, package manager and install commands: see <shell_environment>).",
 		]
 	else:
 		if isolated not in _SHELL_ENV_CACHE:
@@ -569,6 +568,51 @@ def build_session_context(isolated: bool = False) -> str:
 		lines += _SHELL_ENV_CACHE[isolated]
 	lines.append("</session_context>")
 	return "\n".join(lines)
+
+
+# Package manager per sandbox image family, derived from the configured image name (the sandbox
+# starts lazily on the first run_shell, after the prompt is built, so it cannot be probed here).
+# (name substrings, package manager install command, headless JRE package). The default
+# freelabz/secator image is Alpine and runs as the unprivileged `secator` user with passwordless
+# sudo for `apk add` only (see Dockerfile), hence the `sudo`.
+_SANDBOX_PACKAGE_MANAGERS = (
+	(("freelabz/secator",), "sudo apk add --no-cache", "openjdk17-jre-headless"),
+	(("alpine",), "apk add --no-cache", "openjdk17-jre-headless"),
+	(("debian", "ubuntu", "kali"), "apt-get install -y --no-install-recommends", "default-jre-headless"),
+	(("fedora", "rocky", "alma", "centos"), "dnf install -y", "java-17-openjdk-headless"),
+)
+
+
+def build_sandbox_packages(image: str) -> str:
+	"""Install guidance for the sandbox image: concrete commands when the image family is known
+	from its name, otherwise tell the model to detect the OS once and pick the manager."""
+	name = image.lower()
+	for needles, install, jre in _SANDBOX_PACKAGE_MANAGERS:
+		if any(n in name for n in needles):
+			return (
+				f'- System packages / runtimes:   run_shell(command="{install} go rust cargo nmap-scripts")\n'
+				f'- Java tools:   run_shell(command="{install} {jre}"), then '
+				'run_shell(command="java -jar $workspace_path/.outputs/<tool>/<tool>.jar")'
+			)
+	return (
+		"- The package manager of this image is not known in advance: run `cat /etc/os-release; id -u` once, "
+		"then use its manager (`apk add --no-cache`, `apt-get install -y`, `dnf install -y`), prefixed "
+		"with `sudo` when you are not root.\n"
+		"- Java tools: install a headless JRE with that manager (e.g. openjdk17-jre-headless, "
+		"default-jre-headless or java-17-openjdk-headless), then "
+		'run_shell(command="java -jar $workspace_path/.outputs/<tool>/<tool>.jar")'
+	)
+
+
+def build_shell_environment(isolated: bool) -> str:
+	"""The <shell_environment> block, picked from where run_shell really executes: the per-run
+	sandbox container (``--isolated``; image from ``addons.ai.isolated_container_image``) or the host."""
+	if not isolated:
+		return load_prompt("constraints/shell_host.md")
+	from secator.ai.tools._sandbox import _sandbox_image
+	image = _sandbox_image()
+	return Template(load_prompt("constraints/shell_sandbox.md")).safe_substitute(
+		sandbox_image=image, sandbox_packages=build_sandbox_packages(image))
 
 
 def build_contribute_deliverable(backend=None) -> str:
@@ -618,8 +662,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
 		out_of_scope: Optional deny-list of targets to surface in the prompt.
-		isolated: When not None (True/False), append a dynamic ``<session_context>`` block
-			describing the clock + the shell environment (sandbox vs host) for that mode.
+		isolated: Whether run_shell executes in the per-run sandbox; picks the
+			``<shell_environment>`` block (None: the ``security.shell_isolated`` default). When not
+			None, also append a dynamic ``<session_context>`` block (clock + shell environment).
 			Left None by callers (e.g. tests) that want a deterministic, static prompt.
 		is_subagent: When True, strip all subagent-delegation guidance (a subagent has no
 			`run_subagent` tool and must not spawn further subagents) and append the
@@ -656,6 +701,15 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		# disposable RemoteBackend sandbox, or any non-interactive run) it cannot, so it must
 		# paste the files inline for the user to PR themselves.
 		subst["deliverable"] = build_contribute_deliverable(backend)
+	if mode in ("scan", "exploit", "contribute", "monitor", "research"):
+		# Where run_shell executes (sandbox vs host). `isolated=None` (static callers, tests)
+		# falls back to the configured default for the ai task's --isolated option.
+		if isolated is None:
+			from secator.config import CONFIG
+			shell_isolated = bool(CONFIG.security.shell_isolated)
+		else:
+			shell_isolated = bool(isolated)
+		subst["shell_environment"] = build_shell_environment(shell_isolated)
 	result = system_prompt.safe_substitute(**subst)
 
 	# Prepend the programmatic current-mode statement (from the registry) so the model

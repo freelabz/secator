@@ -53,7 +53,7 @@ ${queries}
 ${findings}
 ${arsenal}
 ${guardrails}
-${isolation}
+$shell_environment
 ${proof}
 ${exploitation_report}
 

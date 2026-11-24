@@ -73,7 +73,7 @@ ${common}
 ${queries}
 ${findings}
 ${guardrails}
-${isolation}
+$shell_environment
 </constraints>
 
 ${operating_rules}
