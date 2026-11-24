@@ -27,10 +27,10 @@ class UserInputTimeout(Exception):
 	In remote mode a prompt is NOT auto-denied on timeout (that produced weird
 	states — an action silently denied while the user was away). Instead this
 	exception unwinds the AI loop so the worker exits cleanly (saving infra $).
-	On the way out the run closes the prompt (``status: "expired"``, see
-	``RemoteBackend.close_raised_prompts``): nothing is waiting on it any more.
-	The user's next message in the session respawns the `ai` task, which
-	restores the conversation and continues.
+	The prompt stays ``pending`` (still answerable) and the run stamps it
+	``extra_data.run_ended`` on the way out (see ``RemoteBackend.park_raised_prompts``),
+	so a reader can tell no worker is polling it. Answering it later respawns the
+	`ai` task, which restores the conversation and applies the answer.
 	"""
 
 
@@ -59,11 +59,18 @@ class InteractivityBackend:
 		"""
 		raise NotImplementedError
 
-	def close_raised_prompts(self, session_id: str) -> int:
-		"""Close the prompts this backend raised that are still unanswered.
+	def park_raised_prompts(self, session_id: str) -> int:
+		"""Mark the prompts this backend raised that are still unanswered as parked.
 
 		Called when the run ends (for any reason). No-op for backends that do not
-		persist prompts. Returns the number of prompts closed.
+		persist prompts. Returns the number of prompts parked.
+		"""
+		return 0
+
+	def resolve_parked_prompts(self, session_id: str, query_engine=None) -> int:
+		"""Resolve prompts that earlier, ended runs left unanswered (on resume).
+
+		No-op for backends that do not persist prompts. Returns the number resolved.
 		"""
 		return 0
 
@@ -163,8 +170,8 @@ class RemoteBackend(InteractivityBackend):
 		self.timeout = timeout
 		self.query_engine = query_engine
 		self.poll_interval = poll_interval
-		# prompt_uuid of every prompt this backend persisted, so the run can close
-		# the ones still unanswered when it ends (close_raised_prompts).
+		# prompt_uuid of every prompt this backend persisted, so the run can park
+		# the ones still unanswered when it ends (park_raised_prompts).
 		self._raised_prompt_uuids = set()
 
 	def get_initial_prompt(self, inputs, **context):
@@ -217,7 +224,7 @@ class RemoteBackend(InteractivityBackend):
 
 	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
 		# Record the prompt as this run's own even when its pending doc was persisted
-		# elsewhere (the `stop` tool persists its own doc), so run end can close it.
+		# elsewhere (the `stop` tool persists its own doc), so run end can park it.
 		if context.get("prompt_uuid"):
 			self._raised_prompt_uuids.add(context["prompt_uuid"])
 		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
@@ -353,26 +360,29 @@ class RemoteBackend(InteractivityBackend):
 		# Timeout with no answer. Do NOT return None (which the guardrail would
 		# treat as a deny) — that produced the "silently auto-denied while the user
 		# was away" state. Raise instead, so the AI loop unwinds and the worker exits
-		# cleanly (saving infra $). The run closes the prompt on its way out
-		# (close_raised_prompts); the next message in the session respawns the task.
+		# cleanly (saving infra $). The prompt stays pending (answerable); the run
+		# parks it on its way out (park_raised_prompts), and answering it respawns
+		# the task, which restores the conversation and applies the answer.
 		raise UserInputTimeout(f"No answer for {prompt_type} prompt after {self.timeout}s; worker exiting")
 
-	def close_raised_prompts(self, session_id):
-		"""Mark the prompts this backend raised that are still pending as expired.
+	def park_raised_prompts(self, session_id):
+		"""Stamp the prompts this backend raised that are still pending as parked.
 
-		A run that ends (answer timeout, success, failure, iteration cap) can no
-		longer act on an answer, so its unanswered prompts must not stay
-		``pending``: a reader listing pending prompts would show the session as
-		waiting for the user forever. Scoped to this run's own prompt_uuids, so it
-		never touches a prompt raised by another run of the same session. An
-		answer that already landed is left alone (the match is on ``pending``).
-		Best-effort: a backend error never fails the run.
+		A run that ends (answer timeout, success, failure, iteration cap) no longer
+		polls for an answer. Its unanswered prompts keep ``status: "pending"`` so a
+		client can still answer them while the task is stopped (answering respawns the
+		task, which restores the conversation and applies the answer, see
+		``restore_history_from_db``), and get ``extra_data.run_ended: True`` so a reader
+		can tell "waiting for an answer, no run live" from "a run is polling".
+		Scoped to this run's own prompt_uuids, so it never touches a prompt raised by
+		another run of the same session. An answer that already landed is left alone
+		(the match is on ``pending``). Best-effort: a backend error never fails the run.
 		"""
 		if self.query_engine is None or not self._raised_prompt_uuids:
 			return 0
-		closed = 0
+		parked = 0
 		# One update per prompt: some drivers update a single matching doc per call,
-		# so an `$in` over several prompt_uuids would close only one of them.
+		# so an `$in` over several prompt_uuids would park only one of them.
 		for prompt_uuid in sorted(self._raised_prompt_uuids):
 			try:
 				self.query_engine.update(
@@ -382,13 +392,55 @@ class RemoteBackend(InteractivityBackend):
 						"status": "pending",
 						"extra_data.prompt_uuid": prompt_uuid,
 					},
-					{"$set": {"status": "expired"}},
+					{"$set": {"extra_data.run_ended": True}},
 				)
-			except Exception:  # noqa: BLE001 - closing prompts must never fail the run
+			except Exception:  # noqa: BLE001 - parking prompts must never fail the run
 				continue
 			self._raised_prompt_uuids.discard(prompt_uuid)
-			closed += 1
-		return closed
+			parked += 1
+		return parked
+
+	def resolve_parked_prompts(self, session_id, query_engine=None):
+		"""Resolve the parked prompts a resumed session will not act on.
+
+		Called by a respawned run BEFORE it restores the conversation. A parked prompt
+		that was answered while the task was stopped is already ``answered``, so it is
+		not matched here and restore threads its answer into the history. One still
+		``pending`` was superseded by the new message that respawned the task: it is
+		marked ``timed_out`` (the status ``_expire_stale_pending`` gives a superseded
+		prompt) so it stops showing as waiting. Resolving before the restore read
+		means an answer either lands first (and is restored) or finds the prompt no
+		longer pending. Only parked prompts (``extra_data.run_ended``) are matched,
+		never one a live run is polling. ``query_engine`` overrides the backend's own,
+		which is only wired once the loop starts. Known limit: a driver that searches
+		then writes has a small window where an answer landing in between is
+		overwritten. Best-effort: a backend error never fails the run.
+		"""
+		engine = query_engine if query_engine is not None else self.query_engine
+		if engine is None:
+			return 0
+		base = {
+			"_type": "ai",
+			"_context.session_id": session_id,
+			"status": "pending",
+			"extra_data.run_ended": True,
+		}
+		try:
+			docs = engine.search(base) or []
+		except Exception:  # noqa: BLE001 - must never fail the run
+			return 0
+		resolved = 0
+		# One update per prompt (some drivers update a single matching doc per call).
+		for prompt_uuid in sorted({(d.get("extra_data") or {}).get("prompt_uuid") for d in docs} - {None}):
+			try:
+				engine.update(
+					{**base, "extra_data.prompt_uuid": prompt_uuid},
+					{"$set": {"status": "timed_out"}},
+				)
+			except Exception:  # noqa: BLE001 - must never fail the run
+				continue
+			resolved += 1
+		return resolved
 
 	def _resolve_answer(self, answered_query):
 		"""Return the newest answered doc's answer, or None if none answered.

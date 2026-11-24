@@ -179,13 +179,13 @@ class TestRemoteBackend(unittest.TestCase):
 		backend = RemoteBackend(timeout=10, query_engine=mock_engine, poll_interval=5)
 
 		# On timeout the prompt is NOT auto-denied: it raises so the worker exits
-		# cleanly. The poll itself does not flip the doc (the run closes it on exit).
+		# cleanly. The poll itself does not flip the doc (the run parks it on exit).
 		with self.assertRaises(UserInputTimeout):
 			backend.ask_user("What next?", [], "session1")
 
 		# Should have polled twice (0s, 5s) then timed out at 10s
 		self.assertEqual(mock_sleep.call_count, 2)
-		# The poll must NOT flip the doc (run end closes it, see close_raised_prompts).
+		# The poll must NOT flip the doc (run end parks it, see park_raised_prompts).
 		mock_engine.update.assert_not_called()
 
 	def test_poll_scopes_query_to_prompt_uuid(self):
@@ -223,11 +223,14 @@ class TestRemoteBackend(unittest.TestCase):
 		with self.assertRaises(UserInputTimeout):
 			backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
 
-		# No flip by the poll — closing is the run's job on exit.
+		# No flip by the poll — parking is the run's job on exit.
 		mock_engine.update.assert_not_called()
 
-	def test_close_raised_prompts_expires_only_own_pending(self):
-		"""Run end closes the prompts this backend raised that are still pending."""
+	def test_park_raised_prompts_parks_only_own_pending(self):
+		"""Run end parks the prompts this backend raised that are still pending.
+
+		They stay `pending` (still answerable while the task is stopped) and get
+		`extra_data.run_ended`; the status is never changed here."""
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
@@ -235,43 +238,68 @@ class TestRemoteBackend(unittest.TestCase):
 		backend.build_pending_prompt("Allow?", ["allow", "deny"], "s1",
 									 prompt_type="permission", prompt_uuid="u1")
 		mock_engine.update.reset_mock()  # build_pending_prompt expires superseded prompts
-		self.assertEqual(backend.close_raised_prompts("s1"), 2)
+		self.assertEqual(backend.park_raised_prompts("s1"), 2)
 		# One update per prompt (a driver may update only one doc per call).
 		calls = [c[0] for c in mock_engine.update.call_args_list]
 		self.assertEqual([q["extra_data.prompt_uuid"] for q, _ in calls], ["u1", "u2"])
 		for query, update in calls:
 			self.assertEqual(query["status"], "pending")
 			self.assertEqual(query["_context.session_id"], "s1")
-			self.assertEqual(update, {"$set": {"status": "expired"}})
-		# Idempotent: nothing left to close.
+			self.assertEqual(update, {"$set": {"extra_data.run_ended": True}})
+		# Idempotent: nothing left to park.
 		mock_engine.update.reset_mock()
-		self.assertEqual(backend.close_raised_prompts("s1"), 0)
+		self.assertEqual(backend.park_raised_prompts("s1"), 0)
 		mock_engine.update.assert_not_called()
 
 	@patch('secator.ai.interactivity.sleep')
-	def test_prompt_persisted_elsewhere_is_closed_after_timeout(self, mock_sleep):
+	def test_prompt_persisted_elsewhere_is_parked_after_timeout(self, mock_sleep):
 		"""A prompt whose doc was persisted by the caller (a `stop` with choices) is
-		still recorded by ask_user, so run end closes it after the answer timeout."""
+		still recorded by ask_user, so run end parks it after the answer timeout."""
 		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = []
 		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
 		with self.assertRaises(UserInputTimeout):
 			backend.ask_user("Pick one", ["a", "b"], "s1", prompt_uuid="stop-uuid")
-		self.assertEqual(backend.close_raised_prompts("s1"), 1)
+		self.assertEqual(backend.park_raised_prompts("s1"), 1)
 		query, _ = mock_engine.update.call_args[0]
 		self.assertEqual(query["extra_data.prompt_uuid"], "stop-uuid")
 
-	def test_close_raised_prompts_is_best_effort(self):
+	def test_resolve_parked_prompts_only_matches_parked_pending(self):
+		"""Resume resolves parked, still-pending prompts (one update each) as timed_out."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"extra_data": {"prompt_uuid": "p2", "run_ended": True}},
+			{"extra_data": {"prompt_uuid": "p1", "run_ended": True}},
+		]
+		# The engine is passed in: on resume the backend's own is not wired yet.
+		backend = RemoteBackend(timeout=60)
+		self.assertEqual(backend.resolve_parked_prompts("s1", query_engine=mock_engine), 2)
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query["status"], "pending")
+		self.assertIs(search_query["extra_data.run_ended"], True)
+		calls = [c[0] for c in mock_engine.update.call_args_list]
+		self.assertEqual([q["extra_data.prompt_uuid"] for q, _ in calls], ["p1", "p2"])
+		for query, update in calls:
+			self.assertEqual(query["status"], "pending")
+			self.assertIs(query["extra_data.run_ended"], True)
+			self.assertEqual(update, {"$set": {"status": "timed_out"}})
+
+	def test_park_and_resolve_are_best_effort(self):
 		"""No engine, no prompts or a backend error never raises."""
 		from secator.ai.interactivity import RemoteBackend, AutoBackend
-		self.assertEqual(RemoteBackend(timeout=60).close_raised_prompts("s1"), 0)
-		self.assertEqual(AutoBackend().close_raised_prompts("s1"), 0)
+		self.assertEqual(RemoteBackend(timeout=60).park_raised_prompts("s1"), 0)
+		self.assertEqual(RemoteBackend(timeout=60).resolve_parked_prompts("s1"), 0)
+		self.assertEqual(AutoBackend().park_raised_prompts("s1"), 0)
+		self.assertEqual(AutoBackend().resolve_parked_prompts("s1"), 0)
 		mock_engine = MagicMock()
 		mock_engine.update.side_effect = RuntimeError("db down")
+		mock_engine.search.side_effect = RuntimeError("db down")
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
 		backend._raised_prompt_uuids.add("u1")
-		self.assertEqual(backend.close_raised_prompts("s1"), 0)
+		self.assertEqual(backend.park_raised_prompts("s1"), 0)
+		self.assertEqual(backend.resolve_parked_prompts("s1"), 0)
 
 	def test_build_pending_prompt_stamps_permission_prompt_uuid(self):
 		"""A permission pending doc carries its prompt_uuid in extra_data."""
