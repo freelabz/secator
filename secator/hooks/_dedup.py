@@ -88,19 +88,48 @@ def compute_duplicate_updates(workspace_findings, untagged_findings, copy_fields
 	copy_fields = copy_fields or []
 	if baseline_index is None:
 		baseline_index = build_baseline_index(workspace_findings, copy_fields)
-	seen = []
+	if not isinstance(untagged_findings, list):
+		untagged_findings = list(untagged_findings)  # iterated twice below
+
+	# Group equal findings once by their equality key (O(n)) instead of rescanning the whole
+	# list for every item (O(n²)). Two findings are equal (dataclass ``__eq__``) exactly when
+	# their ``_compare_key()`` matches (the key covers every ``compare=True`` field, including
+	# ``_type``), so each group holds, in input order, the uuids ``==`` would have matched.
+	# Memory stays at the pairwise scan's level: a group holds uuids only (a bare uuid for a
+	# finding with no equal, a list otherwise), keys are recomputed rather than stored per
+	# finding, and a group is dropped once its main finding is processed.
+	groups = {}
+	for item in untagged_findings:
+		key = item._compare_key()
+		group = groups.get(key)
+		if group is None:
+			groups[key] = item._uuid
+		elif isinstance(group, list):
+			group.append(item._uuid)
+		else:
+			groups[key] = [group, item._uuid]
+
+	seen = set()
 	db_updates = {}
 
 	for item in untagged_findings:
 		if item._uuid in seen:
 			continue
 
-		duplicate_ids = [_._uuid for _ in untagged_findings if _ == item and _._uuid != item._uuid]
-		seen.extend(duplicate_ids)
+		key = item._compare_key()
+		group = groups.pop(key, None)
+		if group is None:
+			# Group already processed: only reached when a uuid is repeated across findings that
+			# are not equal. Rare, so fall back to the pairwise scan for this item.
+			group = [_._uuid for _ in untagged_findings if _ == item]
+		elif not isinstance(group, list):
+			group = [group]
+		duplicate_ids = [uuid_ for uuid_ in group if uuid_ != item._uuid]
+		seen.update(duplicate_ids)
 
 		copied_fields = {}
 		related_ids = []
-		entry = baseline_index.get(item._compare_key())
+		entry = baseline_index.get(key)
 		if entry:
 			ws_uuids = [uuid_ for uuid_ in entry['uuids'] if uuid_ != item._uuid]
 			if ws_uuids:

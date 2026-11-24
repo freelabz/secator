@@ -97,9 +97,20 @@ class ChannelEngine:
 		n = 0
 		for d in self.docs:
 			if _match(d, query):
-				d.update(update.get('$set', {}))
+				for key, val in update.get('$set', {}).items():
+					*parents, leaf = key.split('.')
+					cur = d
+					for part in parents:
+						cur = cur.setdefault(part, {})
+					cur[leaf] = val
 				n += 1
 		return n
+
+	def answer(self, prompt_uuid, answer):
+		"""A client answering a prompt: a compare-and-set on `pending`, like a real answer write."""
+		return self.update(
+			{"extra_data.prompt_uuid": prompt_uuid, "status": "pending"},
+			{"$set": {"status": "answered", "answer": answer}})
 
 	def insert(self, doc):
 		self.docs.append(dict(doc))
@@ -319,6 +330,116 @@ class TestConversationE2E(unittest.TestCase):
 		# Every distinct answer was applied exactly once, in order — none dropped/capped
 		# (30 << default ceiling 200).
 		self.assertEqual(served, answers)
+
+	# Scenario 7: a run that ends with its end-of-turn pause unanswered (the answer
+	# timeout) parks that prompt: it stays `pending` (answerable) and is stamped
+	# `run_ended` so a reader can tell no run is polling it.
+	def test_run_end_parks_its_unanswered_prompt(self):
+		e = ChannelEngine(answers=[])
+		e.docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": "scan the target", "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "done", "_timestamp": 2, "_context": _ctx()},
+		]
+		t = _make_task(e, content_only_llm(), seed_user=None, run_prompt="now check SSH")
+		_drive(t, "_maybe_resume_remote")
+		stopped = [d for d in e.docs if d.get("ai_type") == "stopped"]
+		self.assertEqual(len(stopped), 1)
+		self.assertEqual(stopped[0]["status"], "pending")
+		self.assertIs(stopped[0]["extra_data"]["run_ended"], True)
+
+	# Scenario 7b: parking is scoped to the run's own prompts — an older run's prompt of
+	# the same session, and an answered one, are left as they are.
+	def test_run_end_leaves_other_prompts_alone(self):
+		e = ChannelEngine(answers=["go on"])
+		e.docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": "scan the target", "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "permission", "content": "allow nmap?", "status": "pending",
+			 "_timestamp": 2, "extra_data": {"prompt_uuid": "other-run"}, "_context": _ctx()},
+		]
+		t = _make_task(e, content_only_llm(), seed_user="scan the target")
+		_drive(t, "_run_loop")
+		t._park_raised_prompts()
+		docs = {_get(d, "extra_data.prompt_uuid"): d for d in e.docs if d.get("status")}
+		other = docs.pop("other-run")
+		self.assertEqual(other["status"], "pending")
+		self.assertNotIn("run_ended", other["extra_data"])
+		by_status = {d["status"]: d for d in docs.values()}
+		self.assertEqual(sorted(by_status), ["answered", "pending"])
+		self.assertNotIn("run_ended", by_status["answered"]["extra_data"])
+		self.assertIs(by_status["pending"]["extra_data"]["run_ended"], True)
+
+	# Scenario 8: run ends with a pending prompt -> a client answers it while the task
+	# is stopped -> the task is respawned (no new message) -> restore applies the
+	# answer as the next user turn, and the prompt is resolved (not re-asked).
+	def test_answer_while_stopped_is_applied_on_restore(self):
+		e = ChannelEngine(answers=[])
+		e.insert({"_type": "ai", "ai_type": "prompt", "content": "scan the target",
+				  "_timestamp": 1, "_context": _ctx()})
+		t1 = _make_task(e, content_only_llm(), seed_user="scan the target")
+		_drive(t1, "_run_loop")
+		t1._park_raised_prompts()  # the finally of run()/resume
+		parked = [d for d in e.docs if d.get("ai_type") == "stopped"]
+		self.assertEqual(len(parked), 1)
+		self.assertEqual(parked[0]["status"], "pending")
+		# The client answers the parked prompt while no run is live: still answerable.
+		self.assertEqual(e.answer(parked[0]["extra_data"]["prompt_uuid"], "now check SSH"), 1)
+		seen = []
+
+		def llm(messages, *a, **k):
+			seen.append([m["content"] for m in messages if m.get("role") == "user"])
+			return content_only_llm()(messages, *a, **k)
+		t2 = _make_task(e, llm, seed_user=None, run_prompt="")
+		t2.backend.query_engine = None  # as in a real run: wired only once the loop starts
+		_drive(t2, "_maybe_resume_remote")
+		# The answer reached the model as the newest user turn of the restored run.
+		self.assertTrue(seen)
+		self.assertEqual(seen[0][-1], "now check SSH")
+		self.assertEqual(parked[0]["status"], "answered")
+		self.assertEqual(parked[0]["answer"], "now check SSH")
+		# Only the resumed run's own new pause is waiting now.
+		pending = [d for d in e.docs if d.get("status") == "pending"]
+		self.assertEqual(len(pending), 1)
+		self.assertNotEqual(pending[0]["extra_data"]["prompt_uuid"], parked[0]["extra_data"]["prompt_uuid"])
+
+	# Scenario 8b: a parked prompt left unanswered, superseded by a NEW message that
+	# respawns the task, is resolved on resume (it stops showing as waiting).
+	def test_new_message_resolves_parked_prompt_on_resume(self):
+		e = ChannelEngine(answers=[])
+		e.insert({"_type": "ai", "ai_type": "prompt", "content": "scan the target",
+				  "_timestamp": 1, "_context": _ctx()})
+		t1 = _make_task(e, content_only_llm(), seed_user="scan the target")
+		_drive(t1, "_run_loop")
+		t1._park_raised_prompts()
+		parked = [d for d in e.docs if d.get("ai_type") == "stopped"][0]
+		t2 = _make_task(e, content_only_llm(), seed_user=None, run_prompt="something else")
+		t2.backend.query_engine = None  # as in a real run: wired only once the loop starts
+		import sys
+		real_restore = sys.modules["secator.tasks.ai"].restore_history_from_db
+		status_at_restore = []
+
+		def _restore(*a, **k):
+			status_at_restore.append(parked["status"])
+			return real_restore(*a, **k)
+		with patch("secator.tasks.ai.restore_history_from_db", _restore):
+			_drive(t2, "_maybe_resume_remote")
+		# Resolved BEFORE the restore read the docs.
+		self.assertEqual(status_at_restore, ["timed_out"])
+		self.assertEqual(parked["status"], "timed_out")
+		self.assertIn("something else", [p.content for p in _prompt_docs(t2)])
+
+	# Scenario 8c: a prompt a LIVE run is polling (not parked) is never resolved by
+	# another run's resume.
+	def test_resume_leaves_unparked_pending_prompt_alone(self):
+		e = ChannelEngine(answers=[])
+		e.docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": "scan the target", "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "permission", "content": "allow nmap?", "status": "pending",
+			 "_timestamp": 2, "extra_data": {"prompt_uuid": "live-run"}, "_context": _ctx()},
+		]
+		t = _make_task(e, content_only_llm(), seed_user=None, run_prompt="")
+		t._run_loop = lambda: iter(())
+		_drive(t, "_maybe_resume_remote")
+		self.assertEqual(e.docs[1]["status"], "pending")
 
 
 if __name__ == "__main__":

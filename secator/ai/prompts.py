@@ -540,7 +540,7 @@ def build_session_context(isolated: bool = False) -> str:
 	Two things the model otherwise guesses wrong:
 	- the current date (it has no clock);
 	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
-	  Alpine sandbox (apk, root) when ``--isolated``, otherwise THIS host's OS + package
+	  per-run sandbox when ``--isolated`` (details in ``<shell_environment>``), otherwise THIS host's OS + package
 	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
 	  host, and stops it issuing a sudo command that can only stall/fail.
 
@@ -559,9 +559,8 @@ def build_session_context(isolated: bool = False) -> str:
 	]
 	if isolated:
 		lines += [
-			"Shell environment: a disposable, network-isolated Alpine sandbox container — run_shell runs there, not on the host.",  # noqa: E501
-			"Package manager: apk — install packages with `apk add --no-cache <pkg>`.",
-			"Privileges: running as root in the sandbox — no sudo needed.",
+			"Shell environment: this run's sandbox container — run_shell runs there, not on the host "
+			"(image, package manager and install commands: see <shell_environment>).",
 		]
 	else:
 		if isolated not in _SHELL_ENV_CACHE:
@@ -569,6 +568,62 @@ def build_session_context(isolated: bool = False) -> str:
 		lines += _SHELL_ENV_CACHE[isolated]
 	lines.append("</session_context>")
 	return "\n".join(lines)
+
+
+# The default sandbox image (freelabz/secator:<version>-lite, Alpine) runs as the unprivileged
+# `secator` user with passwordless sudo for `apk add` only; the full flavor drops that sudo rule
+# (see Dockerfile). Any other configured image is unknown here
+# (the sandbox starts lazily on the first run_shell, after the prompt is built), so the model is
+# told to detect its OS once.
+_DEFAULT_SANDBOX_REPO = "freelabz/secator"
+
+
+def build_sandbox_packages(image: str) -> str:
+	"""Install guidance for the sandbox image: concrete apk commands for the default secator lite
+	image, a detect-once step (OS, package manager, root or not) for any other image."""
+	java_run = 'run_shell(command="java -jar $runner_dir/.outputs/<tool>/<tool>.jar")'
+	repo, _, tag = image.split("@", 1)[0].partition(":")
+	if repo == _DEFAULT_SANDBOX_REPO and tag.endswith("-lite"):
+		return (
+			'- System packages / runtimes (Alpine, unprivileged user: apk via sudo):   '
+			'run_shell(command="sudo apk add --no-cache go rust cargo nmap-scripts")\n'
+			'- Java tools:   run_shell(command="sudo apk add --no-cache openjdk17-jre-headless"), then ' + java_run
+		)
+	return (
+		"- System packages / runtimes: this image's package manager is not known in advance: run "
+		"`cat /etc/os-release; id -u` once, then use its manager (`apk add --no-cache`, "
+		"`apt-get install -y`, `dnf install -y`), prefixed with `sudo` when you are not root.\n"
+		"- Java tools: install a headless JRE with that manager (e.g. openjdk17-jre-headless, "
+		"default-jre-headless or java-17-openjdk-headless), then " + java_run
+	)
+
+
+def build_sandbox_loopback() -> str:
+	"""Loopback rule for the sandbox, matching what the permission engine enforces (a private
+	network namespace exempts the sandbox's own loopback; host/container networking does not)."""
+	from secator.ai.guardrails import _sandbox_has_private_loopback
+	if _sandbox_has_private_loopback():
+		return (
+			"The sandbox has its own network namespace, so its loopback (127.0.0.1, ::1, localhost) is\n"
+			"its own: a lab or PoC service you start there can be reached on loopback from run_shell\n"
+			"without an approval prompt, unless a deny rule or out_of_scope entry covers it."
+		)
+	return (
+		"The sandbox shares another network namespace (host or container networking), so loopback\n"
+		"(127.0.0.1, ::1, localhost) is scoped like any other target."
+	)
+
+
+def build_shell_environment(isolated: bool) -> str:
+	"""The <shell_environment> block, picked from where run_shell really executes: the per-run
+	sandbox container (``--isolated``; image from ``addons.ai.isolated_container_image``) or the host."""
+	if not isolated:
+		return load_prompt("constraints/shell_host.md")
+	from secator.ai.tools._sandbox import _sandbox_image
+	image = _sandbox_image()
+	return Template(load_prompt("constraints/shell_sandbox.md")).safe_substitute(
+		sandbox_image=image, sandbox_packages=build_sandbox_packages(image),
+		sandbox_loopback=build_sandbox_loopback())
 
 
 def build_contribute_deliverable(backend=None) -> str:
@@ -614,12 +669,14 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 
 	Args:
 		mode: One of "scan", "chat", or "exploit"
-		workspace_path: Path to the workspace/reports directory
+		workspace_path: The runner's reports folder (e.g. <reports>/<workspace>/tasks/<id>), rendered
+			in the prompt as ``$runner_dir``. Not the workspace folder itself.
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
 		out_of_scope: Optional deny-list of targets to surface in the prompt.
-		isolated: When not None (True/False), append a dynamic ``<session_context>`` block
-			describing the clock + the shell environment (sandbox vs host) for that mode.
+		isolated: Whether run_shell executes in the per-run sandbox; picks the
+			``<shell_environment>`` block (None: the ``security.shell_isolated`` default). When not
+			None, also append a dynamic ``<session_context>`` block (clock + shell environment).
 			Left None by callers (e.g. tests) that want a deterministic, static prompt.
 		is_subagent: When True, strip all subagent-delegation guidance (a subagent has no
 			`run_subagent` tool and must not spawn further subagents) and append the
@@ -656,6 +713,15 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		# disposable RemoteBackend sandbox, or any non-interactive run) it cannot, so it must
 		# paste the files inline for the user to PR themselves.
 		subst["deliverable"] = build_contribute_deliverable(backend)
+	if mode in ("scan", "exploit", "contribute", "monitor", "research"):
+		# Where run_shell executes (sandbox vs host). `isolated=None` (static callers, tests)
+		# falls back to the configured default for the ai task's --isolated option.
+		if isolated is None:
+			from secator.config import CONFIG
+			shell_isolated = bool(CONFIG.security.shell_isolated)
+		else:
+			shell_isolated = bool(isolated)
+		subst["shell_environment"] = build_shell_environment(shell_isolated)
 	result = system_prompt.safe_substitute(**subst)
 
 	# Prepend the programmatic current-mode statement (from the registry) so the model
@@ -669,8 +735,13 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# then append the subagent persona so it carries out its objective itself. Strips are
 	# resilient no-ops when a block is absent (e.g. chat mode has no vulnerability_handling).
 	if is_subagent:
-		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
-		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
+		# Anchor the tags to line starts: prompts also mention them inline (e.g. "see
+		# <vulnerability_handling>"), and an unanchored match would strip everything from
+		# that mention to the closing tag.
+		result = re.sub(r'\n*^<subagents>$.*?^</subagents>$\n*', '\n\n', result, flags=re.DOTALL | re.MULTILINE)
+		result = re.sub(r'\n*^<vulnerability_handling>$.*?^</vulnerability_handling>$\n*', '\n\n', result, flags=re.DOTALL | re.MULTILINE)
+		# Scan's role line delegates to that block inline; drop the clause with it.
+		result = re.sub(r'; and hand [^;.]*?\(see <vulnerability_handling>\)[^;.]*', '', result)
 		result += "\n\n" + load_prompt("constraints/subagent.md")
 
 	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in
@@ -694,9 +765,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if isolated is not None:
 		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
-	# Substitute $workspace_path in the baked-in prompt BEFORE appending the user
-	# context, so a user note's body is treated verbatim (never token-substituted).
-	result = result.replace("$workspace_path", ws)
+	# Substitute $runner_dir (this runner's reports folder) in the baked-in prompt BEFORE
+	# appending the user context, so a user note's body is treated verbatim (never substituted).
+	result = result.replace("$runner_dir", ws)
 
 	# User-provided engagement context (~/.secator/templates/ai/**/*.md), appended last so
 	# it reads as an authoritative, run-specific overlay on top of the baked-in prompt.

@@ -70,10 +70,11 @@ downgrade / fix, never delete) and be conservative: act only on a confident, cle
 anything inconclusive stays completely as-is. Call stop when the surface has been walked.
 </mode>
 ${common}
+${scope_respect}
 ${queries}
 ${findings}
 ${guardrails}
-${isolation}
+$shell_environment
 </constraints>
 
 ${operating_rules}

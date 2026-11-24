@@ -6,7 +6,7 @@ behave like ``-f port.port`` when a single type is present.
 """
 import unittest
 
-from secator.cli import _apply_format
+from secator.query._format import _apply_format
 
 
 class TestApplyFormatBareField(unittest.TestCase):

@@ -31,10 +31,11 @@ runs:
         pip-${{ runner.os }}-py${{ inputs.python-version }}-
 
   # The mongodb extra (pymongo) is installed so the mongodb driver/backend tests run instead
-  # of skipping (the dev extra brings mongomock for the unit ones).
+  # of skipping (the dev extra brings mongomock for the unit ones). The worker extra (gevent)
+  # lets the per-pool worker tests cover the default gevent pool too.
   - name: Install secator with pipx
     shell: bash
-    run: pipx install -e .[dev,ai,mongodb]
+    run: pipx install -e .[dev,ai,mongodb,worker]
 
   - name: Add secator to $PATH
     shell: bash

@@ -3,9 +3,11 @@
 import json
 import orjson
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from secator.utils import to_datetime
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
@@ -95,6 +97,39 @@ def get_nested_field(item, key: str) -> Any:
 	return value
 
 
+def _has_datetime_operand(condition) -> bool:
+	if isinstance(condition, datetime):
+		return True
+	if isinstance(condition, dict):
+		return any(
+			isinstance(v, datetime) or (isinstance(v, list) and any(isinstance(x, datetime) for x in v))
+			or (k == '$not' and _has_datetime_operand(v))
+			for k, v in condition.items())
+	return False
+
+
+def _datetime_condition(condition):
+	"""Parse the value operands of ``condition`` to datetimes (unparseable ones are kept)."""
+	def conv(v):
+		if isinstance(v, (str, dict)):
+			dt = to_datetime(v)
+			return v if dt is None else dt
+		return v
+	if isinstance(condition, dict) and any(str(k).startswith('$') for k in condition):
+		out = {}
+		for op, v in condition.items():
+			if op in ('$in', '$nin') and isinstance(v, list):
+				out[op] = [conv(x) for x in v]
+			elif op in ('$eq', '$ne', '$gt', '$gte', '$lt', '$lte'):
+				out[op] = conv(v)
+			elif op == '$not' and isinstance(v, dict):
+				out[op] = _datetime_condition(v)
+			else:
+				out[op] = v
+		return out
+	return conv(condition)
+
+
 def match_query(item: dict, query: dict) -> bool:
 	"""Check if item matches MongoDB-style query."""
 	if '$and' in query:
@@ -111,6 +146,14 @@ def match_query(item: dict, query: dict) -> bool:
 		return or_result
 	for key, condition in query.items():
 		value = get_nested_field(item, key)
+		# A datetime operand (a date filter on a datetime field, see QueryBackend._merge_query):
+		# parse the stored value (an ISO string in the json store) so it compares by instant.
+		if _has_datetime_operand(condition):
+			value = to_datetime(value)
+		elif isinstance(value, datetime):
+			# The reverse: an in-memory datetime (a live OutputType or its toDict()) matched against a
+			# raw, un-normalized filter (string operands) — parse the operands instead.
+			condition = _datetime_condition(condition)
 
 		if isinstance(condition, dict):
 			for op, op_value in condition.items():
@@ -125,8 +168,11 @@ def match_query(item: dict, query: dict) -> bool:
 					continue
 				if op not in OPERATORS:
 					continue
-				if not OPERATORS[op](value, op_value):
-					return False
+				try:
+					if not OPERATORS[op](value, op_value):
+						return False
+				except TypeError:
+					return False  # incomparable types (e.g. a date vs an unparseable string): no match
 		else:
 			if value != condition:
 				return False
@@ -174,10 +220,37 @@ def _line_needles(query):
 	return needles
 
 
+# Every `"_type": "<name>"` pair of a raw ndjson line (nested ones included, so the record's own
+# type is always among them).
+_LINE_TYPES = re.compile(rb'"_type"\s*:\s*"([^"\\]*)"')
+
+
+def _line_type_sets(query):
+	"""Sets of type names (bytes) a raw ndjson line must name at least one of, as a ``"_type"``
+	value: from ``_type: {$in: [...]}`` (a multi-type read, see
+	``secator.query._stream.iter_types_raw``) at the top level or in ``$and`` branches. The
+	multi-type counterpart of the ``_line_needles`` prefilter; one regex scan per line, however
+	many types are listed. Names a plain JSON string cannot hold verbatim disable it."""
+	if not isinstance(query, dict):
+		return []
+	sets = []
+	cond = query.get('_type')
+	values = cond.get('$in') if isinstance(cond, dict) else None
+	if (isinstance(values, list) and values
+			and all(isinstance(v, str) and v and orjson.dumps(v)[1:-1] == v.encode() for v in values)):
+		sets.append(frozenset(v.encode() for v in values))
+	and_queries = query.get('$and')
+	if isinstance(and_queries, list):
+		for sub in and_queries:
+			sets.extend(_line_type_sets(sub))
+	return sets
+
+
 class JsonBackend(QueryBackend):
 	"""Query backend for JSON files on filesystem."""
 
 	name = "json"
+	scan_per_query = True  # every query reads every report file of the workspace
 
 	def __init__(self, workspace_id: str, config: Optional[dict] = None,
 				 context: Optional[dict] = None):
@@ -197,7 +270,8 @@ class JsonBackend(QueryBackend):
 		workspace_folder = get_workspace_folder_name(self.workspace_id, self.reports_dir)
 		return self.reports_dir / workspace_folder
 
-	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, needles: list = None):
+	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, needles: list = None,
+						type_sets: list = None):
 		"""Yield one runner's records matching ``query``, keeping only each finding's LATEST record.
 
 		The live store (``results.ndjson``) is append-only: updating a finding appends a new record
@@ -214,7 +288,8 @@ class JsonBackend(QueryBackend):
 		legacy ``report.json`` (no ndjson) is read whole.
 
 		``needles``: pass 1 skips ndjson lines missing any of these byte strings without parsing
-		them (see ``_line_needles``). Every record of one finding has the same ``_uuid`` and
+		them (see ``_line_needles``); ``type_sets`` skips lines naming none of a set's types
+		(see ``_line_type_sets``). Every record of one finding has the same ``_uuid`` and
 		``_type``, so the latest record of each finding that can match is still indexed."""
 		runner_id = report_dir.name
 
@@ -251,6 +326,8 @@ class JsonBackend(QueryBackend):
 									continue
 							elif needles and not all(map(line.__contains__, needles)):
 								continue
+							elif type_sets and not all(not s.isdisjoint(_LINE_TYPES.findall(line)) for s in type_sets):
+								continue
 							line = line.strip()
 							if not line:
 								continue
@@ -282,6 +359,7 @@ class JsonBackend(QueryBackend):
 		parses the lines containing that uuid / type name. A finding lives in one runner's store;
 		should a ``_uuid`` appear in several, the first runner dir read wins."""
 		needles = _line_needles(query)
+		type_sets = _line_type_sets(query)
 		report_dir = self.context.get('report_dir')
 		if report_dir:
 			report_dir = Path(report_dir)
@@ -296,7 +374,7 @@ class JsonBackend(QueryBackend):
 						dirs.extend((d, runner_type.rstrip('s')) for d in runner_path.iterdir() if d.is_dir())
 		seen = set()
 		for d, singular in dirs:
-			for rec in self._iter_report_dir(d, singular, query, needles):
+			for rec in self._iter_report_dir(d, singular, query, needles, type_sets):
 				uid = rec.get('_uuid') if isinstance(rec, dict) else None
 				if uid:
 					if uid in seen:

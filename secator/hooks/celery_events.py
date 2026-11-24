@@ -18,6 +18,10 @@ from secator.config import CONFIG
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug
 
+# Post phase: run after the persistence drivers, so the published run is already stored with its
+# final status when a consumer reads it.
+HOOK_PHASE = 'post'
+
 # Bounded publish retries: the hook runs on the worker that just finished the run, so a broker
 # outage must not stall it for long.
 PUBLISH_RETRY_POLICY = {'max_retries': 3, 'interval_start': 0, 'interval_step': 1, 'interval_max': 2}

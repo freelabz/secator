@@ -12,6 +12,7 @@ from time import time
 from dotmap import DotMap
 from rich.errors import MarkupError as RichMarkupError
 import humanize
+from celery.result import allow_join_result
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
@@ -27,7 +28,7 @@ from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, get_workspace_folder_name
 from secator.tree import build_runner_tree, prune_runner_tree
-from secator.loader import get_configs_by_type
+from secator.loader import get_configs_by_type, get_hook_driver, get_hook_phase, hook_sort_key
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ HOOKS = [
 	'on_run_end',
 	'on_item_pre_convert',
 	'on_item',
+	'on_item_update',
 	'on_duplicate',
 	'on_interval',
 ]
@@ -630,16 +632,14 @@ class Runner:
 		from secator.loader import apply_default_drivers, discover_external_drivers, order_drivers
 		# json is the CORE default store: EVERY run — CLI and library (Workflow(...).run(), tests) —
 		# is store-backed, so `results` (the StreamView) always has a store to read. mongodb still
-		# wins when active (priority). Stamped into context so descendants inherit it.
+		# wins when active (authority order). Stamped into context so descendants inherit it.
 		drivers = apply_default_drivers(self.context.get('drivers', []), CONFIG.addons.mongodb.enabled)
 		self.context['drivers'] = drivers
 		if not drivers:
 			return
 
 		discover_external_drivers()
-		# Order by canonical priority so authoritative backends (e.g. mongodb)
-		# register their hooks before relay drivers (e.g. api). Hook lists are
-		# concatenated in driver order, so this decides hook execution order.
+		# Order by hook phase: pre drivers, then persistence drivers (api last), then post drivers (e.g. discord).
 		drivers = order_drivers(drivers)
 		hooks_list = []
 		for driver in drivers:
@@ -1116,7 +1116,12 @@ class Runner:
 		if self.sync:
 			self.print_item = False
 			self.debug('running workflow in sync mode', sub='start')
-			results = workflow.apply().get()
+			# Eager run in this process: every result is already computed, so lift Celery's
+			# "never call result.get() within a task" guard (set by prefork/solo/threads).
+			# The guard is a process-wide flag: on a threads pool with concurrency > 1, two
+			# overlapping sync children can restore it under each other.
+			with allow_join_result():
+				results = workflow.apply().get()
 		else:
 			self.debug('running workflow in async mode', sub='start')
 			self.celery_result = workflow()
@@ -1193,13 +1198,18 @@ class Runner:
 		# value is redacted where it actually lands: run_opts (resolved_opts) and the cmd.
 		return data
 
-	def run_hooks(self, hook_type, *args, sub='hooks'):
+	def run_hooks(self, hook_type, *args, sub='hooks', phase=None):
 		""" "Run hooks of a certain type.
+
+		A failing hook is reported as an Error and the previous hook's result is passed on. With
+		``raise_on_error``, the failure is re-raised unless the hook belongs to a pre / post driver:
+		those never abort the remaining hooks (notably the persistence drivers').
 
 		Args:
 			hook_type (str): Hook type.
 			args (list): List of arguments to pass to the hook.
 			sub (str): Debug id.
+			phase (str): Only run the hooks of this driver phase (non-driver hooks are ``pre``).
 
 		Returns:
 			any: Hook return value.
@@ -1219,6 +1229,8 @@ class Runner:
 			self.debug('hook skipped (backend update frequency)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
 			return result
 		for hook in hooks:
+			if phase and get_hook_phase(hook) != phase:
+				continue
 			fun = self.get_func_path(hook)
 			try:
 				if not self.enable_hooks or self.no_process:
@@ -1229,7 +1241,8 @@ class Runner:
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
-				if self.raise_on_error:
+				isolated = get_hook_driver(hook) and get_hook_phase(hook) != 'persist'
+				if self.raise_on_error and not isolated:
 					raise e
 				self.add_result(error, hooks=False)
 		return result
@@ -1300,6 +1313,9 @@ class Runner:
 				fun = self.get_func_path(hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
 				registered.append(hook)
+
+			# Run hooks phase by phase whatever the registration order (CLI, profile, context drivers)
+			registered.sort(key=hook_sort_key)
 
 	def register_validators(self, validators):
 		"""Register validators.
