@@ -579,6 +579,7 @@ class ai(PythonRunner):
 			try:
 				yield from self._run_loop()
 			finally:
+				self._park_raised_prompts()  # the run is over: no poll waits on its prompts
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
@@ -616,6 +617,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._park_raised_prompts()  # the run is over: no poll waits on its prompts
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 
@@ -857,6 +859,13 @@ class ai(PythonRunner):
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)
 
+		# Prompts an earlier run left parked: one answered while the task was stopped
+		# is `answered`, so it is not touched and the restore below threads its answer
+		# into the history; one still pending was superseded by the message that
+		# respawned this run, so resolve it. Done BEFORE the restore read, so an answer
+		# either lands first (and is restored) or finds the prompt no longer pending.
+		self._resolve_parked_prompts(query_engine)
+
 		# Rebuild history from the channel docs (text-only; see restore_history_from_db)
 		self.history = restore_history_from_db(
 			self.session_id, query_engine, model=self.model,
@@ -900,6 +909,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._park_raised_prompts()  # the run is over: no poll waits on its prompts
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 		return True
@@ -1384,12 +1394,13 @@ class ai(PythonRunner):
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 
 			except UserInputTimeout as e:
-				# A remote prompt went unanswered past the timeout. The pending doc
-				# is LEFT pending (not denied) — exit the worker cleanly to save infra
-				# $. Emit the notice to the console/pod-logs ONLY (not a persisted
+				# A remote prompt went unanswered past the timeout. It is NOT denied:
+				# exit the worker cleanly to save infra $. The prompt stays pending
+				# (answerable) and is parked on the way out (_park_raised_prompts).
+				# Emit the notice to the console/pod-logs ONLY (not a persisted
 				# Warning), so it does NOT surface in the chat: the still-pending
 				# prompt is the user-facing state, and answering it later respawns
-				# the task to continue.
+				# the task, which restores the conversation and applies the answer.
 				console.print(Warning(message=str(e)))
 				return
 
@@ -1425,6 +1436,42 @@ class ai(PythonRunner):
 
 		self._save_history()
 		yield Info(message=f"Reached max iterations ({iteration}/{self.max_iterations})")
+
+	def _park_raised_prompts(self):
+		"""Park the prompts this run raised that are still unanswered (best-effort).
+
+		Runs when the loop exits for any reason (answer timeout, stop, failure,
+		iteration cap). The prompts stay answerable: answering one while the task is
+		stopped respawns it, and the resumed run applies the answer. Parking only
+		records that no run is polling them any more.
+		"""
+		backend = getattr(self, "backend", None)
+		if backend is None:
+			return
+		try:
+			parked = backend.park_raised_prompts(self.session_id)
+		except Exception as e:  # noqa: BLE001 - must never fail the run
+			self.debug(f'park prompts failed: {e}', sub='llm')
+			return
+		if parked:
+			self.debug(f'parked {parked} unanswered prompt(s)', sub='llm')
+
+	def _resolve_parked_prompts(self, query_engine):
+		"""On resume, resolve parked prompts superseded by the respawning message (best-effort).
+
+		``query_engine`` is passed explicitly: the backend's own engine is only wired
+		once ``_run_loop`` starts, after this runs.
+		"""
+		backend = getattr(self, "backend", None)
+		if backend is None:
+			return
+		try:
+			resolved = backend.resolve_parked_prompts(self.session_id, query_engine=query_engine)
+		except Exception as e:  # noqa: BLE001 - must never fail the run
+			self.debug(f'resolve parked prompts failed: {e}', sub='llm')
+			return
+		if resolved:
+			self.debug(f'resolved {resolved} parked prompt(s)', sub='llm')
 
 	def _teardown_isolation(self):
 		"""Remove this run's --isolated sandbox container at turn end (best-effort, idempotent).
@@ -2129,6 +2176,10 @@ class ai(PythonRunner):
 						stop_prompt_uuid = str(uuid.uuid4())
 						result.extra_data = {
 							**(result.extra_data or {}), "prompt_uuid": stop_prompt_uuid}
+						# Register it as this run's prompt as soon as it is persisted: a
+						# revoke after this batch returns before ask_user, and run end
+						# must still park it.
+						self.backend.track_prompt(stop_prompt_uuid)
 					self.add_result(result, print=not is_from_subagent)
 					continue
 				self.add_result(result, print=not is_from_subagent)
