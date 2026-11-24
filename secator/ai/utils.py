@@ -13,10 +13,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG, mask_secret, mask_url
 from secator.output_types import Warning, Error
-from secator.output_types._base import to_datetime
 from secator.rich import console, maybe_status
 from secator.runners import Task
-from secator.utils import format_token_count
+from secator.utils import format_token_count, to_datetime
 
 # Module-level state for litellm initialization
 _llm_initialized = False

@@ -5,8 +5,7 @@ from datetime import datetime, timedelta, timezone
 from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
 from secator.output_types import OutputType, Vulnerability
-from secator.output_types._base import to_datetime
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, to_datetime
 
 
 @dataclass

@@ -17,7 +17,7 @@ from secator.ai.actions import ActionContext
 from secator.ai.tools import TOOLS_BY_NAME
 from secator.ai.utils import _coerce_finding_fields
 from secator.output_types import Certificate, Domain
-from secator.output_types._base import to_datetime
+from secator.utils import to_datetime
 from secator.query import QueryEngine
 from secator.query.json import _apply_set, match_query
 from secator.serializers.dataclass import DataclassEncoder

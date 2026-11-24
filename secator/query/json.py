@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from secator.output_types._base import to_datetime
+from secator.utils import to_datetime
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name

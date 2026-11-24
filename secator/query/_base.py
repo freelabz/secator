@@ -160,7 +160,7 @@ class QueryBackend(ABC):
 		into the representation this backend stores, so date filters behave the same everywhere.
 		Only strings / datetimes / ``{'$date': ...}`` are converted (a bare int stays an int: '2027'
 		is a year, not an epoch); anything unparseable is left as-is."""
-		from secator.output_types._base import to_datetime
+		from secator.utils import to_datetime
 		if isinstance(query, list):
 			return [self._normalize_datetime_operands(q) for q in query]
 		if not isinstance(query, dict):
