@@ -1,6 +1,8 @@
 # secator/query/_base.py
 
 from abc import ABC, abstractmethod
+from datetime import datetime
+from functools import lru_cache
 from typing import List, Dict, Any, Optional
 
 import click
@@ -14,6 +16,17 @@ from secator.utils import debug
 # the model, and listings/reports would show raw values. Only an explicit
 # ``include_internal=True`` read (the restore itself) reaches them.
 INTERNAL_AI_TYPES = ('pii_map',)
+
+# Operators whose operand is a field VALUE (so a datetime field's operand is a date).
+_VALUE_OPS = ('$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin')
+
+
+@lru_cache(maxsize=None)
+def datetime_fields() -> frozenset:
+	"""Top-level field names declared ``datetime`` on any output type (e.g. not_after)."""
+	from secator.output_types import OUTPUT_TYPES
+	return frozenset(
+		name for cls in OUTPUT_TYPES for name, typ in cls.field_types().items() if typ is datetime)
 
 
 def internal_docs_filter() -> dict:
@@ -51,6 +64,11 @@ class QueryBackend(ABC):
 	"""Abstract base class for query backends."""
 
 	name: str = 'base'
+
+	# True when every query costs a full pass over the store (no index), so a caller reading
+	# several finding types should read them in ONE query and split by `_type` rather than issue
+	# one query per type. Indexed backends keep per-type queries (cheap seeks, stable ordering).
+	scan_per_query: bool = False
 
 	PROTECTED_FIELDS = [
 		'_context.workspace_id',
@@ -135,7 +153,53 @@ class QueryBackend(ABC):
 			ands = merged.get('$and')
 			merged['$and'] = (list(ands) if isinstance(ands, list) else []) + [internal_docs_filter()]
 
-		return merged
+		return self._normalize_datetime_operands(merged)
+
+	def _datetime_operand(self, dt: datetime, raw: Any) -> Any:
+		"""How this backend compares a datetime field: ``dt`` is the operand parsed to aware UTC,
+		``raw`` the value the caller passed. Default: a native datetime (mongodb stores a BSON date;
+		the json matcher parses the stored ISO string before comparing)."""
+		return dt
+
+	def _normalize_datetime_operands(self, query: Any) -> Any:
+		"""Rewrite the operands of comparisons on datetime fields (``not_after < '2027-01-01'``)
+		into the representation this backend stores, so date filters behave the same everywhere.
+		Only strings / datetimes / ``{'$date': ...}`` are converted (a bare int stays an int: '2027'
+		is a year, not an epoch); anything unparseable is left as-is."""
+		from secator.utils import to_datetime
+		if isinstance(query, list):
+			return [self._normalize_datetime_operands(q) for q in query]
+		if not isinstance(query, dict):
+			return query
+		dt_fields = datetime_fields()
+
+		def conv(value):
+			if not isinstance(value, (str, datetime, dict)):
+				return value
+			dt = to_datetime(value)
+			return value if dt is None else self._datetime_operand(dt, value)
+
+		out = {}
+		for key, cond in query.items():
+			if key in ('$and', '$or', '$nor'):
+				out[key] = self._normalize_datetime_operands(cond)
+			elif key not in dt_fields:
+				out[key] = cond
+			elif isinstance(cond, dict) and any(str(k).startswith('$') for k in cond):
+				new = {}
+				for op, val in cond.items():
+					if op in ('$in', '$nin') and isinstance(val, list):
+						new[op] = [conv(v) for v in val]
+					elif op in _VALUE_OPS:
+						new[op] = conv(val)
+					elif op == '$not' and isinstance(val, dict):
+						new[op] = self._normalize_datetime_operands({key: val})[key]
+					else:
+						new[op] = val
+				out[key] = new
+			else:
+				out[key] = conv(cond)
+		return out
 
 	def search(self, query: dict, limit: int = 0, exclude_fields: List[str] = None,
 	           scope_only: bool = False, offset: int = 0, include_internal: bool = False) -> List[Dict[str, Any]]:

@@ -126,6 +126,11 @@ class SqliteBackend(QueryBackend):
 
 	name = 'sqlite'
 
+	def _datetime_operand(self, dt, raw):
+		# The sqlite driver stores datetimes as json.dumps(default=str) -> 'YYYY-MM-DD HH:MM:SS+00:00';
+		# compare against the same UTC text form so string ordering is chronological.
+		return str(dt)
+
 	def _get_conn(self):
 		from secator.hooks.sqlite import get_sqlite_conn
 		return get_sqlite_conn(self.config.get('db_path'))

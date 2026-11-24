@@ -207,3 +207,82 @@ class TestBaselineFields(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+def _reference_duplicate_updates(workspace_findings, untagged_findings, copy_fields=None):
+	"""The original pairwise (O(n²)) implementation, kept as an oracle for the grouped one."""
+	copy_fields = copy_fields or []
+	baseline_index = build_baseline_index(workspace_findings, copy_fields)
+	seen = []
+	db_updates = {}
+	for item in untagged_findings:
+		if item._uuid in seen:
+			continue
+		duplicate_ids = [_._uuid for _ in untagged_findings if _ == item and _._uuid != item._uuid]
+		seen.extend(duplicate_ids)
+		copied_fields = {}
+		related_ids = []
+		entry = baseline_index.get(item._compare_key())
+		if entry:
+			ws_uuids = [uuid_ for uuid_ in entry['uuids'] if uuid_ != item._uuid]
+			if ws_uuids:
+				duplicate_ids.extend(ws_uuids)
+				related_ids.extend(entry['related'])
+				for field in copy_fields:
+					value_prev = entry['copy'].get(field)
+					if not value_prev:
+						continue
+					value_curr = getattr(item, field, None)
+					if not value_curr and field not in copied_fields:
+						copied_fields[field] = value_prev
+		db_updates[item._uuid] = {
+			**copied_fields,
+			'_related': duplicate_ids + related_ids,
+			'_context.workspace_duplicate': False,
+			'_tagged': True,
+		}
+		for uuid_ in duplicate_ids:
+			db_updates[uuid_] = {'_context.workspace_duplicate': True, '_tagged': True}
+	return db_updates
+
+
+class TestComputeDuplicateUpdatesGroupedEquivalence(unittest.TestCase):
+	"""The grouped implementation must produce byte-identical updates (values AND key order)
+	to the original pairwise one, on mixed types, baseline hits, copy fields and repeated uuids."""
+
+	def _random_findings(self, rng, n, prefix):
+		out = []
+		for i in range(n):
+			kind = rng.randrange(4)
+			k = rng.randrange(max(1, n // 4))
+			if kind == 0:
+				f = Url(url=f'http://h{k}.test/', status_code=rng.choice([200, 404]))
+			elif kind == 1:
+				f = Port(port=80 + k % 3, ip=f'10.0.0.{k % 5}', host='h')
+			elif kind == 2:
+				f = Subdomain(host=f's{k}.example.test', domain='example.test')
+			else:
+				f = _vuln(None, status=rng.choice(['', 'ACKNOWLEDGED']))
+				f.matched_at = f'host:{k % 3}'
+			# Occasionally reuse a uuid to exercise the repeated-uuid path.
+			f._uuid = f'{prefix}{rng.randrange(n) if rng.random() < 0.05 else i}'
+			out.append(f)
+		return out
+
+	def test_grouped_matches_pairwise_reference(self):
+		import json
+		import random
+		for seed in range(25):
+			rng = random.Random(seed)
+			baseline = self._random_findings(rng, rng.randrange(0, 40), 'b')
+			untagged = self._random_findings(rng, rng.randrange(1, 120), 'u')
+			copy_fields = rng.choice([[], ['status'], ['status', 'verified']])
+			expected = _reference_duplicate_updates(baseline, untagged, copy_fields)
+			actual = compute_duplicate_updates(baseline, untagged, copy_fields=copy_fields)
+			self.assertEqual(
+				json.dumps(actual, default=str), json.dumps(expected, default=str), f'seed={seed}')
+
+	def test_accepts_any_iterable(self):
+		items = [Url(url='http://a.test/', _uuid='1'), Url(url='http://a.test/', _uuid='2')]
+		self.assertEqual(
+			compute_duplicate_updates([], iter(items)), _reference_duplicate_updates([], items))

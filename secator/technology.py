@@ -19,6 +19,8 @@ from functools import lru_cache
 
 import yaml
 
+from secator.cpe import cpe_vendor_product
+
 CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'data', 'technologies.yaml')
 
 # "nginx/1.30.4", "Apache/2.4.25 (Debian)", "Apache HTTP Server:2.4.56", "IIS:10.0",
@@ -51,24 +53,6 @@ def split_version(raw):
 	if m:
 		return m.group('name').strip(), m.group('version')
 	return re.sub(r'\s*\([^)]*\)\s*$', '', s), None
-
-
-def cpe_vendor_product(cpe):
-	"""``(vendor, product)`` from a CPE 2.2 / 2.3 application string, else ``None``."""
-	if not cpe or not isinstance(cpe, str):
-		return None
-	c = cpe.strip().lower()
-	if c.startswith('cpe:2.3:'):
-		parts = c.split(':')
-		part, vendor, product = (parts[2], parts[3], parts[4]) if len(parts) >= 5 else ('', '', '')
-	elif c.startswith('cpe:/'):
-		parts = c[5:].split(':')
-		part, vendor, product = (parts[0], parts[1], parts[2]) if len(parts) >= 3 else ('', '', '')
-	else:
-		return None
-	if part != 'a' or not vendor or not product or ' ' in vendor or ' ' in product or '*' in (vendor + product):
-		return None
-	return vendor, product
 
 
 @lru_cache(maxsize=1)

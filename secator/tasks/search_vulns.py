@@ -10,6 +10,7 @@ from secator.definitions import (
 from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
+from secator.cpe import cpe23
 
 # search_vulns match reason for a CVE whose only link to the query is the general product.
 UNCERTAIN_MATCH = 'general_product_uncertain'
@@ -24,7 +25,7 @@ class search_vulns(Vuln):
 	tags = ['vuln', 'recon']
 	input_flag = '-q'
 	input_chunk_size = 1
-	# Inputs are product/CPE query strings (fan-in: `matched_at~product version`),
+	# Inputs are product/CPE query strings (fan-in: `matched_at~cpe` or `matched_at~product version`),
 	# not targets — never persist them as phantom Target findings.
 	enable_targets = False
 	item_loaders = [JSONSerializer()]
@@ -73,10 +74,11 @@ class search_vulns(Vuln):
 		_in = self.inputs[0]
 		self.matched_at = None
 		if '~' in _in:
-			split = _in.split('~')
-			self.matched_at = split[0]
-			self.inputs[0] = split[1]
-		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()
+			self.matched_at, _, _in = _in.partition('~')
+		# A CPE is queried as CPE 2.3: search_vulns does not recognise the CPE 2.2 URIs nmap
+		# reports (`cpe:/a:...`), and the free-text clean-up below would break them.
+		cpe = cpe23(_in) if _in.strip().lower().startswith('cpe:') else None
+		self.inputs[0] = cpe or _in.replace('/', ' ').rstrip()
 
 	@staticmethod
 	def on_json_loaded(self, item):

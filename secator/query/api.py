@@ -10,6 +10,7 @@ from secator.output_types import Warning
 from secator.query._base import QueryBackend, QueryBackendError, sort_runners_chronologically, validate_runner_order
 from secator.config import CONFIG
 from secator.rich import console
+from secator.serializers.dataclass import DataclassEncoder
 
 
 def _auth_error_message(status_code: int, url: str, has_key: bool) -> str:
@@ -28,6 +29,10 @@ class ApiBackend(QueryBackend):
     """Query backend for remote API."""
 
     name = "api"
+
+    def _datetime_operand(self, dt, raw):
+        # The remote search endpoint interprets the query itself: send the operand unchanged.
+        return raw
 
     def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None):
         super().__init__(workspace_id, config, context=context)
@@ -48,7 +53,9 @@ class ApiBackend(QueryBackend):
         response = requests.request(
             method=method,
             url=url,
-            data=json.dumps(data) if data else None,
+            # DataclassEncoder (like the api driver hook): datetime values (e.g. a certificate's
+            # not_after set by update_finding) serialize as ISO 8601 instead of raising TypeError.
+            data=json.dumps(data, cls=DataclassEncoder) if data else None,
             headers=headers,
             verify=self.force_ssl,
             timeout=30
