@@ -132,7 +132,13 @@ class TestCommandRunner(unittest.TestCase):
 			'{"url": "http://example.com"}'  # Duplicate
 		]
 
-		# Run the command using mock_command
+		# Run the command using mock_command. Frequency 0: on_interval fires on every item instead of
+		# being throttled by the default json driver's on_start write (`last_updated_db`). Plain
+		# set/restore: patch()'s delattr-based restore breaks the pydantic config model.
+		from secator.config import CONFIG
+		previous = CONFIG.runners.backend_update_frequency
+		CONFIG.runners.backend_update_frequency = 0
+		self.addCleanup(setattr, CONFIG.runners, 'backend_update_frequency', previous)
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run'):
 			for hook, mock in mock_hooks.items():
 				# 'on_build' is a build-time hook fired by a PARENT runner during Celery canvas
