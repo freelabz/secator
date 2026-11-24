@@ -139,6 +139,91 @@ class TestSandboxCreateRace(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
+class TestSandboxStartAndBootstrap(unittest.TestCase):
+	"""Sandbox start overrides the image entrypoint; base packages use the image's package manager."""
+
+	def _create(self, pm="apk", install_rc=0, running_after_start=True):
+		from secator.ai.tools import _sandbox as A
+		calls = []
+		inspects = iter(["false", "false", "true" if running_after_start else "false"])
+
+		def fake_run(argv, **kw):
+			calls.append(argv)
+			if argv[:2] == ["docker", "inspect"]:
+				return _CP(0, next(inspects))
+			if argv[:2] == ["docker", "exec"] and "command -v" in argv[-1]:
+				return _CP(0 if pm else 1, f"{pm}\n" if pm else "")
+			if argv[:2] == ["docker", "exec"] and "/etc/gai.conf" not in argv[-1]:
+				return _CP(install_rc, "", "ERROR: unable to select packages" if install_rc else "")
+			return _CP(0)
+
+		pkgs = patch.object(A, "_SANDBOX_PACKAGES", "git curl python3-pip")
+		with patch("subprocess.run", side_effect=fake_run), patch("secator.rich.console.print") as printed, pkgs:
+			name = A._ensure_sandbox_container(_ctx(isolated=True), {"run_id": "r-boot"})
+		installs = [c for c in calls if c[:2] == ["docker", "exec"] and "command -v" not in c[-1]
+		            and "/etc/gai.conf" not in c[-1]]
+		return name, calls, installs, printed
+
+	def test_work_dir_is_made_writable_as_root(self):
+		_, calls, _, _ = self._create()
+		prep = next(c for c in calls if c[:2] == ["docker", "exec"] and "/etc/gai.conf" in c[-1])
+		self.assertEqual(prep[2:4], ["-u", "0"])
+		self.assertIn("chmod 1777 /work", prep[-1])
+
+	def test_dead_container_warns_with_the_exec_error(self):
+		from secator.ai.tools import _sandbox as A
+
+		def fake_run(argv, **kw):
+			return _CP(1, "", "Error response from daemon: container abc is not running")
+
+		with patch("subprocess.run", side_effect=fake_run), patch("secator.rich.console.print") as printed:
+			A._install_base_packages("sbx-x")
+		self.assertIn("is not running", printed.call_args[0][0].message)
+
+	def test_entrypoint_is_overridden_to_keep_alive(self):
+		_, calls, _, _ = self._create()
+		run = next(c for c in calls if c[:2] == ["docker", "run"])
+		i = run.index("--entrypoint")
+		self.assertEqual(run[i + 1], "sleep")
+		self.assertEqual(run[-1], "infinity")
+		self.assertNotIn("sleep", run[i + 2:])
+
+	def test_container_exiting_after_start_is_an_error(self):
+		with self.assertRaises(RuntimeError) as cm:
+			self._create(running_after_start=False)
+		self.assertIn("exited right after start", str(cm.exception))
+
+	def test_alpine_uses_apk_with_mapped_names_as_root(self):
+		_, _, installs, printed = self._create(pm="apk")
+		self.assertEqual(len(installs), 1)
+		self.assertEqual(installs[0][2:4], ["-u", "0"])
+		self.assertIn("apk add --no-cache -q git curl py3-pip", installs[0][-1])
+		printed.assert_not_called()
+
+	def test_debian_uses_apt_get(self):
+		_, _, installs, _ = self._create(pm="apt-get")
+		self.assertIn("apt-get -o Acquire::ForceIPv4=true install", installs[0][-1])
+		self.assertIn("python3-pip", installs[0][-1])
+
+	def test_dnf_is_supported(self):
+		_, _, installs, _ = self._create(pm="dnf")
+		self.assertIn("dnf install -y -q git curl python3-pip", installs[0][-1])
+
+	def test_no_package_manager_warns(self):
+		name, _, installs, printed = self._create(pm="")
+		self.assertTrue(name)
+		self.assertEqual(installs, [])
+		self.assertIn("no supported package manager", printed.call_args[0][0].message)
+
+	def test_failed_install_warns_but_sandbox_is_usable(self):
+		name, _, _, printed = self._create(pm="apk", install_rc=1)
+		self.assertTrue(name)
+		msg = printed.call_args[0][0].message
+		self.assertIn("apk exited 1", msg)
+		self.assertIn("unable to select packages", msg)
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
 class TestChildInheritsIsolated(unittest.TestCase):
 	"""A spawned child force-inherits the parent's `isolated` and can never lower it."""
 

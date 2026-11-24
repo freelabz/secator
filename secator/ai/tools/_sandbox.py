@@ -37,6 +37,59 @@ _SANDBOX_NETWORK = os.environ.get("SECATOR_AI_SANDBOX_NETWORK", "")
 _SANDBOX_PACKAGES = os.environ.get("SECATOR_AI_SANDBOX_PACKAGES", "git curl wget python3 python3-pip ca-certificates")
 
 
+# Package-manager install commands, probed in this order inside the sandbox (the default
+# lite image is Alpine -> apk; Debian/Kali -> apt-get; Fedora/RHEL -> dnf/yum).
+_PKG_INSTALL_CMDS = {
+	"apk": "apk add --no-cache -q {pkgs}",
+	# gVisor: libapt ignores gai.conf, so apt needs its own ForceIPv4 (see the bootstrap).
+	"apt-get": ("export DEBIAN_FRONTEND=noninteractive && apt-get -o Acquire::ForceIPv4=true update -qq && "
+	            "apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {pkgs}"),
+	"dnf": "dnf install -y -q {pkgs}",
+	"yum": "yum install -y -q {pkgs}",
+}
+
+
+# Package names that differ from the Debian name used in SECATOR_AI_SANDBOX_PACKAGES.
+_PKG_NAME_MAP = {"apk": {"python3-pip": "py3-pip"}}
+
+
+def _detect_package_manager(name: str) -> str:
+	"""Return the first package manager available in container `name`. Raises when there is
+	none, or when the probe itself fails (e.g. the container is not running)."""
+	import subprocess
+	probe = "for pm in " + " ".join(_PKG_INSTALL_CMDS) + "; do command -v $pm >/dev/null 2>&1 && echo $pm && exit 0; done"
+	r = subprocess.run(["docker", "exec", "-u", "0", name, "sh", "-c", probe], capture_output=True, text=True, timeout=30)
+	pm = (r.stdout or "").strip()
+	if pm in _PKG_INSTALL_CMDS:
+		return pm
+	if (r.stderr or "").strip():
+		raise RuntimeError(r.stderr.strip().splitlines()[-1])
+	raise RuntimeError("no supported package manager (apk/apt-get/dnf/yum) in the image")
+
+
+def _install_base_packages(name: str) -> None:
+	"""Best-effort install of _SANDBOX_PACKAGES with the sandbox's own package manager.
+	Never raises: a failure only prints a warning (the LLM can still install on demand)."""
+	import subprocess
+	try:
+		pm = _detect_package_manager(name)
+		names = _PKG_NAME_MAP.get(pm, {})
+		pkgs = " ".join(names.get(pkg, pkg) for pkg in _SANDBOX_PACKAGES.split())
+		r = subprocess.run(
+			["docker", "exec", "-u", "0", name, "sh", "-c", _PKG_INSTALL_CMDS[pm].format(pkgs=pkgs)],
+			capture_output=True, text=True, timeout=300)
+		if r.returncode != 0:
+			err = (r.stderr or r.stdout or "").strip().splitlines()
+			raise RuntimeError(f"{pm} exited {r.returncode}" + (f": {err[-1]}" if err else ""))
+	except Exception as e:
+		try:
+			from secator.output_types import Warning
+			from secator.rich import console
+			console.print(Warning(message=f"Sandbox {name}: could not install base packages ({_SANDBOX_PACKAGES}): {e}"))
+		except Exception:
+			pass
+
+
 def _sandbox_image() -> str:
 	"""Resolve the --isolated sandbox image from `addons.ai.isolated_container_image`, replacing
 	`{version}` with the running secator version so the sandbox matches the client (default:
@@ -95,7 +148,9 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
 				*(["--network", _SANDBOX_NETWORK] if _SANDBOX_NETWORK else []),
 				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
-				_sandbox_image(), "sleep", "infinity",
+				# Override the image ENTRYPOINT: the default secator image's is `secator`, which
+				# would turn the keep-alive into `secator sleep infinity` and exit at once.
+				"--entrypoint", "sleep", _sandbox_image(), "infinity",
 			], capture_output=True, text=True)
 			if run.returncode != 0:
 				# A concurrent creator (another thread on this dockerd) may have won the
@@ -105,28 +160,30 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 					return name
 				err = (run.stderr or run.stdout or "").strip() or f"docker run exited {run.returncode}"
 				raise RuntimeError(err)
+			if not _sandbox_is_running(name):
+				logs = subprocess.run(
+					["docker", "logs", "--tail", "5", name], capture_output=True, text=True, timeout=30)
+				out = (logs.stderr or logs.stdout or "").strip()
+				raise RuntimeError(f"sandbox container exited right after start{': ' + out if out else ''}")
 			created = True
 	# Only bootstrap the container WE created (best-effort; a failure must not break the
-	# shell path — the LLM can apt-get on demand).
+	# shell path — the LLM can install on demand). Runs as root (`-u 0`): the image's
+	# default user may not be (the secator image runs as `secator`).
 	if created:
 		# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
 		# (git/curl/ssh/pip/apt) tries IPv6 first and HANGS. Prefer IPv4 in glibc via gai.conf (fixes
 		# git/curl/ssh/python); apt needs its own ForceIPv4 (libapt ignores gai.conf).
 		try:
 			subprocess.run(
-				["docker", "exec", name, "sh", "-c", 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
+				["docker", "exec", "-u", "0", name, "sh", "-c",
+				 # /work is a fresh volume owned by root; the image's user (the default image
+				 # runs as `secator`) must be able to write to it.
+				 'chmod 1777 /work; printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
 				capture_output=True, timeout=30)
 		except Exception:
 			pass
 		if _SANDBOX_PACKAGES.strip():
-			try:
-				subprocess.run(
-					["docker", "exec", name, "sh", "-c",
-					 "apt-get -o Acquire::ForceIPv4=true update -qq && "
-					 f"apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
-					capture_output=True, timeout=300)
-			except Exception:
-				pass  # tools missing → the LLM can still apt-get on demand
+			_install_base_packages(name)
 	return name
 
 
