@@ -1,7 +1,7 @@
+import re
 import shlex
 
 from secator.config import CONFIG
-from secator.cve import extract_software_and_version
 from secator.decorators import task
 
 # fmt: off
@@ -14,15 +14,36 @@ from secator.definitions import (
 from secator.output_types import Progress, Tag, Technology, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
+from secator.technology import split_version
+
+
+# Template tags that mark a product / version detection (nuclei-templates convention:
+# `http/technologies/*` carry `tech`, network detections `detect`, login panels `panel`).
+DETECTION_TAGS = {'tech', 'detect', 'detection', 'panel', 'wp-plugin', 'wp-theme'}
+# ...unless the template reports a weakness (`vuln`, `misconfig`, `exposure`) or a WAF
+# (`waf`: its matcher names a WAF signature, not a product): those stay tags.
+FINDING_TAGS = {'vuln', 'misconfig', 'exposure', 'waf'}
+# Default-page templates (`default-nginx-page`) say a stock page is served, not which product
+# runs (`default-windows-server-page` matches IIS 8.5 but carries a Windows Server 2003 CPE).
+DEFAULT_PAGE_ID = re.compile(r'^default-.*-page$')
+# Suffixes that name the template kind, not the product (`apache-detect` -> `apache`).
+TEMPLATE_ID_SUFFIX = re.compile(r'(-(detect|detection|version|login|panel|server-detect))+$')
+
+
+def _template_tags(item):
+	tags = (item.get('info') or {}).get('tags') or []
+	if isinstance(tags, str):
+		tags = tags.split(',')
+	return {t.strip().lower() for t in tags if t}
 
 
 def output_discriminator(self, item):
-	"""Discriminate between Tag and Vulnerability based on severity."""
+	"""Info-severity detections are Technology, other info results Tag, the rest Vulnerability."""
 	if 'percent' in item:
 		return Progress
 	severity = item.get('info', {}).get('severity', '').lower()
 	if severity == 'info':
-		return Tag
+		return Technology if nuclei.is_detection(item) else Tag
 	return Vulnerability
 
 
@@ -123,8 +144,9 @@ class nuclei(VulnMulti):
 		Technology: {
 			'match': 'matched-at',
 			'product': lambda x: nuclei.product_extractor(x),
+			'vendor': lambda x: ((x.get('info') or {}).get('metadata') or {}).get('vendor') or '',
 			'version': lambda x: nuclei.version_extractor(x),
-			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
+			EXTRA_DATA: lambda x: nuclei.technology_extra_data(x),
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
@@ -220,21 +242,54 @@ class nuclei(VulnMulti):
 		return item['template-id']
 
 	@staticmethod
+	def is_detection(item):
+		"""Does this info-severity result identify a product (rather than report a weakness)?"""
+		tags = _template_tags(item)
+		classification = (item.get('info') or {}).get('classification') or {}
+		if DEFAULT_PAGE_ID.match(item.get('template-id') or ''):
+			return False
+		return bool(tags & DETECTION_TAGS or classification.get('cpe')) and not tags & FINDING_TAGS
+
+	@staticmethod
 	def product_extractor(item):
-		tid = item['template-id']
-		if '-detect' in tid:
-			return tid.replace('-detect', '')
-		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
-		product, _ = extract_software_and_version(val, postfix=True)
-		if product is not None:
-			return product
-		return val
+		"""Product named by the result: the matcher name of a multi-product template
+		(`tech-detect:nginx`), else the template metadata product, else an extracted value
+		naming the product (`Apache-Coyote/1.1`), else the template id without its kind
+		suffix (`ms-exchange-server` -> `ms exchange server`)."""
+		matcher_name = item.get('matcher-name')
+		if matcher_name:
+			return matcher_name
+		metadata = (item.get('info') or {}).get('metadata') or {}
+		if metadata.get('product'):
+			return str(metadata['product']).replace('_', ' ')
+		for value in item.get('extracted-results') or []:
+			name, _ = split_version(value)
+			if name:  # the result names the product itself ("Apache-Coyote/1.1", "Microsoft-IIS/8.5")
+				return value
+		return TEMPLATE_ID_SUFFIX.sub('', item['template-id']).replace('-', ' ')
 
 	@staticmethod
 	def version_extractor(item):
-		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
-		_, version = extract_software_and_version(val, postfix=True)
-		return version
+		"""First extracted value carrying a version (`8.5`, `12.2.1.3.0`), unless the product
+		itself comes from that value: then Technology splits it (and knows when a number in a
+		banner is not a release, e.g. `Apache-Coyote/1.1`)."""
+		metadata = (item.get('info') or {}).get('metadata') or {}
+		product_from_value = not item.get('matcher-name') and not metadata.get('product')
+		for value in item.get('extracted-results') or []:
+			name, version = split_version(value)
+			if name and product_from_value:
+				return None
+			if version:
+				return version
+		return None
+
+	@staticmethod
+	def technology_extra_data(item):
+		data = nuclei.extra_data_extractor(item)
+		cpe = ((item.get('info') or {}).get('classification') or {}).get('cpe')
+		if cpe:
+			data['cpe'] = cpe if isinstance(cpe, list) else [cpe]
+		return data
 
 	@staticmethod
 	def name_extractor(item):
