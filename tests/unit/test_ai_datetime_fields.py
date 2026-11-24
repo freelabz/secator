@@ -161,8 +161,8 @@ class _FakeFindings:
 		for d in self.docs:
 			if match_query(d, query):
 				_apply_set(d, update['$set'])
-				return MagicMock(modified_count=1)
-		return MagicMock(modified_count=0)
+				return MagicMock(matched_count=1, modified_count=1)
+		return MagicMock(matched_count=0, modified_count=0)
 
 
 def _task_cert():
@@ -263,22 +263,69 @@ class TestUpdateFindingDatetimePerDriver(unittest.TestCase):
 		stored = engine.search({'_uuid': UUID}, limit=1, scope_only=True)[0]
 		self.assertEqual(Certificate.load(stored).not_after, datetime(2025, 6, 1, tzinfo=timezone.utc))
 
+	def _check_date_filters(self, driver):
+		# task-produced not_after is 2025-06-01; string operands as `secator q` sends them
+		engine = self._engine(driver)
+		cases = [
+			({'not_after': {'$lt': '2025-07-01'}}, 1), ({'not_after': {'$gt': '2025-07-01'}}, 0),
+			({'not_after': {'$gte': '2025-06-01T02:00:00+02:00'}}, 1), ({'not_after': '2025-06-01T00:00:00Z'}, 1),
+			({'not_after': {'$in': ['2025-06-01 00:00:00+00:00']}}, 1),
+			({'$or': [{'not_after': {'$lt': '2000-01-01'}}, {'not_before': {'$lte': '2025-01-01'}}]}, 1),
+		]
+		for query, expected in cases:
+			with self.subTest(query=query):
+				self.assertEqual(len(engine.search({'_type': 'certificate', **query})), expected)
+
 	def test_json(self):
 		self._check('json')
 		self._check_garbage('json')
+		self._check_date_filters('json')
 
 	def test_sqlite(self):
 		self._check('sqlite')
 		self._check_garbage('sqlite')
+		self._check_date_filters('sqlite')
 
 	@unittest.skipUnless(HAS_PYMONGO, 'pymongo not installed')
 	def test_mongodb(self):
 		self._check('mongodb')
 		self._check_garbage('mongodb')
+		self._check_date_filters('mongodb')
 
 	def test_api(self):
 		self._check('api')
 		self._check_garbage('api')
+
+
+class TestDatetimeQueryOperands(unittest.TestCase):
+	"""Date filters on datetime fields get the operand each backend stores."""
+
+	Q = {'not_after': {'$lt': '2027-01-01', '$regex': '2026'}, 'port': 2027, 'extra_data.not_after': 'x',
+	     'creation_date': '2001-02-03T06:05:06+02:00', 'updated_date': 2027,
+	     '$and': [{'expiration_date': {'$in': ['2030-01-01T00:00:00Z', 'junk']}}]}
+
+	def _norm(self, driver):
+		engine = QueryEngine(WS, context={'drivers': [driver]} if driver != 'json' else {})
+		return engine.backend._normalize_datetime_operands(copy.deepcopy(self.Q))
+
+	def test_native_datetime_for_mongodb_and_json(self):
+		for driver in ('json', 'mongodb'):
+			with self.subTest(driver=driver):
+				q = self._norm(driver)
+				self.assertEqual(q['not_after']['$lt'], datetime(2027, 1, 1, tzinfo=timezone.utc))
+				self.assertEqual(q['not_after']['$regex'], '2026')  # non-value operator untouched
+				self.assertEqual(q['creation_date'], datetime(2001, 2, 3, 4, 5, 6, tzinfo=timezone.utc))
+				self.assertEqual(q['$and'][0]['expiration_date']['$in'], [datetime(2030, 1, 1, tzinfo=timezone.utc), 'junk'])
+				# non-datetime fields, nested extra_data keys and bare ints (a year) are untouched
+				self.assertEqual((q['port'], q['extra_data.not_after'], q['updated_date']), (2027, 'x', 2027))
+
+	def test_sqlite_uses_stored_text_form(self):
+		q = self._norm('sqlite')
+		self.assertEqual(q['not_after']['$lt'], '2027-01-01 00:00:00+00:00')
+		self.assertEqual(q['creation_date'], '2001-02-03 04:05:06+00:00')
+
+	def test_api_sends_operands_unchanged(self):
+		self.assertEqual(self._norm('api'), self.Q)
 
 
 class TestAddFindingDatetime(unittest.TestCase):

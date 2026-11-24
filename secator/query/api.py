@@ -30,6 +30,10 @@ class ApiBackend(QueryBackend):
 
     name = "api"
 
+    def _datetime_operand(self, dt, raw):
+        # The remote search endpoint interprets the query itself: send the operand unchanged.
+        return raw
+
     def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None):
         super().__init__(workspace_id, config, context=context)
         self.api_url = CONFIG.addons.api.url

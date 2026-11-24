@@ -3,9 +3,11 @@
 import json
 import orjson
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from secator.output_types._base import to_datetime
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
@@ -95,6 +97,17 @@ def get_nested_field(item, key: str) -> Any:
 	return value
 
 
+def _has_datetime_operand(condition) -> bool:
+	if isinstance(condition, datetime):
+		return True
+	if isinstance(condition, dict):
+		return any(
+			isinstance(v, datetime) or (isinstance(v, list) and any(isinstance(x, datetime) for x in v))
+			or (k == '$not' and _has_datetime_operand(v))
+			for k, v in condition.items())
+	return False
+
+
 def match_query(item: dict, query: dict) -> bool:
 	"""Check if item matches MongoDB-style query."""
 	if '$and' in query:
@@ -111,6 +124,10 @@ def match_query(item: dict, query: dict) -> bool:
 		return or_result
 	for key, condition in query.items():
 		value = get_nested_field(item, key)
+		# A datetime operand (a date filter on a datetime field, see QueryBackend._merge_query):
+		# parse the stored value (an ISO string in the json store) so it compares by instant.
+		if _has_datetime_operand(condition):
+			value = to_datetime(value)
 
 		if isinstance(condition, dict):
 			for op, op_value in condition.items():
