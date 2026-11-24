@@ -875,6 +875,19 @@ class TestFastDetectMode(unittest.TestCase):
 		self.assertEqual(task.mode, "scan")     # fast-path re-detected, not stuck on chat
 		mock_llm.assert_not_called()
 
+	def test_redetect_moves_live_action_context_mode(self):
+		"""dispatch_action gates on ctx.mode, so a follow-up re-detection that switches the mode
+		must move the live action context with it (else the new mode's tools are refused)."""
+		from secator.ai.actions import ActionContext
+		task = self._make_task("scan the target", mode="")  # auto
+		task.mode = "chat"
+		task._isolation_ctx = ActionContext(targets=[], model="m", mode="chat")
+		p_sys, p_tools, p_cfg = self._patches()
+		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm"):
+			task._detect_mode(force=True)
+		self.assertEqual(task.mode, "scan")
+		self.assertEqual(task._isolation_ctx.mode, "scan")
+
 
 class TestSessionIdStampedOnContext(unittest.TestCase):
 	"""_init_options writes the resolved session_id back onto self.context.
