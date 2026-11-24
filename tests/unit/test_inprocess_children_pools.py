@@ -119,10 +119,13 @@ class _InProcessChildren:
 		self.assertEqual(out['errors'], [])
 		self.assertEqual(out['tags'], ['alpha'])
 		self.assertEqual(out['join_will_block'], self.pool != 'gevent')  # guard restored after the child
+		self.assertFalse(out['would_dispatch'])  # a single target runs in-process
 
 	def test_chunked_child(self):
 		# Two targets with input_chunk_size=1: the eager child replaces itself with a chord.
+		# A worker dispatches such a child; the fixture forces it in-process to cover this path.
 		out = self._run(['alpha', 'beta'])
+		self.assertTrue(out['would_dispatch'])
 		self.assertEqual(out['errors'], [])
 		self.assertEqual(out['tags'], ['alpha', 'beta'])
 
