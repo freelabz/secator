@@ -197,6 +197,17 @@ class TestDriversStampLastUpdatedDb(unittest.TestCase):
 			discord.update_runner(runner)
 		self.assertIsNotNone(runner.last_updated_db)
 
+	def test_discord_driver_failed_send_does_not_stamp(self):
+		from secator.hooks import discord
+		runner = _FakeRunner({})
+		with mock.patch.multiple(
+			discord, SEND_RUNNER_UPDATES=True,
+			_build_runner_embed=mock.DEFAULT, _create_message=mock.DEFAULT,
+		) as mocks:
+			mocks['_create_message'].return_value = (None, None)
+			discord.update_runner(runner)
+		self.assertIsNone(runner.last_updated_db)
+
 
 class _Cfg:
 	type = 'task'
