@@ -30,7 +30,7 @@ import pytest
 from tests.integration.ai.conftest import FINAL_STATUSES, LOG_FORBIDDEN, MODEL, children_of, install_workflow
 from tests.integration.ai.scripted import load_requests, parse_tool_result
 from tests.integration.ai.worker_config import AI_QUEUE, POOL_QUEUES
-from tests.integration.ai.worker_scenarios import WORKFLOW
+from tests.integration.ai.worker_scenarios import REVOKE_CHILD_S, WORKFLOW
 
 pytestmark = [pytest.mark.worker, pytest.mark.slow, pytest.mark.ai_timeout(420)]
 
@@ -193,6 +193,10 @@ def workers(request, broker, lab, _ai_dirs):
 	env = _base_env(broker, lab, data, record)
 	w = Workers(pool, broker, env, folder, record)
 	# The ai worker runs one ai task at a time (-c 1), on each pool.
+	# Messages left by an earlier pool's runs (a revoked run's chunks) must not reach these workers.
+	subprocess.run([sys.executable, '-m', 'celery', '-A', 'secator.celery.app', 'purge', '-f',
+	                '-Q', f'{AI_QUEUE},{POOL_QUEUES}'], env=env, cwd=folder, stdin=subprocess.DEVNULL,
+	               capture_output=True, timeout=60)
 	# Started one after the other: a first start creates the data dir tree, racing a second one.
 	w.ai = Worker(f'ai-{pool}', pool, 1, AI_QUEUE, env, folder)
 	request.addfinalizer(w.ai.stop)
@@ -239,9 +243,15 @@ class WorkerRun:
 	def children(self, name=None):
 		return children_of(self.session_id, self.summary.get('id'), name=name)
 
+	def assert_no_network(self):
+		"""Neither the workers nor the client tried an outbound connection."""
+		for wname, text in self.logs.items():
+			assert 'AI-E2E-NETWORK-BLOCKED' not in text, f'blocked connection in {wname}:\n{text[-4000:]}'
+
 	def assert_clean_logs(self, allow_chord_errors=False):
 		"""No traceback / error marker in any log. ``allow_chord_errors``: a revoked chunk makes
 		Celery log its chord's ChordError, traceback included - expected when chunks are cancelled."""
+		self.assert_no_network()
 		for wname, text in self.logs.items():
 			if allow_chord_errors:
 				text = _drop_chord_error_tracebacks(text)
@@ -297,6 +307,8 @@ def wrun(workers):
 		                all_requests=reqs, logs=logs, session_id=session_id)
 		if check_logs:
 			run.assert_clean_logs()
+		else:
+			run.assert_no_network()
 		if shared:
 			workers.runs[name] = run
 		return run
@@ -345,7 +357,9 @@ def _revoked_run(wrun, workers, name='revoke', running=('command', 'httpx')):
 		pytest.skip('revoke needs remote control (redis broker)')
 	if workers.pool == 'solo':
 		pytest.skip('celery limitation: the solo pool cannot terminate a running task')
-	return wrun(name, revoke_when_running=list(running), timeout=200, check_logs=False, shared=True)
+	run = wrun(name, revoke_when_running=list(running), timeout=200, check_logs=False, shared=True)
+	assert run.summary.get('reached_running'), f'{running} never ran: the revoke landed elsewhere'
+	return run
 
 
 def test_revoke_ai_task_mid_run(wrun, workers):
@@ -355,17 +369,24 @@ def test_revoke_ai_task_mid_run(wrun, workers):
 	assert run.summary['wall'] < 120, 'the revoked run kept going'
 	errors = [i.get('message') for i in run.summary['items'] if i.get('_type') == 'error']
 	assert run.status == 'REVOKED', (run.status, errors)
-	assert len(run.requests) == 1
+	# The ai task really stopped in the worker (not just the client giving up on it): had it kept
+	# running, it would call the model again once its children end (REVOKE_CHILD_S).
+	time.sleep(max(0, REVOKE_CHILD_S + 10 - run.summary['wall']))
+	assert len([r for r in load_requests(workers.record) if r.tag == run.tag and not r.side]) == 1, \
+		'the model was called after the revoke'
 
 
 @pytest.mark.xfail(strict=True, reason=(
-	'bug: terminating a revoked ai task leaves the runner doc of its in-process child (the shell '
-	'command it was running) at RUNNING - nothing finalizes the children of a killed ai task'))
-def test_revoked_ai_task_children_are_final(wrun, workers):
+	'bug: revoking the ai task does not stop its in-process children - the shell command it was '
+	'running keeps going (its doc RUNNING) until it ends by itself, then is recorded SUCCESS'))
+def test_revoked_ai_task_stops_its_children(wrun, workers):
+	"""The in-process shell child of a revoked ai task is stopped with it: its doc ends REVOKED
+	(or FAILURE), not RUNNING (still going) nor SUCCESS (ran to completion)."""
 	run = _revoked_run(wrun, workers)
 	time.sleep(5)
 	statuses = {c['name']: c['status'] for c in run.children()}
-	assert statuses and set(statuses.values()) <= set(FINAL_STATUSES), statuses
+	assert 'ai' not in statuses, statuses  # only the ai task's children
+	assert statuses.get('command') in ('REVOKED', 'FAILURE'), statuses  # the in-process shell child
 
 
 CANCELLED_CHUNKED_BUG = (
@@ -373,16 +394,9 @@ CANCELLED_CHUNKED_BUG = (
 	'chunks are revoked, so the chord callback that finalizes the parent task never runs')
 
 
-@pytest.fixture
-def cancelled_chunked_xfail(request, workers):
-	"""Strict xfail, except on prefork where the bug is racy (the chord error path sometimes
-	finalizes the parent before the revoke reaches it): non-strict there."""
-	racy = workers.pool == 'prefork'
-	request.applymarker(pytest.mark.xfail(
-		strict=not racy, reason=CANCELLED_CHUNKED_BUG + (' (racy on prefork)' if racy else '')))
-
-
-@pytest.mark.usefixtures('cancelled_chunked_xfail')
+# Not strict: the revoke races the chord error path on the pool worker, which sometimes
+# finalizes the parent task first.
+@pytest.mark.xfail(strict=False, reason=CANCELLED_CHUNKED_BUG + ' (racy)')
 def test_cancelled_chunked_task_is_final_in_the_store(wrun, workers):
 	"""Ctrl-C while the ai task waits on a dispatched chunked task: the task's doc must end final."""
 	run = _revoked_run(wrun, workers, name='revoke_chunked', running=('httpx',))

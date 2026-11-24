@@ -47,7 +47,8 @@ def test_max_iterations_reached(run_ai):
 	assert run.status == 'SUCCESS'
 	# each continue prompt tells the model where it stands
 	assert f'"iteration":{cap - 1},"max":{cap}' in run.requests[-1].text()
-	assert 'it5' not in run.requests[-1].text()  # the last call ran, but no request followed it
+	# the last call ran (its output is in the run), but no request followed it
+	assert any('it5' in str(a.toDict()) for a in run.ai('shell_output')), 'the last call did not run'
 
 
 def test_usage_and_cost_are_accounted(run_ai):

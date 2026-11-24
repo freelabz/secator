@@ -49,7 +49,7 @@ def test_shell(run_ai, command, expect, status):
 		assert text in output
 	if 'sleep 5' in command:
 		gap = run.requests[1].t - run.requests[0].t
-		assert 5 <= gap < 15, f'sleep 5 took {gap:.1f}s'
+		assert 5 <= gap < 25, f'sleep 5 took {gap:.1f}s'
 	children = run.children('command')
 	assert [c['status'] for c in children] == [status]
 

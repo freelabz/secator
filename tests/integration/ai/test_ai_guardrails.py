@@ -11,15 +11,20 @@ def _scope_denied(text):
 	return f'{DENIED}' in text and 'not in the allowed scope (reason: out_of_scope)' in text
 
 
+# an image that is never pulled: if the scope check ever let these through, nothing leaves the host
+NO_PULL = '--rm --pull=never local/none:never'
+
+
+def _deny_shell(command):
+	return lambda: call('run_shell', id='deny', command=command, description='x')
+
+
 OUT_OF_SCOPE_CALLS = {
 	'task': lambda: call('run_task', id='deny', name='httpx', targets=[f'http://{DENIED}/'], description='x'),
-	'shell': lambda: call('run_shell', id='deny', command=f'curl -s http://{DENIED}/', description='x'),
-	'docker': lambda: call('run_shell', id='deny', command=f'docker run --rm curlimages/curl http://{DENIED}/',
-	                       description='x'),
-	'docker_sh_c': lambda: call('run_shell', id='deny',
-	                            command=f'docker run --rm alpine sh -c "wget -qO- http://{DENIED}/"', description='x'),
-	'podman': lambda: call('run_shell', id='deny', command=f'podman run alpine wget http://{DENIED}/',
-	                       description='x'),
+	'shell': _deny_shell(f'curl -s http://{DENIED}/'),
+	'docker': _deny_shell(f'docker run {NO_PULL} curl http://{DENIED}/'),
+	'docker_sh_c': _deny_shell(f'docker run {NO_PULL} sh -c "wget -qO- http://{DENIED}/"'),
+	'podman': _deny_shell(f'podman run {NO_PULL} wget http://{DENIED}/'),
 }
 
 
