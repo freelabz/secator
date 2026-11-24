@@ -29,7 +29,8 @@ class Tag(OutputType):
 
 	_table_fields = ['match', 'category', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
-	_group_by = ('category', 'name')
+	# One row per distinct value (e.g. each leaked email), aggregating where it was found.
+	_group_by = ('category', 'name', 'value')
 	_group_aggregate = 'match'
 
 	def __post_init__(self):
