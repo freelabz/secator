@@ -9,6 +9,8 @@ Configuration:
 	- addons.api.url: Base URL of the external API
 	- addons.api.api_key: API key for authentication
 	- addons.api.force_ssl: Enable/disable SSL certificate verification
+	- addons.api.retries: Retries on gateway errors / connections not established
+	- addons.api.retry_backoff: Backoff factor (s) between retries
 """
 
 import json
@@ -39,6 +41,20 @@ API_WORKSPACE_CREATE_ENDPOINT = CONFIG.addons.api.workspace_create_endpoint
 API_ORG_ID = CONFIG.addons.api.org_id
 FORCE_SSL = CONFIG.addons.api.force_ssl
 API_TIMEOUT = CONFIG.addons.api.timeout
+API_RETRIES = CONFIG.addons.api.retries
+API_RETRY_BACKOFF = CONFIG.addons.api.retry_backoff
+
+# Gateway statuses: a proxy or load balancer in front of the API answered instead of the API
+# (backend unreachable, restarting, or too slow).
+TRANSIENT_STATUSES = (502, 503, 504)
+# Retry-safe methods: repeating them leaves the same end state.
+IDEMPOTENT_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'})
+# A POST (create) is not idempotent: the API does not dedupe creates, so replaying one it
+# already handled would create a duplicate runner / finding / workspace. 503 means the
+# gateway could not hand the request to any backend. 502 and 504 are NOT retried for POST:
+# the backend may have received and processed it before the connection broke or the
+# gateway gave up waiting.
+POST_RETRY_STATUSES = (503,)
 
 
 def get_runner_dbg(runner):
@@ -46,20 +62,41 @@ def get_runner_dbg(runner):
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
-# Retry transient failures (endpoint restarting behind a gateway, refused connection).
-# Gateway errors are retried for idempotent methods only: a POST that reached the endpoint
-# before the gateway gave up may have been processed, and replaying it would create a
-# duplicate. Connection errors are retried for every method (the request was never sent).
-_session = requests.Session()
-_session.mount('http://', HTTPAdapter(max_retries=Retry(
-	total=2,
-	read=0,
-	backoff_factor=0.5,
-	status_forcelist=(502, 503, 504),
-	allowed_methods=frozenset({'GET', 'PUT', 'DELETE', 'HEAD'}),
-	raise_on_status=False,
-)))
-_session.mount('https://', _session.get_adapter('http://'))
+class _ApiRetry(Retry):
+	"""urllib3 Retry that also retries a POST, on POST_RETRY_STATUSES only."""
+
+	def is_retry(self, method, status_code, has_retry_after=False):
+		if method.upper() == 'POST':
+			return bool(self.total) and status_code in POST_RETRY_STATUSES
+		return super().is_retry(method, status_code, has_retry_after)
+
+
+def _build_session(retries=API_RETRIES, backoff=API_RETRY_BACKOFF):
+	"""HTTP session retrying transient failures that are safe to repeat.
+
+	- Gateway errors (TRANSIENT_STATUSES) for idempotent methods, HTTP 503 only for POST.
+	- Connections that could not be established (refused, connect timeout, DNS failure,
+	  refused proxy connection) for every method: the request was never sent.
+	- Never a read error (read timeout, connection dropped after sending): the API may
+	  have processed the request, and a read timeout already waited `addons.api.timeout`.
+	"""
+	retry = _ApiRetry(
+		total=max(0, retries),
+		read=0,
+		backoff_factor=backoff,
+		status_forcelist=TRANSIENT_STATUSES,
+		allowed_methods=IDEMPOTENT_METHODS,
+		raise_on_status=False,  # the last error response is returned and raised by _make_request
+		respect_retry_after_header=False,  # keep waits bounded by the backoff settings
+	)
+	session = requests.Session()
+	adapter = HTTPAdapter(max_retries=retry)
+	session.mount('http://', adapter)
+	session.mount('https://', adapter)
+	return session
+
+
+_session = _build_session()
 
 
 def _make_request(method, endpoint, data=None):
@@ -85,7 +122,13 @@ def _make_request(method, endpoint, data=None):
 		raise requests.HTTPError(f'API {method} {endpoint} failed: HTTP {response.status_code}: {_error_detail(response)}', response=response)  # noqa: E501
 	if not response.text.strip():
 		return None  # e.g. 204 No Content
-	result = response.json()
+	try:
+		result = response.json()
+	except ValueError:
+		raise requests.exceptions.InvalidJSONError(
+			f'API {method} {endpoint} returned HTTP {response.status_code} with a non-JSON body: {_error_detail(response)}',
+			response=response,
+		) from None
 	debug('API response', sub='hooks.api', verbose=True,
 	      obj='<redacted>' if internal else result)
 	return result
