@@ -394,6 +394,11 @@ class ai(PythonRunner):
 			"default": False,
 			"help": "Resume a previous AI session"
 		},
+		"show_map": {
+			"is_flag": True,
+			"default": False,
+			"help": "Print the placeholder -> real value map and exit (shows real values; never saved to a report)"
+		},
 		"context_warnings": {
 			"is_flag": True,
 			"default": True,
@@ -430,6 +435,44 @@ class ai(PythonRunner):
 		"""Return a context manager that mocks LLM calls with fixture data."""
 		from secator.utils_test import mock_litellm_completion
 		return mock_litellm_completion(fixture)
+
+	@classmethod
+	def show_map(cls, context, resume=False):
+		"""Print the placeholder -> value map to the terminal, read-only (no runner, no write).
+
+		Scoped like a resume: the picked chat's map, or every map of the workspace when no chat
+		is picked or its session id is unknown (a placeholder stands for the same value in every
+		session, so merging dedupes).
+		"""
+		from rich.table import Table
+		from secator.query import QueryEngine
+		query = {"_type": "ai", "ai_type": "pii_map"}
+		if resume:
+			session = show_session_picker()
+			if session is None:
+				return
+			if session.get("store_session_id"):
+				query["_context.session_id"] = session["store_session_id"]
+			else:
+				console.print(Info(message="This chat's session id is unknown: showing every map of the workspace."))
+		try:
+			docs = QueryEngine(context.get("workspace_id", ""), context=context).search(query, include_internal=True)
+		except Exception as e:  # noqa: BLE001 - a store error is reported, never a traceback
+			console.print(Error(message=f"Failed to read the placeholder map: {e}"))
+			return
+		pii_map = {}
+		for doc in docs:
+			pii_map.update((doc.get("extra_data") or {}).get("pii_map") or {})
+		if not pii_map:
+			console.print(Warning(message="No placeholder map found."))
+			return
+		table = Table(box=None)
+		for column in ("Placeholder", "Type", "Value"):
+			table.add_column(column)
+		rows = sorted((ph[1:].split(":", 1)[0], value, ph) for ph, value in pii_map.items())
+		for ph_type, value, ph in rows:
+			table.add_row(ph, ph_type, value)
+		console.print(table, highlight=False)
 
 	@classmethod
 	def requires_local_execution(cls, inputs, run_opts):
@@ -1036,6 +1079,8 @@ class ai(PythonRunner):
 		except Exception as e:  # noqa: BLE001 - restore best-effort; a fresh map still works forward
 			self.debug(f'pii_map restore failed: {e}', sub='llm')
 			return
+		if not docs:
+			self.debug(f'pii_map restore: no stored map for {"the workspace" if any_session else session_id}', sub='llm')
 		for doc in sorted(docs or [], key=lambda d: d.get("_timestamp", 0)):
 			ed = doc.get("extra_data") or {}
 			self.encryptor.pii_map.update(ed.get("pii_map") or {})
