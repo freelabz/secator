@@ -116,3 +116,170 @@ def filter_runners(runners, since=None, status=None, limit=50, now=None):
 	if limit > 0:
 		rows = rows[:limit]
 	return [summarize_runner(r) for _, r in rows]
+
+
+# ---------- get_runner / stop_runner helpers ----------
+
+RUNNER_TYPES = ('task', 'workflow', 'scan')
+TERMINAL_STATUSES = ('SUCCESS', 'FAILURE', 'REVOKED', 'SKIPPED')
+# Findings read to build a live view's per-type counts (the counts say "N+" past it).
+LIVE_VIEW_SCAN_LIMIT = 1000
+_MAX_CHILDREN = 20
+_MAX_MESSAGES = 5
+_MAX_MESSAGE_CHARS = 200
+
+
+def _own_ids(doc, rtype):
+	"""Every id a runner doc answers to: its doc key (``_id``, or the ``_id_str`` a backend's
+	``list_runners`` sets when the doc has no ``_id``, e.g. ``tasks/chunk-1`` on sqlite, which
+	``summarize_runner`` then shows as ``_id``) and its own context ids."""
+	context = doc.get('context') or {}
+	ids = (doc.get('_id'), doc.get('_id_str'), context.get(f'{rtype}_chunk_id'), context.get(f'{rtype}_id'))
+	return {str(i) for i in ids if i}
+
+
+def _in_workspace(doc, workspace_id):
+	"""Whether a runner doc belongs to ``workspace_id`` (any doc when no workspace is set). A
+	backend's get-by-id is not workspace-scoped, so a doc from another workspace is dropped."""
+	if not workspace_id:
+		return True
+	context = doc.get('context') or {}
+	owners = {str(v) for v in (context.get('workspace_id'), context.get('workspace_name')) if v}
+	return str(workspace_id) in owners
+
+
+def find_runner_doc(engine, runner_id, runner_type=None, workspace_id=None):
+	"""Return ``(doc, runner_type)`` of one runner, or ``(None, None)``.
+
+	Works on every query backend through the same two calls ``list_runners`` uses:
+	``get_runner`` by id first (the backend's own lookup: doc key, plus the context ids on
+	json/sqlite), then a scan of ``list_runners`` matching the doc ``_id`` or its own
+	``{type}_chunk_id`` / ``{type}_id`` — so the id from a runner card, a run tool result or
+	a ``list_runners`` row (``_id`` or ``run_id``) all resolve. Only a runner of the run's
+	workspace is returned."""
+	runner_id = str(runner_id or '').strip()
+	if not runner_id:
+		return None, None
+	rtype = str(runner_type or '').strip().lower().rstrip('s') or None
+	types = (rtype,) if rtype in RUNNER_TYPES else RUNNER_TYPES
+	for t in types:
+		try:
+			doc = engine.get_runner(runner_id, t)
+		except Exception:  # noqa: BLE001 - an unknown id/type must not break the lookup
+			doc = None
+		if doc and _in_workspace(doc, workspace_id):
+			return doc, t
+	for t in types:
+		try:
+			docs = engine.list_runners(workspace_id=workspace_id or None, runner_type=t) or []
+		except Exception:  # noqa: BLE001
+			continue
+		for doc in docs:
+			if runner_id in _own_ids(doc, t) and _in_workspace(doc, workspace_id):
+				return doc, t
+	return None, None
+
+
+def runner_scope(doc, rtype):
+	"""``(doc_id, scope_id)``: the runner doc key and the ``_context.{type}_id`` its findings carry."""
+	context = doc.get('context') or {}
+	scope_id = context.get(f'{rtype}_id') or doc.get('_id')
+	doc_id = context.get(f'{rtype}_chunk_id') or context.get(f'{rtype}_id') or doc.get('_id')
+	return str(doc_id or ''), str(scope_id or '')
+
+
+def _elapsed(doc, now=None):
+	start = parse_dt(doc.get('start_time'))
+	end = parse_dt(doc.get('end_time'))
+	if start is None:
+		return doc.get('elapsed')
+	if end is None and str(doc.get('status', '')).upper() in TERMINAL_STATUSES:
+		return doc.get('elapsed')
+	now = now or datetime.now(timezone.utc)
+	return round(((end or now) - start).total_seconds(), 1)
+
+
+def _iso(value):
+	dt = parse_dt(value)
+	return dt.isoformat() if dt else None
+
+
+def _short(msg):
+	msg = str(msg or '')
+	return msg if len(msg) <= _MAX_MESSAGE_CHARS else msg[:_MAX_MESSAGE_CHARS] + '...'
+
+
+def runner_children(engine, rtype, scope_id, workspace_id=None):
+	"""Child runners of a workflow/scan (their context carries its ``{type}_id``), compact."""
+	if rtype not in ('workflow', 'scan') or not scope_id:
+		return []
+	child_types = ('workflow', 'task') if rtype == 'scan' else ('task',)
+	out = []
+	for t in child_types:
+		try:
+			docs = engine.list_runners(workspace_id=workspace_id or None, runner_type=t, has_parent=True) or []
+		except Exception:  # noqa: BLE001
+			continue
+		for doc in docs:
+			if str((doc.get('context') or {}).get(f'{rtype}_id') or '') != scope_id:
+				continue
+			child_id, _ = runner_scope(doc, t)
+			out.append({'id': child_id, 'type': t, 'name': doc.get('name'),
+			            'status': str(doc.get('status') or 'PENDING').upper(), 'progress': doc.get('progress', 0)})
+	return out
+
+
+def runner_live_view(engine, doc, rtype, workspace_id=None, now=None):
+	"""Compact live view of one runner: status/progress/timing from its doc (rewritten by the
+	driver during the run), child runners, and what it produced so far (finding counts by
+	``_type`` + truncated errors/warnings), plus the ``query`` that scopes its findings."""
+	doc_id, scope_id = runner_scope(doc, rtype)
+	targets = doc.get('targets') or []
+	if not isinstance(targets, list):
+		targets = [targets]
+	status = str(doc.get('status') or 'PENDING').upper()
+	view = {
+		'runner_id': doc_id,
+		'runner_type': rtype,
+		'name': doc.get('name'),
+		'description': (doc.get('config') or {}).get('description') or None,
+		'status': status,
+		'done': bool(doc.get('done', status in TERMINAL_STATUSES)),
+		'progress': doc.get('progress', 0),
+		'targets_count': len(targets),
+		'targets': [str(t) for t in targets[:5]],
+		'start_time': _iso(doc.get('start_time')),
+		'end_time': _iso(doc.get('end_time')),
+		'elapsed': _elapsed(doc, now=now),
+		'last_updated': _iso(doc.get('last_updated_db')),
+	}
+	if doc.get('chunk_count'):
+		view['chunk'] = doc.get('chunk')
+		view['chunk_count'] = doc.get('chunk_count')
+	children = runner_children(engine, rtype, scope_id, workspace_id=workspace_id)
+	if children:
+		done = len([c for c in children if c['status'] in TERMINAL_STATUSES])
+		view['children_done'] = f'{done}/{len(children)}'
+		view['children'] = children[:_MAX_CHILDREN]
+	query = {f'_context.{rtype}_id': scope_id}
+	counts, errors, warnings = {}, [], []
+	try:
+		found = engine.search(query, limit=LIVE_VIEW_SCAN_LIMIT) or []
+	except Exception:  # noqa: BLE001 - a store hiccup leaves the counts out, not the view
+		found = None
+	if found is not None:
+		for r in found:
+			t = r.get('_type', '') if isinstance(r, dict) else ''
+			counts[t] = counts.get(t, 0) + 1
+			if t == 'error' and len(errors) < _MAX_MESSAGES:
+				errors.append(_short(r.get('message')))
+			elif t == 'warning' and len(warnings) < _MAX_MESSAGES:
+				warnings.append(_short(r.get('message')))
+		view['findings'] = counts
+		view['findings_total'] = f'{len(found)}+' if len(found) >= LIVE_VIEW_SCAN_LIMIT else len(found)
+	if errors:
+		view['errors'] = errors
+	if warnings:
+		view['warnings'] = warnings
+	view['query'] = query
+	return view

@@ -290,3 +290,29 @@ class SqliteBackend(QueryBackend):
 		except Exception as e:
 			console.print(Warning(message=f'SQLite create_note failed: {e}'))
 			return 0
+
+	def get_runner(self, runner_id: str, runner_type: str):
+		"""Get a single runner by id from its runner table (live: written by update_runner).
+
+		The row key is the runner's ``{type}_chunk_id`` or ``{type}_id``; a runner is also found
+		by either id in its persisted context, so callers need not know which one keyed it."""
+		rtype = (runner_type or '').rstrip('s')
+		if rtype not in ('task', 'workflow', 'scan'):
+			return None
+		table = f'{rtype}s'
+		try:
+			conn = self._get_conn()
+			row = conn.execute(
+				f"SELECT data FROM {table} WHERE id = ? "
+				f"OR json_extract(data, '$.context.{rtype}_chunk_id') = ? "
+				f"OR json_extract(data, '$.context.{rtype}_id') = ? LIMIT 1",
+				(runner_id, runner_id, runner_id)).fetchone()
+			if not row:
+				return None
+			doc = json.loads(row[0])
+			doc['_id'] = runner_id
+			doc['_type'] = table
+			return doc
+		except Exception as e:
+			console.print(Warning(message=f'SQLite get_runner failed: {e}'))
+			return None

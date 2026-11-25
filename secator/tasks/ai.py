@@ -206,7 +206,7 @@ def _yield_tool_results(runner, collected):
 		# DATA, not obeyed. The <untrusted_data> constraint tells the model what the envelope
 		# means. Only data-returning tools are wrapped; our own guidance (scope_note/trunc_hint)
 		# is appended OUTSIDE the envelope below.
-		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell"):
+		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell", "get_runner"):
 			tool_result_str = f"<workspace_data>\n{tool_result_str}\n</workspace_data>"
 		result_incomplete = len(serialized) > max_items
 		# Only nudge a scoped re-query when it ADDS something: the result is item-capped,

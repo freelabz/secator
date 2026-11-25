@@ -2,7 +2,7 @@
 
 Each tool is one self-contained :class:`~secator.ai.tools.base.BaseTool` subclass. The
 built-in tools are grouped by the resource they act on: ``runners.py`` (run_task,
-run_workflow, run_shell, run_subagent, list_runners), ``findings.py`` (query_workspace,
+run_workflow, run_shell, run_subagent, list_runners, get_runner, stop_runner), ``findings.py`` (query_workspace,
 add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search)
 and ``session.py`` (update_plan, change_mode, stop). The class
 carries everything that used to be hand-synced across 5 places (schema, dispatch
@@ -33,7 +33,7 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools.base import BaseTool  # noqa: F401 (re-exported)
 
-from secator.ai.tools.runners import RunTask, RunSubagent, RunWorkflow, RunShell, ListRunners
+from secator.ai.tools.runners import RunTask, RunSubagent, RunWorkflow, RunShell, ListRunners, GetRunner, StopRunner
 from secator.ai.tools.findings import (
 	QueryWorkspace, AddFinding, MarkVulnExploited, MarkVulnFalsePositive, MarkVulnFixed, MarkVulnExploitFailed,
 	UpdateFinding, AddNote,
@@ -61,6 +61,8 @@ _TOOL_CLASSES = [
 	UpdatePlan,
 	WebSearch,
 	ListRunners,
+	GetRunner,
+	StopRunner,
 	ChangeMode,
 	Stop,
 ]

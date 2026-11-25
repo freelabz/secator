@@ -40,6 +40,13 @@ query_workspace(query={"_context.workflow_id": "<runner_id>", "_type": "port"}) 
 (the same rule holds for scans already in the workspace: scope by `_context.scan_id`.)
 </example>
 
+<query_running_runner>
+A RUNNING runner's findings are stored as it finds them, so read them before it ends and start investigating (e.g. a scan running in the workspace, found with list_runners(status="RUNNING")): get_runner(runner_id=<id>) gives its live status, progress and finding counts, then query_workspace(query=<its `query`>) reads what it found so far, e.g. query_workspace(query={"_context.scan_id": "<run_id>"}). These results are PARTIAL until the runner is done: re-query later for new ones (add `"_timestamp": {"$gt": <newest _timestamp you already read>}` to get only those) and never re-run it to see them. Its status/progress refreshes every few seconds.
+</query_running_runner>
+<stop_runner_rule>
+Stop a runner that is clearly useless or too long with stop_runner(runner_id=<id>, reason=...) instead of waiting for it: your own runners stop at once, any other runner asks the user first.
+</stop_runner_rule>
+
 <example>
 Grouped overview first, then drill down. group=True returns ONE row per entity (the
 duplicates of a finding across runs and tools collapse into it) with a _group_count member

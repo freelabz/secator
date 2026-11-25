@@ -374,10 +374,10 @@ class TestPrompts(unittest.TestCase):
 		# else here acts on the world or the data.
 		self.assertEqual(
 			set(actions),
-			{"query", "fetch_url", "web_search", "list_runners", "update_plan",
+			{"query", "fetch_url", "web_search", "list_runners", "get_runner", "update_plan",
 			 "subagent", "change_mode", "stop"},
 		)
-		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
+		for a in ["shell", "task", "workflow", "add_finding", "update_finding", "stop_runner",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
 			self.assertNotIn(a, actions)
 

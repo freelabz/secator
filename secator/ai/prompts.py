@@ -123,7 +123,7 @@ MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "stop_runner", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
@@ -136,7 +136,7 @@ MODES = {
 		# and NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
 		# changing findings is an active action that belongs in scan/exploit.
 		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
-		"allowed_actions": ["query", "fetch_url", "update_plan", "web_search", "list_runners", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
@@ -147,7 +147,7 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "stop" lets exploit mode end-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "stop_runner", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"contribute": {
@@ -159,7 +159,7 @@ MODES = {
 		# does NOT change_mode (deliberate, directly-selected terminal mode). It needs HOST
 		# filesystem access (run it WITHOUT --isolated); writes outside the workspace prompt for
 		# approval. On builds that expose read_file/write_file, those are added for this mode too.
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "subagent", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "stop_runner", "subagent", "stop"],
 		# Authoring + running the full test matrix (dry-run, single/multi target, sync + worker,
 		# fixtures, lint) is long, so a higher iteration floor than the one-shot modes.
 		"max_iterations": 20,
@@ -188,7 +188,7 @@ MODES = {
 		# is nothing to escalate to and it must not de-escalate out. It leans on `subagent`
 		# (adversarial fan-out), `shell` (stand up a sandbox lab), `web_search` (find PoCs) and
 		# `add_finding` (record the validated Exploit, linked by `cves`).
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "stop_runner", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "stop"],
 		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
 		# gets a higher iteration floor than scan/exploit.
 		"max_iterations": 12,
@@ -743,6 +743,13 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		# Scan's role line delegates to that block inline; drop the clause with it.
 		result = re.sub(r'; and hand [^;.]*?\(see <vulnerability_handling>\)[^;.]*', '', result)
 		result += "\n\n" + load_prompt("constraints/subagent.md")
+
+	# The query rules name get_runner / stop_runner: drop each block in a mode that does not
+	# expose its tool (e.g. read-only chat cannot stop runners).
+	allowed = set(mode_config.get("allowed_actions") or [])
+	for tag, needed in (("query_running_runner", "get_runner"), ("stop_runner_rule", "stop_runner")):
+		if needed not in allowed:
+			result = re.sub(rf'\n*^<{tag}>$.*?^</{tag}>$\n*', '\n', result, flags=re.DOTALL | re.MULTILINE)
 
 	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in
 	# every mode; which guidance applies depends only on whether the backend has a user

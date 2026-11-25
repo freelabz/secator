@@ -288,6 +288,17 @@ def _child_preamble(
 	return _build_child_hooks_or_denial(context)
 
 
+def _record_spawn(ctx, runner, *ids, subagent_session=None) -> None:
+	"""Record a spawned runner (and a subagent's conversation) on the ai task's context, for
+	stop_runner's ownership check. No-op on a context without the registry (library use)."""
+	record = getattr(ctx, "record_runner", None)
+	if callable(record):
+		record(runner, *ids)
+	sessions = getattr(ctx, "subagent_sessions", None)
+	if subagent_session and isinstance(sessions, set):
+		sessions.add(subagent_session)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow (see ``_run_runner_steps``).
 
@@ -508,6 +519,9 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 	# both, then `runner.id`.
 	runner_id = (context.get(f"{runner_type}_chunk_id")
 	             or context.get(f"{runner_type}_id", "") or runner.id)
+	# Record the spawn (stop_runner's ownership check): doc key + run-scope id.
+	_record_spawn(ctx, runner, runner_id, context.get(f"{runner_type}_id"),
+	              subagent_session=sub_session if is_ai_subagent else None)
 	extra_data = {
 		"targets": targets,
 		# Never persist transport credentials into the (DB-stored, client-rendered) action item.
