@@ -865,7 +865,11 @@ class Command(Runner):
 		"""
 		if not self.process or not self.process.pid:
 			return
-		infos = list(Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs))
+		try:
+			root = psutil.Process(self.process.pid)
+		except psutil.Error:  # a short command can exit before the monitor's first tick
+			return
+		infos = list(Command.get_process_info(root, children=True, procs=procs))
 		if not infos:
 			return
 		# One Stat PER process in the task's tree (the command + everything it spawns, e.g. a
