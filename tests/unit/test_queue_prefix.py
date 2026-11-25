@@ -8,7 +8,7 @@ to today).
 import unittest
 
 from secator.config import CONFIG
-from secator.loader import get_configs_by_type
+from secator.loader import discover_tasks, get_configs_by_type
 from secator.runners import Scan, Workflow
 from secator.runners._helpers import prefix_queue, resolve_queue_prefix
 
@@ -89,6 +89,12 @@ class TestWorkerSubscription(unittest.TestCase):
         self.assertEqual(subs[0], 'fleet1-small')
         self.assertTrue(all(q.startswith('fleet1-') for q in subs))
         self.assertIn('fleet1-mongodb', subs)
+
+    def test_static_task_profiles_are_consumed(self):
+        for task_cls in discover_tasks():
+            profile = getattr(task_cls, 'profile', None)
+            if isinstance(profile, str):
+                self.assertIn(profile, self.BASE, f'{task_cls.__name__} routes to an unconsumed queue')
 
 
 if __name__ == '__main__':
