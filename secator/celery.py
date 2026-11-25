@@ -166,11 +166,11 @@ def revoke_task(task_id, task_name=None):
 	if meta['status'] not in states.READY_STATES:
 		app.backend.mark_as_revoked(task_id, reason='revoked')
 	console.print(Info(message=message))
-	# A chunked task's id names its chord callback once it is replaced (see break_task): revoke the
-	# chunks it recorded in its state too.
+	# The state of a chunked task (see break_task), workflow or scan (see build_celery_workflow) lists
+	# the ids of its tasks: revoke them too.
 	if isinstance(meta['result'], dict):
-		for chunk_id in meta['result'].get('celery_ids', []):
-			revoke_task(chunk_id, task_name)
+		for child_id in meta['result'].get('celery_ids', []):
+			revoke_task(child_id, task_name)
 
 
 # --------------#
@@ -605,6 +605,7 @@ def replace(task_instance, sig):
 	process = psutil.Process(os.getpid())
 	length = len(task_instance.request.chain) if task_instance.request.chain else 0
 	# console.print(f'Adding {length} chain tasks from request chain')
+	errbacks = sig.body.options.get('link_error')  # see break_task
 	for ix, t in enumerate(reversed(task_instance.request.chain or [])):
 		console.print(Info(message=f'Adding chain task {t.name} from request chain ({ix + 1}/{length})'))
 		chain_task = signature(t, app=task_instance.app)
@@ -614,6 +615,10 @@ def replace(task_instance, sig):
 		del t
 		memory_bytes = process.memory_info().rss
 		console.print(Info(message=f'Memory usage: {memory_bytes / 1024 / 1024:.2f} MB (chain task {ix + 1}/{length})'))
+	# `chord | task` chains the task onto the chord callback, but without its error callback. The chain passes it on
+	# to its later tasks too, where mark_runner_chord_failed ignores any error that is not the chord's.
+	if errbacks:
+		sig.body.set(link_error=errbacks)
 	gc.collect()
 	return task_instance.on_replace(sig)
 

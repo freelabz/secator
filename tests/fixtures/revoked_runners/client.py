@@ -9,7 +9,7 @@ import threading
 import time
 
 from secator.celery import app, revoke_task
-from secator.runners import Task
+from secator.runners import Task, Workflow
 from secator.template import TemplateLoader
 
 SLEEPS = ['120.7', '121.3']  # odd durations, to find the commands' processes
@@ -47,6 +47,15 @@ def chunk_fails():
 	Task(config, ['1', 'boom'], run_opts={'sync': False, 'print_item': False}, context={'drivers': ['json']}).run()
 
 
+def workflow():
+	"""A workflow running a chunked task, revoked by the id its context records (no client polls it)."""
+	config = TemplateLoader(input={'type': 'workflow', 'name': 'revoke_flow', 'tasks': {'revoke_sleep': {}}})
+	workflow = Workflow(config, SLEEPS, run_opts={'sync': False, 'no_poll': True}, context={'drivers': ['json']})
+	workflow.run()
+	wait_for_commands()
+	revoke_task(workflow.context['celery_id'])
+
+
 def batch():
 	"""A task running its children in-process, in parallel threads: revoke it."""
 	result = app.send_task('tests.run_batch_children', args=[SLEEPS], queue='revoke-test')
@@ -55,4 +64,5 @@ def batch():
 
 
 if __name__ == '__main__':
-	{'chunked': chunked, 'revoke_id': revoke_id, 'chunk_fails': chunk_fails, 'batch': batch}[sys.argv[1]]()
+	{'chunked': chunked, 'revoke_id': revoke_id, 'chunk_fails': chunk_fails, 'workflow': workflow,
+	 'batch': batch}[sys.argv[1]]()

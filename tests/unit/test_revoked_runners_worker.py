@@ -6,6 +6,9 @@ commands run, and every runner doc the json driver wrote must end REVOKED:
 
 - a chunked task: its chunks are revoked, and the task is finalized although its chord callback never runs;
 - a task whose child commands run in-process in parallel threads, as the ``ai`` task runs a turn's tool calls.
+
+A workflow running a chunked task is revoked by the id its context records: its task and chunks end
+REVOKED. The workflow itself is not finalized (its chain stops), so it stays RUNNING.
 """
 import json
 import os
@@ -20,7 +23,6 @@ from importlib.util import find_spec
 from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures' / 'revoked_runners'
-FINAL_STATUSES = {'SUCCESS', 'FAILURE', 'REVOKED', 'SKIPPED'}
 
 
 class _RevokedRunners:
@@ -49,7 +51,7 @@ class _RevokedRunners:
 		with cls.log.open('w') as log:
 			worker = subprocess.Popen(
 				[sys.executable, '-m', 'celery', '-A', 'secator.celery.app', 'worker', '-I', 'worker_app',
-				 '-P', cls.pool, '-c', '4', '-Q', 'revoke-test,results,celery', '-n', f'revoke-{cls.pool}@%h',
+				 '-P', cls.pool, '-c', '4', '-Q', 'revoke-test,small,results,celery', '-n', f'revoke-{cls.pool}@%h',
 				 '--without-mingle', '--without-gossip', '--without-heartbeat'],
 				env=cls.env, cwd=cls.tmp, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
 				start_new_session=True)
@@ -76,7 +78,7 @@ class _RevokedRunners:
 			stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=True)
 		deadline = time.time() + 45  # the commands sleep 120s
 		statuses = self.runner_statuses()
-		while time.time() < deadline and not (len(statuses) == len(expected) and set(statuses) <= FINAL_STATUSES):
+		while time.time() < deadline and sorted(statuses) != sorted(expected):
 			time.sleep(0.5)
 			statuses = self.runner_statuses()
 		self.assertEqual(sorted(statuses), sorted(expected), self.log.read_text()[-6000:])
@@ -89,6 +91,9 @@ class _RevokedRunners:
 
 	def test_failed_chunk_fails_the_chunked_task(self):
 		self._run('chunk_fails', ['FAILURE', 'SUCCESS'])  # the task, and the chunk that ran
+
+	def test_revoked_workflow_stops_its_chunked_task(self):
+		self._run('workflow', ['RUNNING'] + ['REVOKED'] * 3)  # the workflow is not finalized
 
 	def test_revoked_task_stops_its_inprocess_children(self):
 		self._run('batch', ['REVOKED'] * 2)

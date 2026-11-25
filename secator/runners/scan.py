@@ -23,7 +23,7 @@ class Scan(Runner):
 			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import mark_runner_started, mark_runner_completed
+		from secator.celery import app, mark_runner_started, mark_runner_completed
 		from secator.template import TemplateLoader
 
 		# A scan-level `description` belongs to the SCAN, not its workflows/tasks. Drop it
@@ -92,4 +92,8 @@ class Scan(Runner):
 				*sigs,
 				mark_runner_completed.si([], self).set(queue='results'),
 			)
+		# Record the run's Celery id, and list its tasks under it: revoke_task(<id>) revokes them all.
+		if sig and not self.sync:
+			self.context['celery_id'] = sig.freeze().id
+			app.backend.store_result(self.context['celery_id'], {'celery_ids': list(self.celery_ids_map)}, 'RUNNING')
 		return sig
