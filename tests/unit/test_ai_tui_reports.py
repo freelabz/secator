@@ -38,12 +38,13 @@ class TestAiTuiQuitReports(unittest.TestCase):
 		from secator.rich import console
 		from secator.tasks.ai import ai as AiTask
 		from secator.tui.ai import AITUI
-		asked = threading.Event()
+		asked, released = threading.Event(), threading.Event()
 		app_run = AITUI.run
+		threads_before = set(threading.enumerate())
 
 		def wait_for_user(*args, **kwargs):
 			asked.set()
-			threading.Event().wait(30)
+			released.wait(30)
 
 		def run_and_quit(app):
 			def quit_app():
@@ -68,6 +69,10 @@ class TestAiTuiQuitReports(unittest.TestCase):
 				cli, ['x', 'ai', 'example.com', '--model', 'gpt-4o', '--api-key', 'test', '--driver', 'json', *args],
 				catch_exceptions=False)
 			output = console.export_text(clear=True)
+			# Let the abandoned runner thread end now, so it does not run on into later tests.
+			released.set()
+			for thread in set(threading.enumerate()) - threads_before:
+				thread.join(10)
 		self.assertEqual(result.exit_code, 0, result.output)
 		reports = {
 			str(p.relative_to(self.reports)): json.loads(p.read_text())['info'].get('status')
