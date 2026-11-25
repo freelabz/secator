@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timezone
 
 import pymongo
 from bson.objectid import ObjectId
@@ -162,9 +163,51 @@ def on_build(self, task_spec):
 	return task_spec
 
 
+def save_suggestion(item):
+	"""Store a runner suggestion in the ``suggestions`` collection: one doc per workspace, runner and
+	target set (a repeat refreshes its message, priority and options)."""
+	db = get_mongodb_client().main
+	now = datetime.now(timezone.utc)
+	targets = list(item.targets)
+	query = {
+		'type': 'runner',
+		'context.workspace_id': item._context.get('workspace_id'),
+		'data.type': item.type,
+		'data.name': item.name,
+		'data.targets': {'$all': targets, '$size': len(targets)},
+	}
+	refresh = {'message': item.reason, 'priority': item.priority, 'data.run_opts': item.opts, 'updated_at': now}
+	existing = db.suggestions.find_one(query, {'_id': 1})
+	if existing:
+		db.suggestions.update_one({'_id': existing['_id']}, {'$set': refresh})
+		item._uuid = str(existing['_id'])
+		return item
+	doc = {
+		'type': 'runner',
+		'name': f'Run {item.type} {item.name}',
+		'message': item.reason,
+		'priority': item.priority,
+		'source': item.source,
+		'data': {
+			'type': item.type,
+			'name': item.name,
+			'config_query': {'config.name': item.name, 'config.type': item.type},
+			'run_opts': item.opts,
+			'targets': targets,
+		},
+		'context': {'workspace_id': item._context.get('workspace_id'), 'done': False},
+		'created_at': now,
+		'updated_at': now,
+	}
+	item._uuid = str(db.suggestions.insert_one(doc).inserted_id)
+	return item
+
+
 def update_finding(self, item):
 	if not is_output_type(item):
 		return item
+	if item._type == 'suggestion':
+		return save_suggestion(item)
 	ensure_mongo_run_id(self.context)
 	for key in (f'{self.config.type}_id', f'{self.config.type}_chunk_id'):
 		cur = item._context.get(key)

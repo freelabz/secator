@@ -20,7 +20,7 @@ class TestToolSchemas(unittest.TestCase):
 		            "fetch_url", "update_plan", "web_search", "list_runners",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		            "mark_vuln_fixed", "mark_vuln_exploit_failed", "update_finding", "add_note", "change_mode",
-		            "get_runner", "stop_runner"}
+		            "get_runner", "stop_runner", "add_suggestion"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):
@@ -120,9 +120,11 @@ class TestBuildToolSchemas(unittest.TestCase):
 	def test_scan_mode_returns_all_tools(self):
 		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS
 		schemas = build_tool_schemas("scan")
-		self.assertEqual(len(schemas), len(TOOL_SCHEMAS))
+		# Every tool but add_suggestion, which is only granted through extra_tools.
+		expected = set(TOOL_SCHEMAS.keys()) - {"add_suggestion"}
 		names = {s["function"]["name"] for s in schemas}
-		self.assertEqual(names, set(TOOL_SCHEMAS.keys()))
+		self.assertEqual(len(schemas), len(expected))
+		self.assertEqual(names, expected)
 
 	def test_chat_mode_excludes_task_and_workflow(self):
 		from secator.ai.tools import build_tool_schemas

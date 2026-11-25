@@ -13,6 +13,7 @@ __all__ = [
 	'Stat',
 	'State',
 	'Subdomain',
+	'Suggestion',
 	'Technology',
 	'Url',
 	'UserAccount',
@@ -41,6 +42,7 @@ from secator.output_types.error import Error
 from secator.output_types.stat import Stat
 from secator.output_types.state import State
 from secator.output_types.domain import Domain
+from secator.output_types.suggestion import Suggestion
 
 
 EXECUTION_TYPES = [
@@ -53,7 +55,7 @@ FINDING_TYPES = [
 	Subdomain, Ip, Port, Url, Tag, Exploit, ExploitAttempt, UserAccount, Vulnerability, Certificate,
 	Record, Domain, Ai, Technology
 ]  # fmt: off
-OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
+OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES + [Suggestion]  # a suggestion is not a finding
 INTERNAL_FIELDS = ('_context', '_uuid', '_related', '_duplicate')
 
 _OUTPUT_TYPE_NAMES = {t.get_name() for t in OUTPUT_TYPES}

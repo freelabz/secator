@@ -3,8 +3,9 @@
 Each tool is one self-contained :class:`~secator.ai.tools.base.BaseTool` subclass. The
 built-in tools are grouped by the resource they act on: ``runners.py`` (run_task,
 run_workflow, run_shell, run_subagent, list_runners, get_runner, stop_runner), ``findings.py`` (query_workspace,
-add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search)
-and ``session.py`` (update_plan, change_mode, stop). The class
+add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search),
+``session.py`` (update_plan, change_mode, stop) and ``suggestions.py`` (add_suggestion,
+only granted per run through ``extra_tools``). The class
 carries everything that used to be hand-synced across 5 places (schema, dispatch
 action, mode exposure, permission auto-allow, handler), and every drift-prone view
 derives from the ``TOOLS`` registry:
@@ -40,6 +41,7 @@ from secator.ai.tools.findings import (
 )
 from secator.ai.tools.web import FetchUrl, WebSearch
 from secator.ai.tools.session import UpdatePlan, ChangeMode, Stop
+from secator.ai.tools.suggestions import AddSuggestion
 
 
 # Order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas emits tools
@@ -65,6 +67,7 @@ _TOOL_CLASSES = [
 	StopRunner,
 	ChangeMode,
 	Stop,
+	AddSuggestion,
 ]
 
 # The live registry. Built-ins are instantiated once; external tools are appended by
