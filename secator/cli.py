@@ -192,12 +192,12 @@ def worker(hostname, concurrency, reload, queue, queue_prefix, pool, quiet, logl
 		is_celery_worker_alive()
 		return
 
+	# When a prefix is set (--queue-prefix or CONFIG.celery.queue_prefix), subscribe to the
+	# prefixed names so this worker only consumes a run dispatched with the matching prefix.
+	prefix = queue_prefix or CONFIG.celery.queue_prefix
 	if not queue:
 		# Build the default queue set from the classic queue names (size pools + the
-		# statically-routed celery/results/mongodb). When a prefix is set (--queue-prefix
-		# or CONFIG.celery.queue_prefix), subscribe to the prefixed names so this worker
-		# only consumes a run dispatched with the matching prefix.
-		prefix = queue_prefix or CONFIG.celery.queue_prefix
+		# statically-routed celery/results/mongodb).
 		base_queues = ['small', 'medium', 'large', 'extra_large', 'poll', 'celery', 'results', 'mongodb']
 		queue = ','.join(f'{prefix}-{q}' if prefix else q for q in base_queues)
 
@@ -210,7 +210,8 @@ def worker(hostname, concurrency, reload, queue, queue_prefix, pool, quiet, logl
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
 		pidfile = '%n.pid'
-		queues = '-Q:1 celery -Q:2 small -Q:3 medium -Q:4 large -Q:5 extra_large'
+		dev_queues = ['celery', 'small', 'medium', 'large', 'extra_large']
+		queues = ' '.join(f'-Q:{i} {prefix}-{q}' if prefix else f'-Q:{i} {q}' for i, q in enumerate(dev_queues, 1))
 		concur = '-c:1 10 -c:2 100 -c:3 50 -c:4 20 -c:5 4'
 		pool = 'gevent'
 		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
