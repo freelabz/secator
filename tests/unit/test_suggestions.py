@@ -62,6 +62,8 @@ class TestAddSuggestionTool(unittest.TestCase):
 		for action in (
 			{'type': 'shell', 'name': 'httpx', 'targets': ['a.com'], 'reason': 'x'},
 			{'type': 'task', 'name': 'httpx', 'targets': [], 'reason': 'x'},
+			{'type': 'task', 'name': 'httpx', 'targets': [None], 'reason': 'x'},
+			{'type': 'task', 'name': 'httpx', 'targets': {'a.com': 1}, 'reason': 'x'},
 			{'type': 'task', 'name': 'httpx', 'targets': ['a.com'], 'reason': 'x', 'priority': 'urgent'},
 			{'type': 'task', 'name': 'httpx', 'targets': ['a.com'], 'reason': 'x', 'opts': ['x']},
 		):
@@ -91,6 +93,7 @@ class TestDriversStoreSuggestions(unittest.TestCase):
 
 	def test_mongodb_writes_suggestions_collection_with_dedup(self):
 		mongomock = pytest.importorskip('mongomock')
+		pytest.importorskip('pymongo')  # provides bson; required by secator.hooks.mongodb
 		from bson import ObjectId
 		from secator.hooks import mongodb
 		client = mongomock.MongoClient()

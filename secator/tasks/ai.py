@@ -13,7 +13,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import ADDONS_ENABLED
 from secator.output_types import (
-	Ai, Stat, Progress, Error, Info, Warning, State, Target, FINDING_TYPES, OutputType, INTERNAL_FIELDS
+	Ai, Stat, Progress, Error, Info, Warning, State, Suggestion, Target, FINDING_TYPES, OutputType, INTERNAL_FIELDS
 )
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
@@ -320,7 +320,7 @@ def resolve_llm_credentials(
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (scan or chat mode)."""
-	output_types = FINDING_TYPES + [Target]
+	output_types = FINDING_TYPES + [Target, Suggestion]  # Suggestion: from add_suggestion
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
 	install_cmd = 'pipx install shfmt-py'

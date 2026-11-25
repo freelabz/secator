@@ -50,7 +50,7 @@ class AddSuggestion(BaseTool):
 		runner_type = str(action.get("type") or "").strip()
 		name = str(action.get("name") or "").strip()
 		targets = action.get("targets") or []
-		targets = sorted({str(t).strip() for t in ([targets] if isinstance(targets, str) else targets)} - {""})
+		targets = [targets] if isinstance(targets, str) else targets
 		opts = action.get("opts") or {}
 		reason = str(action.get("reason") or "").strip()
 		priority = str(action.get("priority") or "medium").strip()
@@ -60,6 +60,10 @@ class AddSuggestion(BaseTool):
 		if name not in {c["name"] for c in get_configs_by_type(runner_type)}:
 			yield Error(message=f"Unknown {runner_type} '{name}': suggest a real secator {runner_type} name.", _context=context)  # noqa: E501
 			return
+		if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+			yield Error(message="add_suggestion `targets` must be a list of strings.", _context=context)
+			return
+		targets = sorted({t.strip() for t in targets} - {""})
 		if not targets or not reason:
 			yield Error(message="add_suggestion requires non-empty `targets` and `reason`.", _context=context)
 			return
