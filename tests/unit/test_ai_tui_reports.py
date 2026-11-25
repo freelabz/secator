@@ -65,14 +65,17 @@ class TestAiTuiQuitReports(unittest.TestCase):
 			]:
 				stack.enter_context(p)
 			console.export_text(clear=True)
-			result = click.testing.CliRunner().invoke(
-				cli, ['x', 'ai', 'example.com', '--model', 'gpt-4o', '--api-key', 'test', '--driver', 'json', *args],
-				catch_exceptions=False)
-			output = console.export_text(clear=True)
-			# Let the abandoned runner thread end now, so it does not run on into later tests.
-			released.set()
-			for thread in set(threading.enumerate()) - threads_before:
-				thread.join(10)
+			try:
+				result = click.testing.CliRunner().invoke(
+					cli, ['x', 'ai', 'example.com', '--model', 'gpt-4o', '--api-key', 'test', '--driver', 'json', *args],
+					catch_exceptions=False)
+				output = console.export_text(clear=True)
+			finally:
+				# End the abandoned runner thread while the patches still apply, so it does not run
+				# on into later tests.
+				released.set()
+				for thread in set(threading.enumerate()) - threads_before:
+					thread.join(10)
 		self.assertEqual(result.exit_code, 0, result.output)
 		reports = {
 			str(p.relative_to(self.reports)): json.loads(p.read_text())['info'].get('status')
