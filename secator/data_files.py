@@ -4,6 +4,7 @@ Shared by the CISA KEV catalog (``secator.kev``) and the CVE names dataset
 (``secator.cve_names``): both are refreshed by ``secator update`` and written atomically,
 so a reader in another process never sees a half-written file.
 """
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -65,3 +66,25 @@ def atomic_write_bytes(path, data):
 		except OSError:
 			pass
 		raise
+
+
+def git_blob_sha(path):
+	"""Return the git blob SHA-1 of a file, or None when it cannot be read.
+
+	Comparable to the ``sha`` the GitHub contents API returns for a file. Reads the file in
+	chunks, so large data files are never loaded whole.
+
+	Args:
+		path (str | Path): File to hash.
+
+	Returns:
+		str | None: The hex digest, or None when the file is missing or unreadable.
+	"""
+	try:
+		with open(path, 'rb') as f:
+			sha = hashlib.sha1(b'blob %d\0' % os.fstat(f.fileno()).st_size)
+			for chunk in iter(lambda: f.read(1 << 20), b''):
+				sha.update(chunk)
+	except OSError:
+		return None
+	return sha.hexdigest()

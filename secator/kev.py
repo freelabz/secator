@@ -12,7 +12,6 @@ update`` re-downloads the catalog from ``kev.url`` (default: the mirror on GitHu
 the bundled copy, and re-copies it to the cache (see ``refresh_kev``). The nightly workflow
 keeps the mirror fresh by running the same refresh with ``kev.url`` set to the cisa.gov feed.
 """
-import hashlib
 import json
 import os
 import shutil
@@ -102,13 +101,12 @@ def get_kev_sha():
 
 	Comparable to the ``sha`` the GitHub contents API returns for the mirror on main.
 	"""
+	from secator.data_files import git_blob_sha
 	ensure_kev_cache()
 	for path in (_cache_path(), BUNDLED_KEV_PATH):
-		try:
-			data = path.read_bytes()
-		except OSError:
-			continue
-		return hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+		sha = git_blob_sha(path)
+		if sha:
+			return sha
 	return None
 
 

@@ -23,6 +23,8 @@ import json
 from rich.table import Table
 
 from secator.config import CONFIG
+from secator.cve_names import CVE_NAMES_FILENAME, cve_names_path
+from secator.data_files import git_blob_sha
 from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, VERSION
 from secator.kev import KEV_FILENAME, get_kev_sha
 from secator.output_types import Info, Warning, Error
@@ -864,7 +866,7 @@ def check_updates(timeout=(1, 1)):
 		# Directory listing: gives the git blob sha of each data file without downloading it.
 		data_files = session.get(f'{api_url}/contents/secator/data?ref=main', headers=headers, timeout=timeout)
 		data_files.raise_for_status()
-		remote_kev_sha = {f['name']: f['sha'] for f in data_files.json()}.get(KEV_FILENAME)
+		remote_shas = {f['name']: f['sha'] for f in data_files.json()}
 		outdated = parse_version(VERSION) < parse_version(latest_version)
 	except (requests.ConnectionError, requests.Timeout):
 		warn_github_unreachable()
@@ -874,8 +876,16 @@ def check_updates(timeout=(1, 1)):
 		return
 	if outdated:
 		console.print(Info(message=f'secator {latest_version} is available (current: {VERSION}). Run [bold green4]secator update[/] to update secator and its data files.'))  # noqa: E501
-	elif remote_kev_sha and remote_kev_sha != get_kev_sha():
-		console.print(Info(message='Newer data files are available (CISA KEV catalog). Run [bold green4]secator update --data-only[/] to refresh them.'))  # noqa: E501
+		return
+	stale = [
+		label for label, filename, local_sha in (
+			('CISA KEV catalog', KEV_FILENAME, get_kev_sha()),
+			('CVE names', CVE_NAMES_FILENAME, git_blob_sha(cve_names_path())),
+		)
+		if remote_shas.get(filename) and remote_shas[filename] != local_sha
+	]
+	if stale:
+		console.print(Info(message=f'Newer data files are available ({", ".join(stale)}). Run [bold green4]secator update --data-only[/] to refresh them.'))  # noqa: E501
 
 
 def get_distro_config():

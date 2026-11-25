@@ -10,6 +10,8 @@ from click.testing import CliRunner
 from secator.cli import cli
 from secator.config import CONFIG
 import secator.kev as kev
+from secator.cve_names import CVE_NAMES_FILENAME
+from secator.data_files import git_blob_sha
 from secator.installer import check_updates, warn_github_unreachable
 from secator.kev import KEV_FILENAME
 from secator.requests import requests
@@ -32,6 +34,7 @@ class TestCheckUpdates(unittest.TestCase):
 		self._patches = [
 			patch('secator.installer.get_session', return_value=self._session),
 			patch('secator.installer.get_kev_sha', return_value='local-sha'),
+			patch('secator.installer.git_blob_sha', return_value='local-names-sha'),
 			patch('secator.installer.VERSION', '1.0.0'),
 			patch('secator.installer.console'),
 		]
@@ -44,10 +47,14 @@ class TestCheckUpdates(unittest.TestCase):
 		CONFIG.dirs.data = self._orig_data
 		shutil.rmtree(self._tmp, ignore_errors=True)
 
-	def _github(self, latest='1.0.0', kev_sha='local-sha'):
+	def _github(self, latest='1.0.0', kev_sha='local-sha', names_sha='local-names-sha'):
 		self._session.get.side_effect = [
 			_resp({'tag_name': f'v{latest}'}),
-			_resp([{'name': KEV_FILENAME, 'sha': kev_sha}, {'name': 'technologies.yaml', 'sha': 'x'}]),
+			_resp([
+				{'name': KEV_FILENAME, 'sha': kev_sha},
+				{'name': CVE_NAMES_FILENAME, 'sha': names_sha},
+				{'name': 'technologies.yaml', 'sha': 'x'},
+			]),
 		]
 
 	def _output(self):
@@ -69,7 +76,24 @@ class TestCheckUpdates(unittest.TestCase):
 	def test_data_file_change_suggests_data_only(self):
 		self._github(kev_sha='remote-sha')
 		check_updates()
+		self.assertIn('(CISA KEV catalog)', self._output())
 		self.assertIn('secator update --data-only', self._output())
+
+	def test_cve_names_change_suggests_data_only(self):
+		self._github(names_sha='remote-names-sha')
+		check_updates()
+		self.assertIn('(CVE names)', self._output())
+		self.assertIn('secator update --data-only', self._output())
+
+	def test_both_data_files_changed_names_both(self):
+		self._github(kev_sha='remote-sha', names_sha='remote-names-sha')
+		check_updates()
+		self.assertIn('(CISA KEV catalog, CVE names)', self._output())
+
+	def test_cve_names_up_to_date_is_not_listed(self):
+		self._github(kev_sha='remote-sha')
+		check_updates()
+		self.assertNotIn('CVE names', self._output())
 
 	def test_unparsable_version_prints_nothing(self):
 		self._github(latest='not-a-version')
@@ -96,6 +120,13 @@ class TestDataFiles(unittest.TestCase):
 
 	def tearDown(self):
 		CONFIG.offline_mode = self._orig_offline
+
+	def test_git_blob_sha(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			path = Path(tmp) / CVE_NAMES_FILENAME
+			path.write_bytes(b'hello\n')
+			self.assertEqual(git_blob_sha(path), 'ce013625030ba8dba906f756967f9e9ca394464a')  # git hash-object
+			self.assertIsNone(git_blob_sha(Path(tmp) / 'missing'))
 
 	def test_kev_sha_is_git_blob_sha(self):
 		data = b'hello\n'
