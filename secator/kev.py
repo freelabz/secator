@@ -131,7 +131,7 @@ def refresh_kev():
 	try:
 		resp = requests.get(KEV_URL, timeout=10)
 		resp.raise_for_status()
-		if not resp.json().get('vulnerabilities'):
+		if not _parse_kev_cve_ids(resp.json()):
 			raise ValueError('empty or malformed KEV feed')
 		blob = resp.content  # kept byte-identical to the mirror, so get_kev_sha() matches it
 	except Exception as e:

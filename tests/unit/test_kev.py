@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import tempfile
@@ -104,22 +105,40 @@ class TestKevLoading(unittest.TestCase):
 		feed = {'vulnerabilities': [{'cveID': 'CVE-1999-9999'}]}
 
 		class FakeResp:
+			content = json.dumps(feed, indent=1).encode() + b'\n'  # refresh must keep the exact bytes
+
 			def raise_for_status(self):
 				pass
 
 			def json(self):
 				return feed
 
-			@property
-			def content(self):
-				return json.dumps(feed).encode()
-
 		with patch('requests.get', return_value=FakeResp()):
 			ids, error = kev.refresh_kev()
 		self.assertEqual(error, '')
 		self.assertEqual(ids, {'CVE-1999-9999'})  # memo busted, reloaded from fresh feed
-		self.assertIn('CVE-1999-9999', self._cache.read_text())    # cache updated
-		self.assertIn('CVE-1999-9999', self._bundle.read_text())   # bundled mirror updated
+		self.assertEqual(self._cache.read_bytes(), FakeResp.content)   # cache updated
+		self.assertEqual(self._bundle.read_bytes(), FakeResp.content)  # bundled mirror updated
+		blob = FakeResp.content
+		self.assertEqual(kev.get_kev_sha(), hashlib.sha1(b'blob %d\0' % len(blob) + blob).hexdigest())
+
+	def test_refresh_keeps_catalog_on_feed_without_cve_ids(self):
+		kev.CONFIG.offline_mode = False
+		kev.ensure_kev_cache()
+		before = self._cache.read_bytes()
+
+		class FakeResp:
+			content = b'{"vulnerabilities":[{"notes":"missing cveID"}]}'
+
+			def raise_for_status(self):
+				pass
+
+			def json(self):
+				return json.loads(self.content)
+
+		with patch('requests.get', return_value=FakeResp()):
+			kev.refresh_kev()
+		self.assertEqual(self._cache.read_bytes(), before)
 
 	def test_refresh_offline_is_noop(self):
 		kev.CONFIG.offline_mode = True
