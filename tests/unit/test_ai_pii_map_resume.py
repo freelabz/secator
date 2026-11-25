@@ -158,6 +158,37 @@ class TestPlaceholderMapSurvivesResume(unittest.TestCase):
 		self.assertEqual(len(plans), 1, "the prior session's placeholder must resolve")
 		self.assertEqual(plans[0]["extra_data"]["items"][0]["text"], f"probe {HOST}")
 
+	def test_placeholder_map_restored_for_a_chat_saved_without_report_or_session_file(self):
+		"""A chat saved by an older version on a store driver other than json left only its
+		history.json locally: no report, no session file, so its session id is unknown. The
+		resume must still find its placeholder map in the store, or every placeholder of the
+		restored chat stays masked in the display and in tool calls."""
+		placeholder = SensitiveDataEncryptor().encrypt(HOST)
+
+		def llm_a(messages, *a, **k):
+			return {"content": "noted", "tool_calls": [], "usage": {}}
+
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			self._run(_Backend(f"look at {HOST}"), llm_a)
+			for path in [*Path(tmp).glob("*/tasks/*/report*.json"), *Path(tmp).glob("*/tasks/*/session.json")]:
+				path.unlink()
+			self.assertEqual(list_sessions()[0]["store_session_id"], "")
+
+			calls = []
+
+			def llm_b(messages, *a, **k):
+				calls.append(messages)
+				if len(calls) == 1:
+					return {"content": "", "usage": {}, "tool_calls": [_plan_call("c1", f"probe {placeholder}")]}
+				return {"content": "done", "tool_calls": [], "usage": {}}
+
+			items = self._run(_Backend("", ["continue"]), llm_b, resume=True)
+
+		plans = [i for i in items if isinstance(i, dict) and i.get("ai_type") == "plan"]
+		self.assertEqual(len(plans), 1, "the prior session's placeholder must resolve")
+		self.assertEqual(plans[0]["extra_data"]["items"][0]["text"], f"probe {HOST}")
+		self.assertNotIn(HOST, json.dumps(calls))
+
 	def test_placeholder_map_survives_a_resume_that_exits_without_a_turn(self):
 		"""A report-less resume runs under a fresh id and the session file then points at it.
 		If that resume ends at the first prompt (no new placeholder minted), the NEXT resume

@@ -79,7 +79,8 @@ class QueryEngine:
         to page through large result sets.
 
         Internal ai docs (the sensitive-data placeholder map) are never returned unless
-        ``include_internal=True`` (reserved for the run's own restore).
+        ``include_internal=True`` (reserved for the run's own restore and
+        ``ai --show-map``).
         """
         from secator.utils import debug, remove_duplicates
         debug(f'search via {self.backend.name} backend', sub='query', obj=query)

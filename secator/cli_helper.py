@@ -276,9 +276,9 @@ def register_runner(cli_endpoint, config):
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 
-		# Expand input
+		# Expand input (`ai --show-map` takes none: never wait on stdin for it)
 		inputs = opts.pop('inputs')
-		inputs = expand_input(inputs, ctx)
+		inputs = [] if opts.get('show_map', False) else expand_input(inputs, ctx)
 
 		# Build hooks from driver name
 		hooks = []
@@ -348,6 +348,10 @@ def register_runner(cli_endpoint, config):
 		from secator.definitions import IN_WORKER
 		is_ai = getattr(config, 'name', '') == 'ai'
 		is_setup = is_ai and inputs in ('setup', ['setup'])
+		# `ai --show-map` only reads the store and prints to the terminal: no runner, no write.
+		if is_ai and opts.get('show_map', False):
+			task_cls.show_map(context, resume=opts.get('resume', False))
+			return
 		wants_tui = (
 			is_ai and not opts.get('headless', False)
 			and not is_setup and not opts.get('show_prompt', False)
