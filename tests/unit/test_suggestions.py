@@ -3,6 +3,7 @@ driver stores a suggestion (its own store, never with findings)."""
 import json
 import shutil
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -77,6 +78,9 @@ class TestAddSuggestionTool(unittest.TestCase):
 			names = [s['function']['name'] for s in build_tool_schemas(mode)]
 			for tool in ('add_suggestion', 'list_suggestions'):
 				self.assertEqual(tool in names, mode == 'chat', (mode, tool))
+		# an explicit extra_tools grant does not bring them into another mode
+		names = [s['function']['name'] for s in build_tool_schemas('scan', extra_tools=['add_suggestion'])]
+		self.assertNotIn('add_suggestion', names)
 
 	def test_no_duplicate_rule_in_description_and_chat_prompt(self):
 		from secator.ai.prompts import get_system_prompt
@@ -209,7 +213,10 @@ class TestListSuggestions(unittest.TestCase):
 			self.assertEqual(
 				{k: rows[0][k] for k in ('type', 'name', 'source', 'status', 'reason')},
 				{'type': 'task', 'name': 'httpx', 'source': 'ai', 'status': 'pending', 'reason': 'probe the hosts'})
+			self.assertEqual(rows[0]['_type'], 'suggestion_row')
 			self.assertEqual(self._list(['sqlite'], workspace='other'), [])
+			sqlite_mod.update_finding(MagicMock(), _suggestion(targets=['h0.com']))  # re-added: moves to the top
+			self.assertEqual(self._list(['sqlite'])[0]['targets'], ['h0.com'])
 		finally:
 			for conn in sqlite_mod._conns.values():
 				conn.close()
@@ -230,6 +237,12 @@ class TestListSuggestions(unittest.TestCase):
 		with patch.object(CONFIG.dirs, 'reports', reports):
 			rows = self._list(['json'])
 		self.assertEqual([r['targets'] for r in rows], [['h1.com'], ['h0.com']])
+		other = reports / get_workspace_folder_name('other', reports) / 'tasks/1'
+		other.mkdir(parents=True)
+		mod.update_finding(MagicMock(reports_folder=str(other)), _suggestion(targets=['x.com']))
+		with patch.object(CONFIG.dirs, 'reports', reports):
+			self.assertEqual([r['targets'] for r in self._list(['json'])], [['h1.com'], ['h0.com']])
+			self.assertEqual([r['targets'] for r in self._list(['json'], workspace='other')], [['x.com']])
 
 	def test_mongodb_backend(self):
 		mongomock = pytest.importorskip('mongomock')
@@ -250,6 +263,10 @@ class TestListSuggestions(unittest.TestCase):
 		other = MongoDBBackend('other')
 		other._client = client
 		self.assertEqual(other.list_suggestions(50), [])
+		time.sleep(0.01)  # BSON dates keep milliseconds: avoid an updated_at tie
+		with patch.object(mongodb, 'get_mongodb_client', return_value=client):
+			mongodb.update_finding(MagicMock(), _suggestion(targets=['a.com']))  # re-added: moves to the top
+		self.assertEqual(backend.list_suggestions(50)[0]['data']['targets'], ['a.com'])
 
 	def test_api_backend(self):
 		from secator.query.api import ApiBackend
@@ -261,3 +278,41 @@ class TestListSuggestions(unittest.TestCase):
 			[row] = [_summary(d) for d in backend.list_suggestions(50)]
 		self.assertEqual(req.call_args.args, ('GET', f'workspace/{"a" * 24}/suggestions?skip=0&limit=50'))
 		self.assertEqual((row['type'], row['name'], row['status'], row['source']), ('scan', 'Basic domain scan', 'done', ''))
+
+	def test_api_backend_needs_a_workspace_id(self):
+		from secator.query._base import QueryBackendError
+		from secator.query.api import ApiBackend
+		for workspace in ('my workspace', ''):
+			backend = ApiBackend(workspace)
+			with patch.object(backend, '_make_request') as req:
+				with self.assertRaises(QueryBackendError):
+					backend.list_suggestions(50)
+			req.assert_not_called()
+
+	@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+	def test_read_failure_is_an_error_not_an_empty_list(self):
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools import TOOLS_BY_NAME
+		from secator.output_types import Error, Info
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1', 'drivers': ['sqlite']})
+		engine = MagicMock()
+		engine.list_suggestions.side_effect = RuntimeError('db down')
+		with patch.object(ctx, 'get_query_engine', return_value=engine):
+			out = list(TOOLS_BY_NAME['list_suggestions'].handle({}, ctx))
+		self.assertTrue(any(isinstance(o, Error) and 'db down' in o.message for o in out))
+		self.assertFalse(any(isinstance(o, (Info, dict)) for o in out))
+
+	@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+	def test_has_more_fetches_one_extra(self):
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools import TOOLS_BY_NAME
+		from secator.output_types import Ai
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1', 'drivers': ['sqlite']})
+		engine = MagicMock()
+		for count, has_more in ((50, False), (51, True)):
+			engine.list_suggestions.return_value = [{'type': 'task', 'name': 'httpx'}] * count
+			with patch.object(ctx, 'get_query_engine', return_value=engine):
+				out = list(TOOLS_BY_NAME['list_suggestions'].handle({}, ctx))
+			engine.list_suggestions.assert_called_with(51)
+			[ai] = [o for o in out if isinstance(o, Ai)]
+			self.assertEqual((ai.extra_data['count'], ai.extra_data['has_more']), (50, has_more))

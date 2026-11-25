@@ -128,14 +128,10 @@ class MongoDBBackend(QueryBackend):
 			return 0
 
 	def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
-		"""Read the workspace's docs from the ``suggestions`` collection, most recent first."""
-		try:
-			docs = self._get_client().main.suggestions.find(
-				{'context.workspace_id': self.workspace_id}, {'_id': 0, '_context': 0})
-			return list(docs.sort([('updated_at', -1), ('_id', -1)]).limit(limit))
-		except Exception as e:
-			console.print(Warning(message=f'MongoDB list_suggestions failed: {e}'))
-			return []
+		"""Read the workspace's docs from the ``suggestions`` collection, last saved first."""
+		docs = self._get_client().main.suggestions.find(
+			{'type': 'runner', 'context.workspace_id': self.workspace_id}, {'_id': 0, '_context': 0})
+		return list(docs.sort([('updated_at', -1), ('_id', -1)]).limit(limit))
 
 	def list_workspaces(self):
 		"""List workspaces for the mongodb backend.

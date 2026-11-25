@@ -91,10 +91,9 @@ def _summary(doc):
 	``context``) or a flat :class:`Suggestion` record."""
 	if "data" in doc:
 		data, context = doc.get("data") or {}, doc.get("context") or {}
-		runner_type, name = data.get("type"), (data.get("config_query") or {}).get("config.name") or data.get("name")
+		runner_type, name = data.get("type"), data.get("name")
 		targets, reason = data.get("targets") or [], doc.get("message")
-		status = doc.get("status") or ("done" if context.get("done") else "pending")
-		status = "dismissed" if context.get("dismissed") else status
+		status = "dismissed" if context.get("dismissed") else "done" if context.get("done") else "pending"
 	else:
 		runner_type, name, targets = doc.get("type"), doc.get("name"), doc.get("targets") or []
 		reason, status = doc.get("reason"), "pending"
@@ -115,7 +114,7 @@ class ListSuggestions(BaseTool):
 			"name": "list_suggestions",
 			"description": (
 				f"List the workspace's existing runner suggestions, most recent first (at most {_MAX_LISTED}): "
-				"type, name, targets, source, status (pending / running / done / dismissed) and reason. "
+				"type, name, targets, source, status (pending / done / dismissed) and reason. "
 				"Call it before add_suggestion so you never suggest the same thing twice."
 			),
 			"parameters": {"type": "object", "properties": {}, "required": []},
@@ -126,16 +125,16 @@ class ListSuggestions(BaseTool):
 		"""Read the suggestions back through the active query backend; rows go to the model only."""
 		context = _get_result_context(action, ctx)
 		try:
-			docs = ctx.get_query_engine().list_suggestions(_MAX_LISTED)
-		except Exception as e:
-			yield Error(message=f"Failed to list suggestions: {e}", _context=context)
+			docs = ctx.get_query_engine().list_suggestions(_MAX_LISTED + 1)
+		except Exception as e:  # never "no suggestions": the model would re-add existing ones
+			yield Error(message=f"Failed to list suggestions, do not add any: {e}", _context=context)
 			return
-		rows = [_summary(doc) for doc in docs]
+		rows = [_summary(doc) for doc in docs[:_MAX_LISTED]]
 		yield Ai(
 			content="suggestions", ai_type="list_suggestions",
-			extra_data={"count": len(rows), "has_more": len(rows) >= _MAX_LISTED}, _context=context,
+			extra_data={"count": len(rows), "has_more": len(docs) > _MAX_LISTED}, _context=context,
 		)
 		if not rows:
 			yield Info(message="No suggestions yet.", _context=context)
 		for row in rows:
-			yield {**row, "_type": "suggestion", "_context": {**context, "ai_query_result": True}}
+			yield {"_type": "suggestion_row", **row, "_context": {**context, "ai_query_result": True}}

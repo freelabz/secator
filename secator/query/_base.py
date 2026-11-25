@@ -356,9 +356,9 @@ class QueryBackend(ABC):
 		return 0
 
 	def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
-		"""This workspace's stored runner suggestions, most recent first (at most ``limit``).
-		Default: no suggestions store on this backend."""
-		return []
+		"""This workspace's stored runner suggestions, last saved first (at most ``limit``).
+		Raises on a read failure, so a caller never mistakes it for "no suggestions"."""
+		raise NotImplementedError(f'{self.name} backend has no suggestions store')
 
 
 # list_runners sort orders: 'asc' = oldest first, most recent last (the default, used by

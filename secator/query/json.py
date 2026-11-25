@@ -529,10 +529,15 @@ class JsonBackend(QueryBackend):
 		return count
 
 	def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
-		"""Read every run's ``suggestions.ndjson`` in the workspace, most recent first; the last
+		"""Read every run's ``suggestions.ndjson`` in the workspace, last saved first; the last
 		record of a ``_uuid`` wins (append-only, like results)."""
+		workspace_path = self._get_workspace_path()
+		paths = [
+			path for runner_type in ('tasks', 'workflows', 'scans')
+			for path in (workspace_path / runner_type).glob('*/suggestions.ndjson')
+		]
 		latest = {}
-		for path in self._get_workspace_path().glob('**/suggestions.ndjson'):
+		for path in paths:
 			for line in path.read_bytes().splitlines():
 				try:
 					record = orjson.loads(line)

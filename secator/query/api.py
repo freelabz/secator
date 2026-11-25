@@ -181,15 +181,13 @@ class ApiBackend(QueryBackend):
             docs.extend(new)
 
     def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
-        """GET the workspace's suggestions from the suggestions list endpoint, most recent first."""
-        try:
-            endpoint = CONFIG.addons.api.suggestion_list_endpoint.format(workspace_id=self.workspace_id)
-            result = self._make_request("GET", f"{endpoint}?skip=0&limit={limit}")
-            items = result.get("items", []) if isinstance(result, dict) else (result or [])
-            return sorted(items, key=lambda d: str(d.get("updated_at") or ""), reverse=True)
-        except Exception as e:
-            console.print(Warning(message=f"API list_suggestions failed: {e}"))
-            return []
+        """GET the workspace's suggestions from the suggestions list endpoint (which orders them
+        last saved first). The endpoint takes a workspace id, not a name."""
+        if not self._is_object_id(self.workspace_id):
+            raise QueryBackendError(f"list_suggestions needs a workspace id, got {self.workspace_id!r}")
+        endpoint = CONFIG.addons.api.suggestion_list_endpoint.format(workspace_id=self.workspace_id)
+        result = self._make_request("GET", f"{endpoint}?skip=0&limit={limit}")
+        return result.get("items", []) if isinstance(result, dict) else (result or [])
 
     def _execute_create_note(self, note: dict) -> int:
         """POST the note to the remote notes endpoint.

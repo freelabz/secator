@@ -201,7 +201,7 @@ MODES = {
 # single source of truth for a mode's BASELINE tools, and it resolves against CORE
 # (built-in) tools only. External/bundle tools are NEVER matched by these globs; they are
 # added on top per-invocation as `extra_tools` (a generic option on the `ai` task), so a
-# caller grants a non-core tool (e.g. `add_suggestion`) to a mode only when needed. The
+# caller grants a non-core tool (e.g. `export_report`) to a mode only when needed. The
 # patterns are loaded into MODES here so MODES stays the one mode registry, and resolved
 # by tool_matches_mode(). (Phase 2 makes this the operative driver of build_tool_schemas,
 # wires `extra_tools`, and drops the per-tool `modes` list.)
@@ -238,7 +238,7 @@ def tool_matches_mode(tool_name: str, patterns: List[str], external: bool = Fals
 	External/bundle tools are never pulled in by a mode's `tools:` globs (not even by an
 	exact-name entry) — they are added on top via the `ai` task's ``extra_tools`` option,
 	so a broad ``tools: ["*"]`` can never grant a mode a non-core tool (e.g.
-	``add_suggestion``). See build_tool_schemas (Phase 2).
+	``export_report``). See build_tool_schemas (Phase 2).
 	"""
 	if external:
 		return False

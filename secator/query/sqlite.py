@@ -262,15 +262,13 @@ class SqliteBackend(QueryBackend):
 			return []
 
 	def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
-		"""Read the workspace's rows from the ``suggestions`` table, most recent first."""
-		try:
-			rows = self._get_conn().execute(
-				"SELECT data FROM suggestions WHERE workspace_id IS ? ORDER BY rowid DESC LIMIT ?",
-				(self.workspace_id, limit)).fetchall()
-			return [json.loads(data) for (data,) in rows]
-		except Exception as e:
-			console.print(Warning(message=f'SQLite list_suggestions failed: {e}'))
-			return []
+		"""Read the workspace's rows from the ``suggestions`` table, last saved first (a re-save
+		rewrites the row with the new ``_timestamp``)."""
+		rows = self._get_conn().execute(
+			"SELECT data FROM suggestions WHERE workspace_id IS ? "
+			"ORDER BY json_extract(data, '$._timestamp') DESC, rowid DESC LIMIT ?",
+			(self.workspace_id, limit)).fetchall()
+		return [json.loads(data) for (data,) in rows]
 
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into a dedicated ``notes`` table (created on first use).

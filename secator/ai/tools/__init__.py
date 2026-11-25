@@ -295,7 +295,7 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 			so `change_mode` is withheld there (the model can only suggest the user
 			switches). An auto session that happens to resolve to chat KEEPS change_mode.
 		extra_tools: Names or fnmatch globs of EXTRA (typically external) tools to add on top
-			of the mode's baseline for this run (e.g. ``["add_suggestion"]`` or
+			of the mode's baseline for this run (e.g. ``["export_report"]`` or
 			``["sysreptor_*"]``). Merged with ``CONFIG.addons.ai.extra_tools``; every exact name
 			must resolve to a loaded tool, a glob expands to the matching EXTERNAL tools only
 			(see :func:`resolve_extra_tools`).

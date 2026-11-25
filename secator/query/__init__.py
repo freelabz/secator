@@ -119,8 +119,8 @@ class QueryEngine:
         the api driver POSTs to the notes endpoint). Returns 1 on success, 0 otherwise."""
         return self.backend.create_note(note)
 
-    def list_suggestions(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """This workspace's runner suggestions via the active backend, most recent first."""
+    def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
+        """This workspace's runner suggestions via the active backend, last saved first."""
         return self.backend.list_suggestions(limit)
 
     def list_workspaces(self) -> List[Dict[str, Any]]:
