@@ -1058,11 +1058,8 @@ class TestModeToolPatterns(unittest.TestCase):
 		(frontmatter `tools:`) and the authz mirror (allowed_actions) from drifting apart."""
 		from secator.ai.tools import TOOLS
 		from secator.ai.prompts import MODES, tool_matches_mode
-		name2action = {t.name: t.action for t in TOOLS}
-		names = [t.name for t in TOOLS]
 		for mode, cfg in MODES.items():
-			exposed = {n for n in names if tool_matches_mode(n, cfg["tools"], external=False)}
-			actions = {name2action[n] for n in exposed}
+			actions = {t.action for t in TOOLS if tool_matches_mode(t.name, cfg["tools"], external=t.external)}
 			self.assertEqual(actions, set(cfg["allowed_actions"]), f"{mode}: tools globs != allowed_actions")
 
 	def test_every_include_pattern_matches_a_known_tool(self):

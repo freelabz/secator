@@ -119,9 +119,10 @@ class BaseTool:
 		injected: True for a tool NOT emitted by ``build_tool_schemas`` mode
 			filtering and NOT listed in ``TOOL_SCHEMAS``; it is injected separately
 			via the interactivity backend's ``get_extra_tools`` (``stop``).
-		external: Set True by the loader for a tool discovered from the templates dir.
-			External tools are never matched by a mode's ``tools:`` globs; they are added
-			per-run via ``extra_tools`` (or ``CONFIG.addons.ai.extra_tools``).
+		external: True for a tool in no mode's baseline: never matched by a mode's ``tools:``
+			globs, only added per-run via ``extra_tools`` (or ``CONFIG.addons.ai.extra_tools``),
+			by exact name or glob. The loader sets it on every tool discovered from the templates
+			dir; the built-in ``add_suggestion`` sets it too.
 
 	Every tool — built-in or external — implements its handler as :meth:`run` in its own
 	file; dispatch is identical for both.

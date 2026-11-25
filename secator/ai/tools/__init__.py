@@ -211,7 +211,8 @@ def resolve_extra_tools(extra_tools=None):
 	  name that is not loaded raises ``ValueError`` with a clear message, so a
 	  misconfigured/absent tool fails loudly rather than being silently dropped.
 	* A GLOB expands to every loaded EXTERNAL tool (templates dir / ``SECATOR_AI_TOOLS_DIRS``
-	  / bundle) whose name matches, in registry order. Globs never match built-in tools —
+	  / bundle, plus the built-in opt-in ``add_suggestion``: an external tool is one in no
+	  mode's baseline) whose name matches, in registry order. Globs never match other built-in tools —
 	  the mirror of a mode's ``tools:`` globs, which match built-in tools only — so a broad
 	  pattern cannot widen a mode with core tools it hides; a built-in tool is only added by
 	  its exact name. ``*`` therefore means "every loaded external tool". A glob that matches

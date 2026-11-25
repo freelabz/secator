@@ -49,7 +49,8 @@ class AddSuggestion(BaseTool):
 		context = _get_result_context(action, ctx)
 		runner_type = str(action.get("type") or "").strip()
 		name = str(action.get("name") or "").strip()
-		targets = [str(t) for t in action.get("targets") or [] if str(t).strip()]
+		targets = action.get("targets") or []
+		targets = sorted({str(t).strip() for t in ([targets] if isinstance(targets, str) else targets)} - {""})
 		opts = action.get("opts") or {}
 		reason = str(action.get("reason") or "").strip()
 		priority = str(action.get("priority") or "medium").strip()

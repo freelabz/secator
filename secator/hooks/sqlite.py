@@ -159,15 +159,15 @@ def update_finding(self, item):
 	workspace_id = ctx.get('workspace_id')
 	payload = json.dumps(data, default=str)
 	if item._type == 'suggestion':  # not a finding: its own table, one row per runner and target set
-		rows = conn.execute(
-			"SELECT uuid, data FROM suggestions WHERE workspace_id IS ? "
-			"AND json_extract(data, '$.type') = ? AND json_extract(data, '$.name') = ?",
-			(workspace_id, item.type, item.name),
-		).fetchall()
-		same = [uuid_ for uuid_, row in rows if sorted(json.loads(row)['targets']) == sorted(item.targets)]
+		data['targets'] = sorted({str(t) for t in item.targets})
+		same = conn.execute(
+			"SELECT uuid FROM suggestions WHERE workspace_id IS ? AND json_extract(data, '$.type') = ? "
+			"AND json_extract(data, '$.name') = ? AND json_extract(data, '$.targets') = json(?)",
+			(workspace_id, str(item.type), str(item.name), json.dumps(data['targets'])),
+		).fetchone()
 		if same:
 			item._uuid = data['_uuid'] = same[0]
-			payload = json.dumps(data, default=str)
+		payload = json.dumps(data, default=str)
 		conn.execute(
 			"INSERT INTO suggestions (uuid, workspace_id, data) VALUES (?, ?, ?) "
 			"ON CONFLICT(uuid) DO UPDATE SET workspace_id=excluded.workspace_id, data=excluded.data",

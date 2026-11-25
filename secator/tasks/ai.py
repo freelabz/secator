@@ -349,7 +349,7 @@ class ai(PythonRunner):
 		# tools (templates dir / SECATOR_AI_TOOLS_DIRS / bundle) and warns if none match. Generic
 		# and driver-agnostic — the same option lets any caller (CLI, a template, a library call)
 		# grant external tools to a run without a core edit.
-		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor_*,add_suggestion'); globs match external tools only"},  # noqa: E501
+		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor_*,add_suggestion'); globs match external (opt-in) tools only"},  # noqa: E501
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",

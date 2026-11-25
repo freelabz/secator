@@ -132,8 +132,12 @@ def update_finding(self, item):
 		item._uuid = str(uuid.uuid4())
 	record = item.toDict()
 	record['_uuid'] = item._uuid
-	# A suggestion is not a finding: keep it out of the results the query backend reads.
-	path = _ndjson_path(self).with_name('suggestions.ndjson') if item._type == 'suggestion' else _ndjson_path(self)
+	# A suggestion is not a finding: it goes to its own per-run file (append-only, no dedup),
+	# out of the results the query backend reads.
+	if item._type == 'suggestion':
+		path = Path(self.reports_folder) / 'suggestions.ndjson'
+	else:
+		path = _ndjson_path(self)
 	append_ndjson(path, orjson.dumps(record, default=str).decode())
 	return item
 

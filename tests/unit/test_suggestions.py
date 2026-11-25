@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from secator.definitions import ADDONS_ENABLED
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, Error, Suggestion
 from secator.output_types._base import load_output_types
 
@@ -32,6 +33,7 @@ class TestSuggestionOutputType(unittest.TestCase):
 		self.assertIn('httpx', repr(loaded))
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestAddSuggestionTool(unittest.TestCase):
 	def _run(self, **action):
 		from secator.ai.actions import ActionContext
@@ -44,6 +46,12 @@ class TestAddSuggestionTool(unittest.TestCase):
 		self.assertIsInstance(item, Suggestion)
 		self.assertEqual((item.type, item.name, item.targets, item.opts), ('task', 'httpx', ['a.com'], {'threads': 5}))
 		self.assertEqual((item.source, item.priority), ('ai', 'medium'))
+
+	def test_targets_are_a_canonical_list(self):
+		[item] = self._run(type='task', name='httpx', targets='a.com', reason='probe')
+		self.assertEqual(item.targets, ['a.com'])
+		[item] = self._run(type='task', name='httpx', targets=[' b.com', 'a.com', 'b.com', ''], reason='probe')
+		self.assertEqual(item.targets, ['a.com', 'b.com'])
 
 	def test_refuses_unknown_config(self):
 		[item] = self._run(type='task', name='not_a_task', targets=['a.com'], reason='x')
@@ -70,6 +78,8 @@ class TestAddSuggestionTool(unittest.TestCase):
 		for mode in MODES:
 			self.assertNotIn('add_suggestion', names(mode), mode)
 		self.assertIn('add_suggestion', names('chat', extra_tools=['add_suggestion']))
+		# It is an opt-in (external) tool, so a glob over opt-in tools grants it too.
+		self.assertIn('add_suggestion', names('chat', extra_tools=['add_*']))
 
 
 class TestDriversStoreSuggestions(unittest.TestCase):
@@ -86,12 +96,16 @@ class TestDriversStoreSuggestions(unittest.TestCase):
 		client = mongomock.MongoClient()
 		with patch.object(mongodb, 'get_mongodb_client', return_value=client):
 			first = mongodb.update_finding(MagicMock(), _suggestion())
-			# Same runner and target set (any order): refreshed, not duplicated.
+			# Same runner and target set: refreshed, not duplicated (also the on_duplicate path).
 			again = mongodb.update_finding(MagicMock(), _suggestion(targets=['b.com', 'a.com'], reason='new reason'))
+			mongodb.update_finding(MagicMock(), again)
 			other = mongodb.update_finding(MagicMock(), _suggestion(targets=['a.com']))
+			# Duplicate targets are the same set; same size but another set is a distinct suggestion.
+			self.assertEqual(mongodb.update_finding(MagicMock(), _suggestion(targets=['a.com', 'a.com']))._uuid, other._uuid)
+			mongodb.update_finding(MagicMock(), _suggestion(targets=['a.com', 'c.com']))
 		db = client.main
 		self.assertEqual(db.findings.count_documents({}), 0)
-		self.assertEqual(db.suggestions.count_documents({}), 2)
+		self.assertEqual(db.suggestions.count_documents({}), 3)
 		self.assertEqual(first._uuid, again._uuid)
 		self.assertNotEqual(first._uuid, other._uuid)
 		doc = db.suggestions.find_one({'_id': ObjectId(first._uuid)})
@@ -101,6 +115,7 @@ class TestDriversStoreSuggestions(unittest.TestCase):
 		self.assertEqual(doc['context'], {'workspace_id': 'ws1', 'done': False})
 		self.assertEqual(doc['data']['config_query'], {'config.name': 'httpx', 'config.type': 'task'})
 		self.assertEqual(doc['data']['targets'], ['a.com', 'b.com'])
+		self.assertEqual(doc['_context'], {'workspace_id': 'ws1'})
 
 	def test_sqlite_writes_suggestions_table(self):
 		import secator.hooks.sqlite as sqlite_mod
@@ -113,10 +128,12 @@ class TestDriversStoreSuggestions(unittest.TestCase):
 			# Same runner and target set (any order): refreshed, not duplicated.
 			again = sqlite_mod.update_finding(MagicMock(), _suggestion(targets=['b.com', 'a.com']))
 			self.assertEqual(again._uuid, item._uuid)
+			other = sqlite_mod.update_finding(MagicMock(), _suggestion(targets=['a.com']))
+			self.assertNotEqual(other._uuid, item._uuid)
 			conn = sqlite_mod.get_sqlite_conn()
 			self.assertEqual(conn.execute('SELECT COUNT(*) FROM findings').fetchone()[0], 0)
-			rows = conn.execute('SELECT uuid, workspace_id, data FROM suggestions').fetchall()
-			self.assertEqual([(r[0], r[1]) for r in rows], [(item._uuid, 'ws1')])
+			rows = conn.execute('SELECT uuid, workspace_id, data FROM suggestions ORDER BY rowid').fetchall()
+			self.assertEqual([(r[0], r[1]) for r in rows], [(item._uuid, 'ws1'), (other._uuid, 'ws1')])
 			self.assertEqual(json.loads(rows[0][2])['name'], 'httpx')
 		finally:
 			for conn in sqlite_mod._conns.values():
@@ -127,10 +144,12 @@ class TestDriversStoreSuggestions(unittest.TestCase):
 	def test_json_writes_suggestions_ndjson(self):
 		from secator.hooks import json as mod
 		runner = MagicMock(reports_folder=self.temp_dir)
-		mod.update_finding(runner, _suggestion())
+		item = mod.update_finding(runner, _suggestion())
+		mod.update_finding(runner, item)  # append-only, like results: last wins by _uuid on read
 		self.assertFalse((Path(self.temp_dir) / 'results.ndjson').exists())
-		[line] = (Path(self.temp_dir) / 'suggestions.ndjson').read_text().splitlines()
-		self.assertEqual(json.loads(line)['_type'], 'suggestion')
+		lines = (Path(self.temp_dir) / 'suggestions.ndjson').read_text().splitlines()
+		self.assertEqual([json.loads(line)['_uuid'] for line in lines], [item._uuid] * 2)
+		self.assertEqual(json.loads(lines[0])['_type'], 'suggestion')
 
 	def test_api_posts_suggestions_endpoint(self):
 		from secator.hooks import api

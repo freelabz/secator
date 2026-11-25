@@ -164,42 +164,35 @@ def on_build(self, task_spec):
 
 
 def save_suggestion(item):
-	"""Store a runner suggestion in the ``suggestions`` collection: one doc per workspace, runner and
-	target set (a repeat refreshes its message, priority and options)."""
+	"""Upsert a runner suggestion in the ``suggestions`` collection, one doc per workspace, runner and
+	target set (a repeat refreshes ``message``, ``priority``, ``data.run_opts`` and ``updated_at``).
+
+	Doc shape: ``{type: 'runner', name, message, priority, source, data: {type, name, config_query,
+	run_opts, targets}, context: {workspace_id, done}, _context, created_at, updated_at}``.
+	"""
 	db = get_mongodb_client().main
 	now = datetime.now(timezone.utc)
-	targets = list(item.targets)
+	runner_type, name = str(item.type), str(item.name)
 	query = {
 		'type': 'runner',
 		'context.workspace_id': item._context.get('workspace_id'),
-		'data.type': item.type,
-		'data.name': item.name,
-		'data.targets': {'$all': targets, '$size': len(targets)},
+		'data.type': runner_type,
+		'data.name': name,
+		'data.targets': sorted({str(t) for t in item.targets}),
 	}
-	refresh = {'message': item.reason, 'priority': item.priority, 'data.run_opts': item.opts, 'updated_at': now}
-	existing = db.suggestions.find_one(query, {'_id': 1})
-	if existing:
-		db.suggestions.update_one({'_id': existing['_id']}, {'$set': refresh})
-		item._uuid = str(existing['_id'])
-		return item
-	doc = {
-		'type': 'runner',
-		'name': f'Run {item.type} {item.name}',
-		'message': item.reason,
-		'priority': item.priority,
-		'source': item.source,
-		'data': {
-			'type': item.type,
-			'name': item.name,
-			'config_query': {'config.name': item.name, 'config.type': item.type},
-			'run_opts': item.opts,
-			'targets': targets,
+	result = db.suggestions.update_one(query, {
+		'$set': {'message': item.reason, 'priority': item.priority, 'data.run_opts': item.opts, 'updated_at': now},
+		'$setOnInsert': {
+			'name': f'Run {runner_type} {name}',
+			'source': item.source,
+			'data.config_query': {'config.name': name, 'config.type': runner_type},
+			'context.done': False,
+			'_context': item._context,
+			'created_at': now,
 		},
-		'context': {'workspace_id': item._context.get('workspace_id'), 'done': False},
-		'created_at': now,
-		'updated_at': now,
-	}
-	item._uuid = str(db.suggestions.insert_one(doc).inserted_id)
+	}, upsert=True)
+	_id = result.upserted_id or db.suggestions.find_one(query, {'_id': 1})['_id']
+	item._uuid = str(_id)
 	return item
 
 
