@@ -153,6 +153,16 @@ def build_runner_tree(config: DotMap, condition: Optional[str] = None, parent: O
 	return tree
 
 
+def strip_workflow_prefix(opts: dict, workflow_name: str) -> dict:
+	"""Copy of opts where ``<workflow>_<opt>`` keys are also exposed as ``<opt>``."""
+	prefix = workflow_name.split('/')[0] + '_'
+	result = dict(opts)
+	for k, v in opts.items():
+		if k.startswith(prefix):
+			result[k[len(prefix):]] = v
+	return result
+
+
 def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> RunnerTree:
 	"""Remove nodes whose conditions evaluate to False against opts/inputs.
 
@@ -164,16 +174,8 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 	"""
 	funcs = {'len': len}
 
-	def strip_prefix(parent_opts, workflow_name):
-		prefix = workflow_name.split('/')[0] + '_'
-		result = dict(parent_opts)
-		for k, v in parent_opts.items():
-			if k.startswith(prefix):
-				result[k[len(prefix):]] = v
-		return result
-
 	def prune_node(node: TaskNode, current_opts: dict):
-		child_opts = strip_prefix(current_opts, node.name) if node.type == 'workflow' else current_opts
+		child_opts = strip_workflow_prefix(current_opts, node.name) if node.type == 'workflow' else current_opts
 		for child in list(node.children):
 			prune_node(child, child_opts)
 		if node.type == 'group' and not node.children:
