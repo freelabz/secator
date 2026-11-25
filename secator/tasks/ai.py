@@ -549,8 +549,11 @@ class ai(PythonRunner):
 				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
 					self.history = replay_session(session)
 				# This run keeps its fresh session id, so seed the placeholder map from the
-				# PRIOR session's stored map (its id is in the session's runner info).
-				self._restore_pii_map(session_id=session.get("store_session_id"))
+				# PRIOR session's stored map (its id is in the session's runner info). A chat
+				# saved by an older version without a local report has no known id: seed from
+				# every map of the workspace then.
+				store_session_id = session.get("store_session_id")
+				self._restore_pii_map(session_id=store_session_id, any_session=not store_session_id)
 				# Re-key the restored map under THIS run's id right away: the next save points
 				# the session file at this id, so a later resume must find the map here even
 				# if this run ends before minting a new placeholder.
@@ -1009,22 +1012,27 @@ class ai(PythonRunner):
 			self.add_result(Ai(content="", ai_type="pii_map", extra_data=payload), print=False)
 		self._pii_map_persisted_size = size
 
-	def _restore_pii_map(self, session_id=None):
+	def _restore_pii_map(self, session_id=None, any_session=False):
 		"""Seed the encryptor's map from the persisted session doc (see _persist_pii_map).
 
 		Runs on every resume path (remote respawn and local resume alike) through the active
 		store, so it behaves the same on every driver. ``session_id`` names the PRIOR session
 		when the resumed run keeps a fresh id (local resume of a session whose report carries
-		no ai results). Every stored version is merged (the map only grows): the json store is
-		append-only, so an early-break ``limit=1`` read could return a stale first version.
+		no ai results). ``any_session`` reads the maps of every session of the workspace, for a
+		chat whose session id is unknown: a placeholder is a salted hash of its type and value
+		only, so it stands for the same value in every session. Every stored version is merged
+		(the map only grows): the json store is append-only, so an early-break ``limit=1`` read
+		could return a stale first version.
 		"""
 		session_id = session_id or self.session_id
-		if not self.encryptor or not session_id:
+		if not self.encryptor or not (session_id or any_session):
 			return
+		query = {"_type": "ai", "ai_type": "pii_map"}
+		if not any_session:
+			query["_context.session_id"] = session_id
 		try:
 			# the ONLY read allowed to reach this internal doc (normal queries never return it)
-			docs = self._get_query_engine().search(
-				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": session_id}, include_internal=True)
+			docs = self._get_query_engine().search(query, include_internal=True)
 		except Exception as e:  # noqa: BLE001 - restore best-effort; a fresh map still works forward
 			self.debug(f'pii_map restore failed: {e}', sub='llm')
 			return
