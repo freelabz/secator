@@ -142,6 +142,7 @@ class Runner:
 		self.uuids = set()
 		self.results_count = 0
 		self.threads = []
+		self.hooks_ran = set()
 		self.output = ''
 		self.started = False
 		self.done = False
@@ -1198,7 +1199,7 @@ class Runner:
 		# value is redacted where it actually lands: run_opts (resolved_opts) and the cmd.
 		return data
 
-	def run_hooks(self, hook_type, *args, sub='hooks', phase=None):
+	def run_hooks(self, hook_type, *args, sub='hooks', phase=None, once=False):
 		""" "Run hooks of a certain type.
 
 		A failing hook is reported as an Error and the previous hook's result is passed on. With
@@ -1210,6 +1211,7 @@ class Runner:
 			args (list): List of arguments to pass to the hook.
 			sub (str): Debug id.
 			phase (str): Only run the hooks of this driver phase (non-driver hooks are ``pre``).
+			once (bool): Skip if this hook type already ran in this runner.
 
 		Returns:
 			any: Hook return value.
@@ -1228,6 +1230,10 @@ class Runner:
 		if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):  # noqa: E501
 			self.debug('hook skipped (backend update frequency)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
 			return result
+		if once and hook_type in self.hooks_ran:
+			self.debug('hook skipped (already ran)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			return result
+		self.hooks_ran.add(hook_type)
 		for hook in hooks:
 			if phase and get_hook_phase(hook) != phase:
 				continue
