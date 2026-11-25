@@ -100,3 +100,5 @@ def get_api_session(retries=3, backoff=1):
 requests = get_session()
 requests.RequestException = requests_lib.RequestException
 requests.codes = requests_lib.codes
+requests.ConnectionError = requests_lib.ConnectionError
+requests.Timeout = requests_lib.Timeout

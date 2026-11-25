@@ -1,3 +1,4 @@
+import json
 import shutil
 import tempfile
 import unittest
@@ -108,6 +109,10 @@ class TestKevLoading(unittest.TestCase):
 
 			def json(self):
 				return feed
+
+			@property
+			def content(self):
+				return json.dumps(feed).encode()
 
 		with patch('requests.get', return_value=FakeResp()):
 			ids, error = kev.refresh_kev()

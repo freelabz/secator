@@ -221,6 +221,7 @@ CLI behavior settings.
 | `cli.show_command_output` | `bool` | `false` | Show raw command output |
 | `cli.exclude_http_response_headers` | `list[str]` | `[connection, content_type, content_length, date, server]` | Headers to hide |
 | `cli.date_format` | `string` | `%m/%d/%Y` | Date display format (use `%d/%m/%Y` for European) |
+| `cli.check_updates` | `bool` | `true` | Check GitHub once a day at startup for a new secator version or newer data files |
 
 ```yaml
 cli:
