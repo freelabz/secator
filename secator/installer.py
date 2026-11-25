@@ -843,8 +843,8 @@ def check_updates(timeout=(1, 1)):
 	Prints nothing when everything is up to date or the check fails for another reason.
 
 	Args:
-		timeout (tuple): (connect, read) timeout (s) of each of the two GitHub API requests: an unreachable
-			GitHub fails in about 1s, a slow one takes at most 4s.
+		timeout (tuple): (connect, read) timeout (s) of each of the two GitHub API requests: excluding DNS
+			resolution, an unreachable GitHub fails in about 1s and a slow one takes at most 4s.
 	"""
 	stamp = CONFIG.dirs.data / '.update_check'
 	if stamp.exists() and time.time() - stamp.stat().st_mtime < 86400:

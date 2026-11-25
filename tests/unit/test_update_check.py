@@ -1,4 +1,3 @@
-import hashlib
 import shutil
 import sys
 import tempfile
@@ -91,10 +90,16 @@ class TestCheckUpdates(unittest.TestCase):
 
 class TestDataFiles(unittest.TestCase):
 
+	def setUp(self):
+		self._orig_offline = CONFIG.offline_mode
+		CONFIG.offline_mode = False
+
+	def tearDown(self):
+		CONFIG.offline_mode = self._orig_offline
+
 	def test_kev_sha_is_git_blob_sha(self):
 		data = b'hello\n'
 		expected = 'ce013625030ba8dba906f756967f9e9ca394464a'  # git hash-object of 'hello\n'
-		self.assertEqual(hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest(), expected)
 		with tempfile.TemporaryDirectory() as tmp:
 			path = Path(tmp) / KEV_FILENAME
 			path.write_bytes(data)
@@ -102,27 +107,17 @@ class TestDataFiles(unittest.TestCase):
 				self.assertEqual(kev.get_kev_sha(), expected)
 
 	def test_refresh_kev_warns_when_unreachable(self):
-		orig = CONFIG.offline_mode
-		CONFIG.offline_mode = False
 		warn_github_unreachable.cache_clear()
-		try:
-			with patch('requests.get', side_effect=requests.ConnectionError('proxy refused')):
-				with patch('secator.installer.console') as console, patch.object(kev, 'get_kev_cve_ids', return_value=set()):
-					kev.refresh_kev()
-		finally:
-			CONFIG.offline_mode = orig
+		with patch('requests.get', side_effect=requests.ConnectionError('proxy refused')):
+			with patch('secator.installer.console') as console, patch.object(kev, 'get_kev_cve_ids', return_value=set()):
+				kev.refresh_kev()
 		self.assertIn('GitHub is unreachable', console.print.call_args.args[0].message)
 
 	@patch('secator.cve_names.refresh_cve_names', return_value=(1, ''))
 	@patch('secator.kev.refresh_kev', return_value=({'CVE-2021-44228'}, ''))
 	@patch('secator.cli.get_version_info')
 	def test_update_data_only_skips_secator_update(self, mock_version_info, mock_refresh, _mock_names):
-		orig = CONFIG.offline_mode
-		CONFIG.offline_mode = False
-		try:
-			result = CliRunner().invoke(cli, ['update', '--data-only'])
-		finally:
-			CONFIG.offline_mode = orig
+		result = CliRunner().invoke(cli, ['update', '--data-only'])
 		self.assertEqual(result.exit_code, 0, result.output)
 		mock_refresh.assert_called_once()
 		mock_version_info.assert_not_called()
