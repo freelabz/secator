@@ -182,10 +182,11 @@ class ApiBackend(QueryBackend):
 
     def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
         """GET the workspace's suggestions from the suggestions list endpoint (which orders them
-        last saved first). The endpoint takes a workspace id, not a name."""
-        if not self._is_object_id(self.workspace_id):
-            raise QueryBackendError(f"list_suggestions needs a workspace id, got {self.workspace_id!r}")
-        endpoint = CONFIG.addons.api.suggestion_list_endpoint.format(workspace_id=self.workspace_id)
+        last saved first). A workspace name is resolved to its id first, like the api driver
+        does; an empty, ``default`` or unknown workspace raises."""
+        from secator.hooks.api import resolve_workspace
+        workspace_id, _ = resolve_workspace(self.workspace_id)
+        endpoint = CONFIG.addons.api.suggestion_list_endpoint.format(workspace_id=workspace_id)
         result = self._make_request("GET", f"{endpoint}?skip=0&limit={limit}")
         return result.get("items", []) if isinstance(result, dict) else (result or [])
 

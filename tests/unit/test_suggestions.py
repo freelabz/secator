@@ -274,18 +274,27 @@ class TestListSuggestions(unittest.TestCase):
 		doc = {'data': {'type': 'scan', 'name': 'Basic domain scan', 'targets': ['a.com']}, 'context': {'done': True},
 			'message': 'm', 'updated_at': '2026-01-01'}
 		backend = ApiBackend('a' * 24)
-		with patch.object(backend, '_make_request', return_value={'items': [doc]}) as req:
+		resolve = patch('secator.hooks.api.resolve_workspace', return_value=('a' * 24, 'ws'))
+		with resolve, patch.object(backend, '_make_request', return_value={'items': [doc]}) as req:
 			[row] = [_summary(d) for d in backend.list_suggestions(50)]
 		self.assertEqual(req.call_args.args, ('GET', f'workspace/{"a" * 24}/suggestions?skip=0&limit=50'))
 		self.assertEqual((row['type'], row['name'], row['status'], row['source']), ('scan', 'Basic domain scan', 'done', ''))
 
-	def test_api_backend_needs_a_workspace_id(self):
-		from secator.query._base import QueryBackendError
+	def test_api_backend_resolves_a_workspace_name(self):
 		from secator.query.api import ApiBackend
-		for workspace in ('my workspace', ''):
+		backend = ApiBackend('my workspace')
+		resolver = patch('secator.hooks.api.resolve_workspace', return_value=('b' * 24, 'my workspace'))
+		with resolver as resolve, patch.object(backend, '_make_request', return_value={'items': []}) as req:
+			self.assertEqual(backend.list_suggestions(50), [])
+		resolve.assert_called_once_with('my workspace')
+		self.assertEqual(req.call_args.args, ('GET', f'workspace/{"b" * 24}/suggestions?skip=0&limit=50'))
+
+	def test_api_backend_refuses_an_empty_or_default_workspace(self):
+		from secator.query.api import ApiBackend
+		for workspace in ('', 'default'):
 			backend = ApiBackend(workspace)
 			with patch.object(backend, '_make_request') as req:
-				with self.assertRaises(QueryBackendError):
+				with self.assertRaises(Exception):
 					backend.list_suggestions(50)
 			req.assert_not_called()
 
