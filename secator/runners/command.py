@@ -1128,6 +1128,10 @@ class Command(Runner):
 			self.revoked = True  # stopped on purpose (interrupt / revoke), not a failure
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
+			# Parse partial output files (e.g. nmap XML) if on_cmd_done did not run before the kill
+			result = self.run_hooks('on_cmd_done', sub='end', once=True)
+			if result:
+				yield from result
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
