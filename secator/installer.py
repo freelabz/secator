@@ -10,10 +10,12 @@ import sys
 import tarfile
 import zipfile
 import io
+import time
 
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from functools import cache
 from pathlib import Path
 
 import json
@@ -21,11 +23,12 @@ import json
 from rich.table import Table
 
 from secator.config import CONFIG
-from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, VERSION
+from secator.kev import KEV_FILENAME, get_kev_sha
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
-from secator.requests import requests
+from secator.requests import get_session, requests
 from secator.utils import debug, get_versions_from_string
 
 
@@ -519,6 +522,8 @@ class GithubInstaller:
 			return latest_release
 		except requests.RequestException as e:
 			console.print(Warning(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
+			if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+				warn_github_unreachable()
 			if 'rate limit exceeded' in str(e):
 				console.print(Warning(message='Consider setting env variable SECATOR_CLI_GITHUB_TOKEN or use secator config set cli.github_token $TOKEN.'))  # noqa: E501
 			return None
@@ -823,6 +828,54 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 			info['status'] += r' [dim orange1]\[unreachable][/]'
 
 	return info
+
+
+@cache
+def warn_github_unreachable():
+	"""Warn (once per process) that GitHub is unreachable and how to silence it."""
+	console.print(Warning(message='GitHub is unreachable. If secator runs offline or behind a proxy, run [bold green4]secator config set offline_mode true[/] to suppress this warning.'))  # noqa: E501
+
+
+def check_updates(timeout=(1, 1)):
+	"""Check GitHub for a newer secator release or newer bundled data files, at most once a day.
+
+	Prints a one-line hint when an update is available and a warning when GitHub is unreachable.
+	Prints nothing when everything is up to date or the check fails for another reason.
+
+	Args:
+		timeout (tuple): (connect, read) timeout (s) of each of the two GitHub API requests: excluding DNS
+			resolution, an unreachable GitHub fails in about 1s and a slow one takes at most 4s.
+	"""
+	stamp = CONFIG.dirs.data / '.update_check'
+	if stamp.exists() and time.time() - stamp.stat().st_mtime < 86400:
+		return
+	try:
+		stamp.touch()
+	except OSError as e:
+		debug(f'Skipping update check, cannot write {stamp}: {e}', sub='installer')
+		return
+	session = get_session(retries=0)
+	headers = {'Authorization': f'Bearer {CONFIG.cli.github_token}'} if CONFIG.cli.github_token else {}
+	api_url = 'https://api.github.com/repos/freelabz/secator'
+	try:
+		release = session.get(f'{api_url}/releases/latest', headers=headers, timeout=timeout)
+		release.raise_for_status()
+		latest_version = release.json()['tag_name'].lstrip('v')
+		# Directory listing: gives the git blob sha of each data file without downloading it.
+		data_files = session.get(f'{api_url}/contents/secator/data?ref=main', headers=headers, timeout=timeout)
+		data_files.raise_for_status()
+		remote_kev_sha = {f['name']: f['sha'] for f in data_files.json()}.get(KEV_FILENAME)
+		outdated = parse_version(VERSION) < parse_version(latest_version)
+	except (requests.ConnectionError, requests.Timeout):
+		warn_github_unreachable()
+		return
+	except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+		debug(f'Update check failed: {e}', sub='installer')
+		return
+	if outdated:
+		console.print(Info(message=f'secator {latest_version} is available (current: {VERSION}). Run [bold green4]secator update[/] to update secator and its data files.'))  # noqa: E501
+	elif remote_kev_sha and remote_kev_sha != get_kev_sha():
+		console.print(Info(message='Newer data files are available (CISA KEV catalog). Run [bold green4]secator update --data-only[/] to refresh them.'))  # noqa: E501
 
 
 def get_distro_config():

@@ -41,6 +41,9 @@ jobs:
     # each feed (non-empty KEV catalog, >= 100k named CVEs) and exits non-zero on any failure,
     # so a bad download never replaces good data.
     - name: Refresh the data files
+      env:
+        # Users refresh the KEV catalog from the mirror on main; this job refreshes that mirror.
+        SECATOR_KEV_URL: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
       run: secator update --data-only
 
     - name: Push to main

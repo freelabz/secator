@@ -8,9 +8,11 @@ The catalog ships as a mirror bundled with the package
 (``secator/data/known_exploited_vulnerabilities.json``). On first use it is copied into
 the cache dir (``CONFIG.dirs.cves``); reads always come from that cache, so KEV tagging
 works offline / in constrained environments with no network at run time. ``secator
-update`` re-downloads the catalog from cisa.gov, updates the bundled mirror, and re-copies
-it to the cache (see ``refresh_kev``). The nightly workflow keeps the bundled mirror fresh.
+update`` re-downloads the catalog from ``kev.url`` (default: the mirror on GitHub), updates
+the bundled copy, and re-copies it to the cache (see ``refresh_kev``). The nightly workflow
+keeps the mirror fresh by running the same refresh with ``kev.url`` set to the cisa.gov feed.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -18,7 +20,6 @@ from pathlib import Path
 
 from secator.config import CONFIG
 
-KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
 KEV_FILENAME = 'known_exploited_vulnerabilities.json'
 
 # Mirror bundled with the package (source of truth, refreshed nightly + on release).
@@ -96,8 +97,23 @@ def _load_kev_cve_ids():
 	return set()
 
 
+def get_kev_sha():
+	"""Return the git blob SHA-1 of the local KEV catalog (cache, else bundle), or None.
+
+	Comparable to the ``sha`` the GitHub contents API returns for the mirror on main.
+	"""
+	ensure_kev_cache()
+	for path in (_cache_path(), BUNDLED_KEV_PATH):
+		try:
+			data = path.read_bytes()
+		except OSError:
+			continue
+		return hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+	return None
+
+
 def refresh_kev():
-	"""Download the KEV catalog from cisa.gov, update the bundled mirror, and re-copy it to
+	"""Download the KEV catalog from ``kev.url``, update the bundled mirror, and re-copy it to
 	the cache. Called by ``secator update``.
 
 	Fail-safe: on offline mode or any download error the existing files are kept and the
@@ -113,14 +129,16 @@ def refresh_kev():
 		return get_kev_cve_ids(), 'offline mode'
 	import requests
 	try:
-		resp = requests.get(KEV_URL, timeout=10)
+		resp = requests.get(CONFIG.kev.url, timeout=10)
 		resp.raise_for_status()
-		data = resp.json()
-		if not data.get('vulnerabilities'):
+		if not _parse_kev_cve_ids(resp.json()):
 			raise ValueError('empty or malformed KEV feed')
-		blob = json.dumps(data, separators=(',', ':'))
+		blob = resp.content  # kept byte-identical to the mirror, so get_kev_sha() matches it
 	except Exception as e:
 		debug(f'KEV refresh download failed, keeping existing catalog: {e}', sub='cve')
+		if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+			from secator.installer import warn_github_unreachable
+			warn_github_unreachable()
 		return get_kev_cve_ids(), str(e) or type(e).__name__
 
 	# Update the bundled mirror (best-effort — may be read-only in site-packages) and the
@@ -128,7 +146,7 @@ def refresh_kev():
 	from secator.data_files import atomic_write_bytes
 	for target in (BUNDLED_KEV_PATH, _cache_path()):
 		try:
-			atomic_write_bytes(target, blob.encode())
+			atomic_write_bytes(target, blob)
 		except OSError as e:
 			debug(f'KEV refresh could not write {target}: {e}', sub='cve')
 

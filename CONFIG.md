@@ -26,6 +26,7 @@ Secator's configuration lives in `~/.secator/config.yml`. Every option can also 
 | [workspace](#workspace) | Workspace settings |
 | [addons](#addons) | Optional integrations |
 | [providers](#providers) | Data providers |
+| [kev](#kev) | CISA KEV catalog source |
 | [cve_names](#cve_names) | Readable CVE names dataset |
 | [security](#security) | Security controls |
 | [offline_mode](#offline_mode) | Offline operation |
@@ -221,6 +222,7 @@ CLI behavior settings.
 | `cli.show_command_output` | `bool` | `false` | Show raw command output |
 | `cli.exclude_http_response_headers` | `list[str]` | `[connection, content_type, content_length, date, server]` | Headers to hide |
 | `cli.date_format` | `string` | `%m/%d/%Y` | Date display format (use `%d/%m/%Y` for European) |
+| `cli.check_updates` | `bool` | `true` | Check GitHub once a day at startup for a new secator version or newer data files |
 
 ```yaml
 cli:
@@ -763,6 +765,22 @@ providers:
     cve: vulners
     exploit: exploitdb
 ```
+
+---
+
+## kev
+
+**Type:** `object`
+
+Source of the CISA Known Exploited Vulnerabilities catalog used to tag vulnerabilities `kev`. The
+catalog ships with secator (`secator/data/known_exploited_vulnerabilities.json`, refreshed nightly on
+the main branch from the cisa.gov feed). `secator update` (or `secator update --data-only`) downloads
+it from `kev.url` and writes the bytes unchanged, so the startup update check can compare the local
+file with the mirror on main.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `kev.url` | `str` | mirror on the secator main branch (`raw.githubusercontent.com`) | Catalog to download |
 
 ---
 

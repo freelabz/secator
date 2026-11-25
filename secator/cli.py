@@ -23,7 +23,9 @@ from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_p
 from secator.click import OrderedGroup
 from secator.cli_helper import register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
-from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
+from secator.installer import (
+	ToolInstaller, check_updates, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
+)
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.query import QueryEngine
 from secator.query._aggregate import _aggregate_streamed, _aggregate_views
@@ -77,6 +79,9 @@ def cli(ctx, version, quiet):
 	ctx.obj = {'piped_input': S_ISFIFO(os.fstat(0).st_mode), 'piped_output': not sys.stdout.isatty()}
 	if not ctx.obj['piped_output'] and not quiet:
 		console.print(ASCII, highlight=False)
+		skip_check = DEV_PACKAGE or CONFIG.offline_mode or not CONFIG.cli.check_updates
+		if not skip_check and ctx.invoked_subcommand not in (None, 'config', 'install', 'update'):
+			check_updates()
 	if ctx.invoked_subcommand is None:
 		if version:
 			print_version()
@@ -2914,8 +2919,8 @@ def _refresh_data_files():
 	Returns:
 		bool: True when every data file was refreshed.
 	"""
-	# Refresh the CISA KEV catalog from the live feed (keeps the bundled mirror if unreachable),
-	# so `kev` tagging uses the latest known-exploited CVEs.
+	# Refresh the CISA KEV catalog from `kev.url` (default: its GitHub mirror; keeps the current
+	# catalog if unreachable), so `kev` tagging uses the latest known-exploited CVEs.
 	from secator.kev import refresh_kev
 	console.print('[bold gold3]:wrench: Refreshing CISA KEV catalog ...[/]')
 	kev_ids, kev_error = refresh_kev()
