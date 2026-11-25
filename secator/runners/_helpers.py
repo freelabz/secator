@@ -97,7 +97,7 @@ def prefix_queue(queue, opts=None):
 	return f'{prefix}-{queue}' if prefix else queue
 
 
-def resolve_task_queue(task_cls, opts):
+def resolve_task_queue(task_cls, opts, prefixed=True):
 	"""Resolve the Celery queue (== task profile) for a task at dispatch time.
 
 	A dynamic (callable) profile encodes the task author's per-run resource routing (e.g. katana
@@ -110,14 +110,17 @@ def resolve_task_queue(task_cls, opts):
 	Args:
 		task_cls (type): The task class (a Command subclass).
 		opts (dict): Run options, passed to a dynamic profile callable.
+		prefixed (bool): Apply the queue prefix (see ``prefix_queue``); False returns the bare profile.
 
 	Returns:
 		str: The queue name.
 	"""
 	if callable(task_cls.profile):
-		return prefix_queue(task_cls.profile(opts), opts)
-	override = get_task_overrides(task_cls.__name__).get('profile')
-	return prefix_queue(override if override else task_cls.profile, opts)
+		profile = task_cls.profile(opts)
+	else:
+		override = get_task_overrides(task_cls.__name__).get('profile')
+		profile = override if override else task_cls.profile
+	return prefix_queue(profile, opts) if prefixed else profile
 
 
 def _format_nested(template, data):

@@ -247,7 +247,7 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: li
 		return True
 	from secator.runners._helpers import resolve_task_queue
 	try:
-		profile = resolve_task_queue(cls, opts)
+		profile = resolve_task_queue(cls, opts, prefixed=False)
 	except Exception:
 		return True  # can't resolve — be conservative and dispatch
 	return profile in set(CONFIG.addons.ai.dispatch_profiles or [])
