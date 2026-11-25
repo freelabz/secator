@@ -206,10 +206,10 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		vulns = next(iter(fixture.values())).get('vulns', {}).values()
 		return len([v for v in vulns if v.get('match_reason') != 'general_product_uncertain'])
 
-	def _vulns(self, include_uncertain):
+	def _vulns(self, include_uncertain, query='apache httpd 2.4.39'):
 		fixture = self._load_fixture()
 		task = search_vulns.__new__(search_vulns)
-		task.inputs = ['apache httpd 2.4.39']
+		task.inputs = [query]
 		task.matched_at = 'scanme.nmap.org:80'
 		task.run_opts = {}
 		task.get_opt_value = lambda k: include_uncertain if k == 'include_uncertain' else False
@@ -232,6 +232,30 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		self.assertIn('CVE-1999-1237', vulns)
 		self.assertEqual(vulns['CVE-1999-1237'].confidence, 'low')
 		self.assertIn('uncertain', vulns['CVE-1999-1237'].tags)
+
+	def _service(self, query):
+		vulns, _ = self._vulns(include_uncertain=False, query=query)
+		extra_data = next(iter(vulns.values())).extra_data
+		return extra_data['service_name'], (extra_data.get('cpe') or [None])[0]
+
+	def test_service_name_free_text_unchanged(self):
+		self.assertEqual(self._service('apache httpd 2.4.39'), ('apache httpd 2.4.39', None))
+
+	def test_service_name_cpe_uses_technology_name(self):
+		"""A CPE query names the service as its technology reads, and keeps the CPE."""
+		cpe = 'cpe:2.3:a:microsoft:internet_information_services:8.5:*:*:*:*:*:*:*'
+		self.assertEqual(self._service(cpe), ('Microsoft IIS 8.5', cpe))
+		cpe = 'cpe:2.3:a:igor_sysoev:nginx:1.18.0:*:*:*:*:*:*:*'  # legacy vendor of a catalog product
+		self.assertEqual(self._service(cpe), ('nginx 1.18.0', cpe))
+
+	def test_service_name_cpe_outside_catalog(self):
+		cpe = 'cpe:2.3:a:acme:acme_widget\\!:2.0\\:1:*:*:*:*:*:*:*'
+		self.assertEqual(self._service(cpe), ('acme widget! 2.0:1', cpe))
+
+	def test_service_name_cpe_without_version(self):
+		for version in ('*', '-'):
+			cpe = f'cpe:2.3:a:microsoft:internet_information_services:{version}:*:*:*:*:*:*:*'
+			self.assertEqual(self._service(cpe), ('Microsoft IIS', cpe))
 
 	def test_before_init_single_host(self):
 		"""before_init parses single host from matched_at~service format."""
