@@ -65,7 +65,7 @@ class TestAiTuiQuitReports(unittest.TestCase):
 				stack.enter_context(p)
 			console.export_text(clear=True)
 			result = click.testing.CliRunner().invoke(
-				cli, ['x', 'ai', '--model', 'gpt-4o', '--api-key', 'test', '--driver', 'json', *args],
+				cli, ['x', 'ai', 'example.com', '--model', 'gpt-4o', '--api-key', 'test', '--driver', 'json', *args],
 				catch_exceptions=False)
 			output = console.export_text(clear=True)
 		self.assertEqual(result.exit_code, 0, result.output)
