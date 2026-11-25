@@ -2919,8 +2919,8 @@ def _refresh_data_files():
 	Returns:
 		bool: True when every data file was refreshed.
 	"""
-	# Refresh the CISA KEV catalog from its GitHub mirror (keeps the current catalog if
-	# unreachable), so `kev` tagging uses the latest known-exploited CVEs.
+	# Refresh the CISA KEV catalog from `kev.url` (default: its GitHub mirror; keeps the current
+	# catalog if unreachable), so `kev` tagging uses the latest known-exploited CVEs.
 	from secator.kev import refresh_kev
 	console.print('[bold gold3]:wrench: Refreshing CISA KEV catalog ...[/]')
 	kev_ids, kev_error = refresh_kev()

@@ -510,6 +510,12 @@ class Providers(StrictModel):
 	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb', 'ghsa': 'ghsa'}
 
 
+class Kev(StrictModel):
+	# CISA KEV catalog downloaded by `secator update`. Default: the mirror bundled on main, so the
+	# startup update check can compare it by git blob sha. The nightly workflow sets the cisa.gov feed.
+	url: str = 'https://raw.githubusercontent.com/freelabz/secator/main/secator/data/known_exploited_vulnerabilities.json'
+
+
 class CveNames(StrictModel):
 	# Readable CVE names dataset (https://github.com/freelabz/vulnamer), bundled with the
 	# package and refreshed by `secator update`; names vulnerabilities whose name is a bare CVE id.
@@ -587,6 +593,7 @@ class SecatorConfig(StrictModel):
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	kev: Kev = Kev()
 	cve_names: CveNames = CveNames()
 	queries: Dict[str, str] = {}
 	offline_mode: bool = False

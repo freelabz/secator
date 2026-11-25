@@ -875,7 +875,7 @@ def check_updates(timeout=(1, 1)):
 	if outdated:
 		console.print(Info(message=f'secator {latest_version} is available (current: {VERSION}). Run [bold green4]secator update[/] to update secator and its data files.'))  # noqa: E501
 	elif remote_kev_sha and remote_kev_sha != get_kev_sha():
-		console.print(Info(message='A newer CISA KEV catalog is available. Run [bold green4]secator update --data-only[/] to refresh it.'))  # noqa: E501
+		console.print(Info(message='Newer data files are available (CISA KEV catalog). Run [bold green4]secator update --data-only[/] to refresh them.'))  # noqa: E501
 
 
 def get_distro_config():
