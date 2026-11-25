@@ -2908,13 +2908,49 @@ def install_tools(cmds, cleanup, fail_fast):
 # --------#
 
 
+def _refresh_data_files():
+	"""Refresh the data files bundled with secator (CISA KEV catalog, CVE names dataset).
+
+	Returns:
+		bool: True when every data file was refreshed.
+	"""
+	# Refresh the CISA KEV catalog from the live feed (keeps the bundled mirror if unreachable),
+	# so `kev` tagging uses the latest known-exploited CVEs.
+	from secator.kev import refresh_kev
+	console.print('[bold gold3]:wrench: Refreshing CISA KEV catalog ...[/]')
+	kev_ids, kev_error = refresh_kev()
+	if kev_error:
+		console.print(Warning(message=f'CISA KEV refresh failed ({kev_error}): keeping the existing catalog.'))
+	console.print(Info(message=f'CISA KEV catalog: {len(kev_ids)} known-exploited CVEs.'))
+
+	# Refresh the CVE names dataset (readable names for vulnerabilities named by a bare CVE id).
+	from secator.cve_names import cve_names_path, refresh_cve_names
+	console.print('[bold gold3]:wrench: Refreshing CVE names dataset ...[/]')
+	nb_names, names_error = refresh_cve_names()
+	if names_error:
+		console.print(Warning(message=f'CVE names refresh failed ({names_error}): keeping the existing dataset.'))
+	if nb_names:
+		console.print(Info(message=f'CVE names dataset: {nb_names} named CVEs ({cve_names_path()}).'))
+	else:
+		console.print(Warning(message='CVE names dataset unavailable: CVE vulnerabilities keep their id as name.'))
+	return not kev_error and not names_error
+
+
 @cli.command('update')
 @click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (addons, tools, ...)')
-def update(all):
+@click.option('--data-only', is_flag=True, help='Only refresh the bundled data files (CISA KEV catalog, CVE names); fail if a refresh fails')  # noqa: E501
+def update(all, data_only):
 	"""Update to latest version"""
+	if data_only and CONFIG.offline_mode:
+		console.print(Warning(message='Offline mode: data files not refreshed, using the versions bundled with secator.'))
+		sys.exit(0)
+
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
+
+	if data_only:
+		sys.exit(0 if _refresh_data_files() else 1)
 
 	# Check current and latest version
 	info = get_version_info('secator', '-version', 'freelabz/secator', version=VERSION)
@@ -2941,12 +2977,7 @@ def update(all):
 		if not ret.return_code == 0:
 			sys.exit(1)
 
-	# Refresh the CISA KEV catalog cache from the live feed (falls back to the bundled
-	# mirror if unreachable), so `kev` tagging uses the latest known-exploited CVEs.
-	from secator.kev import refresh_kev
-	console.print('[bold gold3]:wrench: Refreshing CISA KEV catalog ...[/]')
-	kev_ids = refresh_kev()
-	console.print(Info(message=f'CISA KEV catalog: {len(kev_ids)} known-exploited CVEs.'))
+	_refresh_data_files()
 
 	# Update tools
 	if all:

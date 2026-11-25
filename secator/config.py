@@ -509,6 +509,13 @@ class Providers(StrictModel):
 	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb', 'ghsa': 'ghsa'}
 
 
+class CveNames(StrictModel):
+	# Readable CVE names dataset (https://github.com/freelabz/vulnamer), bundled with the
+	# package and refreshed by `secator update`; names vulnerabilities whose name is a bare CVE id.
+	url: str = 'https://github.com/freelabz/vulnamer/releases/download/dataset/vuln_names.min.jsonl.gz'
+	path: str = ''  # use only this TSV file; default: the bundled file, or <dirs.cves>/cve_names.tsv if larger
+
+
 class DiscordAddon(StrictModel):
 	enabled: bool = False
 	webhook_url: Secret = ''
@@ -579,6 +586,7 @@ class SecatorConfig(StrictModel):
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	cve_names: CveNames = CveNames()
 	queries: Dict[str, str] = {}
 	offline_mode: bool = False
 

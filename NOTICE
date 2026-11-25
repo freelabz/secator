@@ -1,0 +1,17 @@
+secator
+Copyright (c) FreeLabz
+
+This product bundles, and can download updates of, third-party data files:
+
+CVE names dataset (vulnamer)
+  https://github.com/freelabz/vulnamer
+  Software and dataset released under the MIT License.
+  Part of the dataset is derived from the GitHub Advisory Database
+  (https://github.com/github/advisory-database), licensed under the
+  Creative Commons Attribution 4.0 International license (CC-BY-4.0,
+  https://creativecommons.org/licenses/by/4.0/). Names derived from advisory
+  summaries may be shortened or normalized.
+
+CISA Known Exploited Vulnerabilities catalog
+  https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+  U.S. government work, public domain.

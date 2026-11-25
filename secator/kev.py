@@ -98,15 +98,19 @@ def _load_kev_cve_ids():
 
 def refresh_kev():
 	"""Download the KEV catalog from cisa.gov, update the bundled mirror, and re-copy it to
-	the cache. Returns the resulting CVE-ID set. Called by ``secator update``.
+	the cache. Called by ``secator update``.
 
 	Fail-safe: on offline mode or any download error the existing files are kept and the
 	current set is returned (never raises).
+
+	Returns:
+		tuple[set[str], str]: The resulting CVE-ID set, and the refresh error ('' when the
+			catalog was refreshed).
 	"""
 	global _KEV_CVE_IDS
 	from secator.utils import debug
 	if CONFIG.offline_mode:
-		return get_kev_cve_ids()
+		return get_kev_cve_ids(), 'offline mode'
 	import requests
 	try:
 		resp = requests.get(KEV_URL, timeout=10)
@@ -117,17 +121,16 @@ def refresh_kev():
 		blob = json.dumps(data, separators=(',', ':'))
 	except Exception as e:
 		debug(f'KEV refresh download failed, keeping existing catalog: {e}', sub='cve')
-		return get_kev_cve_ids()
+		return get_kev_cve_ids(), str(e) or type(e).__name__
 
 	# Update the bundled mirror (best-effort — may be read-only in site-packages) and the
 	# cache (always writable; it's what reads use).
+	from secator.data_files import atomic_write_bytes
 	for target in (BUNDLED_KEV_PATH, _cache_path()):
 		try:
-			target.parent.mkdir(parents=True, exist_ok=True)
-			with open(target, 'w') as f:
-				f.write(blob)
+			atomic_write_bytes(target, blob.encode())
 		except OSError as e:
 			debug(f'KEV refresh could not write {target}: {e}', sub='cve')
 
 	_KEV_CVE_IDS = None  # bust the in-process memo so get_kev_cve_ids() re-loads
-	return get_kev_cve_ids()
+	return get_kev_cve_ids(), ''

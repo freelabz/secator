@@ -24,6 +24,13 @@ _REPORTS = tempfile.mkdtemp(prefix='secator_unit_reports_')
 os.environ['SECATOR_DIRS_REPORTS'] = _REPORTS
 CONFIG.dirs.reports = _REPORTS
 
+# Keep tests hermetic from the bundled CVE names dataset (and one refreshed by `secator update`): point
+# the lookup at a file that does not exist, so vulnerabilities keep the names the tests give them.
+# test_cve_names patches the path to its own fixture.
+_NO_CVE_NAMES = os.path.join(_REPORTS, 'no_cve_names.tsv')
+os.environ['SECATOR_CVE_NAMES_PATH'] = _NO_CVE_NAMES
+CONFIG.cve_names.path = _NO_CVE_NAMES
+
 
 def pytest_runtest_setup(item):
 	global _SECATOR_MODULES

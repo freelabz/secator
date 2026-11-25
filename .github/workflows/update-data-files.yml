@@ -1,0 +1,62 @@
+name: Update bundled data files
+
+# Nightly refresh of the data files bundled with secator, pushed straight to main so every
+# release ships current data (installs without internet access use it as-is):
+#   - secator/data/known_exploited_vulnerabilities.json  (CISA KEV catalog)
+#   - secator/data/cve_names.tsv                          (CVE names, vulnamer dataset)
+# Users with internet access get the latest data with `secator update --data-only`, which runs
+# the same refresh code as this job.
+
+on:
+  schedule:
+    - cron: '30 2 * * *'  # nightly, after the tools-version job
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  update-data-files:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        token: ${{ secrets.RELEASE_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install secator
+      run: pip install -e .
+
+    # Editable install: the refresh rewrites the bundled files in this checkout. It validates
+    # each feed (non-empty KEV catalog, >= 100k named CVEs) and exits non-zero on any failure,
+    # so a bad download never replaces good data.
+    - name: Refresh the data files
+      run: secator update --data-only
+
+    - name: Push to main
+      run: |
+        set -euo pipefail
+        files="secator/data/known_exploited_vulnerabilities.json secator/data/cve_names.tsv"
+        if git diff --quiet -- $files; then
+          echo "Data files unchanged."
+          exit 0
+        fi
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add $files
+        git commit -m "chore(data): update bundled CISA KEV catalog and CVE names"
+        for attempt in 1 2 3; do
+          git pull --rebase origin main && git push origin HEAD:main && exit 0
+          sleep 10
+        done
+        exit 1

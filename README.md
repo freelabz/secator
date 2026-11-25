@@ -307,6 +307,11 @@ To go deeper with `secator`, check out:
 * Our [Medium post](https://medium.com/p/09333f3d3682)
 * Follow us on social media: [@freelabz](https://twitter.com/freelabz) on Twitter and [@FreeLabz](https://youtube.com/@FreeLabz) on YouTube
 
+## Data sources
+
+* **CISA Known Exploited Vulnerabilities catalog** (`kev` tag), bundled and refreshed by `secator update` (or `secator update --data-only`).
+* **CVE names** from [vulnamer](https://github.com/freelabz/vulnamer) (MIT): vulnerabilities that a tool reports with a bare CVE id as name get a readable name (a "Product - Flaw" name, prefixed with the community name when there is one, e.g. `SIGRed - Microsoft Windows DNS Server Remote Code Execution`). The dataset is bundled and refreshed by `secator update` (or `secator update --data-only`). It includes data derived from the [GitHub Advisory Database](https://github.com/github/advisory-database), licensed [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). See [NOTICE](NOTICE).
+
 ## Stats
 
 <a href="https://star-history.com/#freelabz/secator&Date">
