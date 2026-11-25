@@ -15,6 +15,7 @@ from time import time
 
 import psutil
 from fp.fp import FreeProxy
+from greenlet import GreenletExit
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
@@ -607,12 +608,14 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
+				preexec_fn=self._new_session if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
 				errors='replace',
 				env=env,
 				cwd=self.cwd,
 			)
+			if self.revoked:  # stopped while starting (see Runner.stop)
+				self.stop_process()
 
 			# Initialize monitor objects and start monitor thread
 			self._init_monitor_objects()
@@ -645,6 +648,8 @@ class Command(Runner):
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
+			if isinstance(e, (SystemExit, GreenletExit)):
+				raise  # stopped by its worker: Runner.__iter__ finalizes the runner and re-raises it
 			yield Error.from_exception(e)
 
 		finally:
@@ -746,10 +751,19 @@ class Command(Runner):
 			error = Error.from_exception(exc)
 		yield error
 
+	@staticmethod
+	def _new_session():
+		"""Start the command in its own session, with the default SIGINT action.
+
+		A Celery prefork pool process ignores SIGINT, and the command would inherit it.
+		"""
+		os.setsid()
+		signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
 		"""Sends signal to running process, if any.
 
-		Uses killpg only when the subprocess has its own process group (preexec_fn=os.setsid).
+		Uses killpg only when the subprocess has its own process group (preexec_fn=_new_session).
 		Otherwise (disable_preexec=True or sudo), the subprocess shares the worker's pgid and
 		killpg would also kill the worker.
 		"""

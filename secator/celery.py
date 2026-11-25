@@ -8,7 +8,7 @@ from time import time
 
 from celery import Celery, chord, states
 from celery.canvas import signature
-from celery.exceptions import Ignore
+from celery.exceptions import ChordError, Ignore
 from celery.app import trace
 
 from rich.logging import RichHandler
@@ -162,9 +162,15 @@ def revoke_task(task_id, task_name=None):
 	# The broadcast only reaches workers alive right now. Also record the revoke on the result
 	# backend, so that a still-queued task picked up later by a worker that never saw it (e.g. one
 	# started afterwards) is skipped at start (see run_command). Finished tasks keep their state.
-	if not app.AsyncResult(task_id).ready():
+	meta = app.backend.get_task_meta(task_id)
+	if meta['status'] not in states.READY_STATES:
 		app.backend.mark_as_revoked(task_id, reason='revoked')
 	console.print(Info(message=message))
+	# A chunked task's id names its chord callback once it is replaced (see break_task): revoke the
+	# chunks it recorded in its state too.
+	if isinstance(meta['result'], dict):
+		for chunk_id in meta['result'].get('celery_ids', []):
+			revoke_task(chunk_id, task_name)
 
 
 # --------------#
@@ -325,6 +331,8 @@ def run_command(self, results, name, targets, opts={}):
 	# touch its state, and do not trigger the rest of its chain / chord.
 	if not self.request.is_eager and self.AsyncResult(self.request.id).state == states.REVOKED:
 		console.print(Info(message=f'Task {name} was revoked before it started, skipping'))
+		if self.request.chord:  # still count it in its chord (see mark_runner_chord_failed)
+			self.backend.mark_as_revoked(self.request.id, reason='revoked', request=self.request)
 		raise Ignore()
 
 	# Set routing key in context
@@ -523,6 +531,26 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	return []
 
 
+@app.task
+def mark_runner_chord_failed(request, exc, traceback, runner):
+	"""Error callback of a chunked task's chord (see break_task): finalize the task.
+
+	A revoked or failed chunk fails the chord, and Celery skips its callback (mark_runner_completed).
+	Celery calls this inline where the chord failed, possibly in the worker main process: queue the
+	callback instead.
+
+	Args:
+		request (celery.app.task.Context): Request of the chord callback.
+		exc (Exception): Error.
+		traceback (str): Traceback.
+		runner (Runner): Chunked task.
+	"""
+	if not isinstance(exc, ChordError):  # the callback itself failed
+		return
+	runner.revoked = 'TaskRevokedError' in str(exc)  # "Dependency <chunk id> raised TaskRevokedError(...)"
+	mark_runner_completed.si([], runner=runner).apply_async(queue='results')
+
+
 # --------------#
 # Celery utils  #
 # --------------#
@@ -675,10 +703,9 @@ def break_task(task, task_opts):
 	# console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
-	workflow = chord(
-		tuple(sigs),
-		mark_runner_completed.s(runner=task).set(queue='results'),
-	)
+	callback = mark_runner_completed.s(runner=task).set(queue='results')
+	callback.link_error(mark_runner_chord_failed.s(runner=task))
+	workflow = chord(tuple(sigs), callback)
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
 	return workflow

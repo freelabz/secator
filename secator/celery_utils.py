@@ -345,7 +345,7 @@ class CeleryData(object):
 				data['ready'] = True
 			else:
 				debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
-				raise info
+				data['results'] = [Error.from_exception(info, _source=data['name'])]  # FAILURE is final
 
 		elif isinstance(info, list):
 			data['results'] = info

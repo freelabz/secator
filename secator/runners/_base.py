@@ -10,6 +10,7 @@ from pathlib import Path
 from time import time
 
 from dotmap import DotMap
+from greenlet import GreenletExit
 from rich.errors import MarkupError as RichMarkupError
 import humanize
 from celery.result import allow_join_result
@@ -563,6 +564,7 @@ class Runner:
 			'chunk_count': self.chunk_count,
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
+			'celery_ids': list(self.celery_ids_map),
 			'count': count,
 			'descr': self.description,
 		}
@@ -770,6 +772,8 @@ class Runner:
 				for item in self.yielder():
 					yield from self._process_item(item)
 					self.run_hooks('on_interval', sub='item')
+			if isinstance(e, (SystemExit, GreenletExit)):
+				raise  # stopped by its worker (revoked task): let Celery record it, not SUCCESS
 
 		finally:
 			yield from self.results_buffer
@@ -1439,6 +1443,17 @@ class Runner:
 			with profile_path.open('w', encoding='utf-8') as f_html:
 				f_html.write(self.profiler.output_html())
 			self._print_item(Info(message=f'Wrote profile to {str(profile_path)}'), force=True)
+
+	def stop(self):
+		"""Stop the runner while it runs in another thread: it then ends REVOKED.
+
+		Revoke its Celery tasks when it runs remotely, else interrupt its command, if any.
+		"""
+		self.revoked = True
+		if not self.sync:
+			self.stop_celery_tasks()
+		elif hasattr(self, 'stop_process'):
+			self.stop_process()
 
 	def stop_celery_tasks(self):
 		"""Stop all tasks running in Celery worker."""
