@@ -169,6 +169,7 @@ def save_suggestion(item):
 
 	Doc shape: ``{type: 'runner', name, message, priority, source, data: {type, name, config_query,
 	run_opts, targets}, context: {workspace_id, done}, _context, created_at, updated_at}``.
+	A repeat refreshes the existing doc even when it is done, leaving ``context.done`` untouched.
 	Without a unique index on the filter, two concurrent saves may rarely insert twice.
 	"""
 	db = get_mongodb_client().main
