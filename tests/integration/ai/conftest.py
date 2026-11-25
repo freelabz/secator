@@ -260,17 +260,16 @@ class AiRun:
 		return children_of(self.task.context.get('session_id'), self.task.id, name=name)
 
 	def stored(self, _type=None) -> List[Dict]:
-		"""Every result the run streamed to its results.ndjson (latest record per _uuid)."""
-		path = self.folder / 'results.ndjson'
+		"""Every result of the run's session as persisted, read back through the query backend of
+		the run's drivers (json / mongodb / sqlite alike), latest record per _uuid."""
+		context = self.task.context
+		query = {'_context.session_id': context.get('session_id')}
+		if _type:
+			query['_type'] = _type
 		latest = {}
-		if path.exists():
-			for line in path.read_text().splitlines():
-				try:
-					rec = json.loads(line)
-				except ValueError:
-					continue
-				latest[rec.get('_uuid') or id(rec)] = rec
-		return [r for r in latest.values() if _type is None or r.get('_type') == _type]
+		for rec in store_for(context).search(query, scope_only=True):
+			latest[rec.get('_uuid') or id(rec)] = rec
+		return list(latest.values())
 
 
 def children_of(session_id, run_id, name=None) -> List[Dict]:

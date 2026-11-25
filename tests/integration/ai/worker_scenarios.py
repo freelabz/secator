@@ -50,10 +50,23 @@ def background(suffix):
 			     description='Bg chunked', background=True),
 			call('run_shell', id='fg', command='echo fg-while-bg', description='Foreground'),
 		),
-		tools(call('check_background_jobs', id='chk1', wait=90)),
-		tools(call('check_background_jobs', id='chk2', wait=90)),
-		say('done'),
+		# an ended turn: the run waits for a job to end, then gives a turn - again while one runs
+		say('Waiting for the jobs.'),
+		tools(call('check_background_jobs', id='chk1')),
+		*[_wait_then_check('chk2')] * 3,
 	]
+
+
+def _wait_then_check(call_id):
+	"""End the turn while a job still runs (the latest status block says so), then check once."""
+	def turn(req):
+		status = req.text().rpartition('<background_jobs>')[2].partition('</background_jobs>')[0]
+		if '[running' in status:
+			return say('Waiting for the jobs.')
+		if req.tool_result(call_id) is None:
+			return tools(call('check_background_jobs', id=call_id))
+		return say('done')
+	return turn
 
 
 def cancel_chunked(suffix):
@@ -86,7 +99,8 @@ def subagent_bg(suffix):
 		tools(call('run_subagent', id='sub', objective=f'[scenario:subagent_bg.child{suffix}] Probe the lab.',
 		           description='Bg subagent')),
 		tools(call('run_shell', id='parent', command='echo parent-busy', description='Parent work')),
-		tools(call('check_background_jobs', id='chk', wait=90)),
+		say('Waiting for the subagent.'),  # the run waits for the job, then gives a turn
+		tools(call('check_background_jobs', id='chk')),
 		say('done'),
 	]
 

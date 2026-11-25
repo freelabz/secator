@@ -1,9 +1,9 @@
 """E'. Background jobs and the end of a turn.
 
-Minimal design: a background job never blocks the turn, the status block of running jobs is
-injected at the start of every turn, and new turns only come from the user. While jobs run the
-run is not stopped (the idle timeout is frozen); a non-interactive run waits for its jobs, then
-gives the model one turn; an explicit stop cancels the jobs.
+A background job never blocks the turn, the status block of running jobs is injected at the
+start of every turn, and new turns only come from the user. While jobs run the run is not
+stopped (the idle timeout is frozen); a non-interactive run waits for its jobs, then gives the
+model one turn; an explicit stop cancels the jobs.
 
 Event-driven wake (later, 1.0): a job finishing wakes the model too, with its results.
 
@@ -17,10 +17,6 @@ import pytest
 from tests.integration.ai.conftest import Answerer, driver_context, store_for
 from tests.integration.ai.scripted import call, say, stop, tools
 
-FROZEN_IDLE = 'minimal background jobs: the idle timeout is not frozen yet while jobs run'
-STOP_CANCELS = (
-	'minimal background jobs: an explicit stop does not cancel running jobs yet (the run '
-	'waits for them, then gives the model another turn)')
 EVENT_WAKE = 'event-driven wake, 1.0'
 
 
@@ -61,7 +57,6 @@ def test_non_interactive_run_waits_for_jobs_then_gets_one_turn(run_ai):
 	assert 'wait-out-66' in run.tool_result('chk')
 
 
-@pytest.mark.xfail(strict=True, reason=STOP_CANCELS)
 def test_explicit_stop_cancels_running_jobs(run_ai):
 	"""The model stops the run while a job runs: the job is cancelled, the run ends at once."""
 	run = run_ai('end_stop_cancels', [
@@ -95,7 +90,6 @@ def test_user_message_while_a_job_runs(run_ai, mongo, remote):
 	assert 'msg-out-22' not in by_message.text()
 
 
-@pytest.mark.xfail(strict=True, reason=FROZEN_IDLE)
 def test_idle_timeout_is_frozen_while_jobs_run(run_ai, mongo, remote):
 	"""Nobody answers: the idle timeout does not end the run while a job runs; once none runs,
 	the timeout applies again and the run ends, its prompt left pending (run_ended). No new

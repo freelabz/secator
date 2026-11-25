@@ -20,7 +20,8 @@ def test_background_task_while_the_model_keeps_working(run_ai):
 	run = run_ai('bg_one', [
 		tools(call('run_shell', id='bg', command='sleep 4; echo bg-finished', description='Long', background=True)),
 		tools(call('run_shell', id='fg', command='echo meanwhile', description='Foreground work')),
-		tools(call('check_background_jobs', id='chk', job_ids=['bg-1'], wait=20)),
+		say('Waiting for the job.'),  # ends the turn: the run waits for the job, then gives a turn
+		tools(call('check_background_jobs', id='chk', job_ids=['bg-1'])),
 		say('done'),
 	])
 	r0, r1, r2 = run.requests[:3]
@@ -46,9 +47,9 @@ def test_two_background_and_one_foreground_in_one_turn(run_ai):
 			call('run_shell', id='bg2', command='sleep 6; echo two', description='Bg 2', background=True),
 			call('run_shell', id='fg', command='sleep 2; echo sync-done', description='Sync'),
 		),
-		# wait returns once ONE of the jobs finished: poll twice to read both
-		tools(call('check_background_jobs', id='chk', wait=20)),
-		tools(call('check_background_jobs', id='chk2', wait=20)),
+		# a check never blocks: check once both jobs are surely done (6s jobs, 10s later)
+		Turn(calls=[call('check_background_jobs', id='chk')], delay=10),
+		tools(call('check_background_jobs', id='chk2')),
 		say('done'),
 	])
 	r0, r1 = run.requests[:2]
@@ -58,7 +59,7 @@ def test_two_background_and_one_foreground_in_one_turn(run_ai):
 	assert 'bg-1' in r1.tool_result('bg1') and 'bg-2' in r1.tool_result('bg2')
 	outputs = [r['content'] for c in ('chk', 'chk2') for r in run.tool_json(c)['results']
 	           if r.get('ai_type') == 'shell_output']
-	assert set(outputs) == {'one', 'two'}  # each once: see test_finished_job_results_are_reported_once
+	assert sorted(outputs) == ['one', 'two']  # each once: see test_finished_job_results_are_reported_once
 
 
 def test_cancel_background_job(run_ai):
@@ -76,25 +77,24 @@ def test_cancel_background_job(run_ai):
 	assert cmd and all(c['status'] in FINAL_STATUSES for c in cmd), cmd
 
 
-@pytest.mark.parametrize('ending', ['max_wait', 'llm_error'])
+@pytest.mark.parametrize('ending', ['max_iterations', 'llm_error'])
 def test_job_still_running_when_the_run_ends(run_ai, ending):
-	"""A job outliving the run is cancelled and its final status recorded.
-
-	max_wait: the model ends its turn, the non-interactive run waits up to background_max_wait
-	then cancels the job and gives the model one turn. llm_error: the run dies on a model
+	"""Jobs have no timeout, but a run that ends otherwise cancels them, with their final status
+	recorded. max_iterations: the iteration cap ends the run. llm_error: the run dies on a model
 	error while the job runs (teardown cancels it)."""
 	def boom(req):
 		raise RuntimeError('provider exploded')
 
+	cap = 6
 	turns = [tools(call('run_shell', id='bg', command='sleep 60', description='Long', background=True))]
-	if ending == 'max_wait':
-		turns += [say('I will stop here.'), say('ok, done')]
+	if ending == 'max_iterations':
+		turns += [tools(call('run_shell', id=f'w{i}', command='echo working', description='Work')) for i in range(cap)]
 	else:
 		turns += [boom]
-	run = run_ai(f'bg_run_end_{ending}', turns, background_max_wait=2)
-	assert run.elapsed < 30
-	if ending == 'max_wait':
-		assert 'cancelled bg-1' in run.requests[2].text()
+	run = run_ai(f'bg_run_end_{ending}', turns, max_iterations=cap)
+	assert run.elapsed < 30, 'the run waited for the job'
+	if ending == 'max_iterations':
+		assert len(run.requests) == cap
 	else:
 		assert any('provider exploded' in e for e in run.errors())
 	jobs = [r for r in run.stored('ai') if r.get('ai_type') == 'background_job']
@@ -127,14 +127,12 @@ def test_background_job_limit(run_ai):
 	assert run.elapsed < 25
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug: check_background_jobs re-reads a job\'s findings from the store on every poll and only '
-	'dedupes by _uuid, which the job\'s own buffered items do not carry yet: a finished job\'s '
-	'output is reported again on the next check, and its stat items leak into the results'))
 def test_finished_job_results_are_reported_once(run_ai):
+	"""A finished job's output comes back on the first check only, without execution items."""
 	run = run_ai('bg_report_once', [
 		tools(call('run_shell', id='bg', command='sleep 2; echo once', description='Bg', background=True)),
-		tools(call('check_background_jobs', id='chk1', wait=20)),
+		say('Waiting for the job.'),
+		tools(call('check_background_jobs', id='chk1')),
 		tools(call('check_background_jobs', id='chk2')),
 		say('done'),
 	])
@@ -145,11 +143,9 @@ def test_finished_job_results_are_reported_once(run_ai):
 	assert not [r for r in second if r.get('ai_type') == 'shell_output'], second
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug: a cancelled background job is reported "cancelled" to the model, but the runner it ran '
-	'is persisted with status SUCCESS (the killed command / the stopped subagent), not REVOKED'))
 @pytest.mark.parametrize('kind', ['shell', 'subagent'])
 def test_cancelled_job_runner_is_revoked(run_ai, model, kind):
+	"""A cancelled job's runner (the killed command / the stopped subagent) ends REVOKED."""
 	tag = f'bg_revoked_{kind}'
 	if kind == 'shell':
 		spawn = call('run_shell', id='bg', command='sleep 60', description='Server', background=True)
@@ -186,7 +182,8 @@ def test_background_subagent_handback(run_ai, model):
 	run = run_ai('sub_bg', [
 		tools(_spawn('sub_bg.child')),  # background by default
 		tools(call('run_shell', id='parent_work', command='echo parent-busy', description='Parent work')),
-		tools(call('check_background_jobs', id='chk', wait=30)),
+		say('Waiting for the subagent.'),
+		tools(call('check_background_jobs', id='chk')),
 		say('done'),
 	])
 	r0, r1 = run.requests[:2]
@@ -209,7 +206,8 @@ def test_tool_calls_inside_a_background_subagent_run_in_the_foreground(run_ai, m
 	], tag='sub_bg_fg.child')
 	run = run_ai('sub_bg_fg', [
 		tools(_spawn('sub_bg_fg.child')),
-		tools(call('check_background_jobs', id='chk', wait=30)),
+		say('Waiting for the subagent.'),
+		tools(call('check_background_jobs', id='chk')),
 		say('done'),
 	])
 	child = model.for_tag('sub_bg_fg.child')
@@ -245,8 +243,8 @@ POLL_CAP = 300  # model-side cap on poll turns: bounds the run while there is no
 
 
 def _poll_loop(run_ai, tag):
-	"""The model starts a ~2 min background job, then calls check_background_jobs() with no
-	wait, again and again, until the job is reported done (or POLL_CAP polls). Returns
+	"""The model starts a ~2 min background job, then calls check_background_jobs() again and
+	again, until the job is reported done (or POLL_CAP polls). Returns
 	(run, poll_count, poll_timestamps relative to the first poll)."""
 	done_marker = 'poll-job-42'  # the output only: the command (echoed in tool results) formats it
 
@@ -288,7 +286,7 @@ def poll_loop(run_ai, poll_loop_result, record_property):
 
 @pytest.mark.slow
 def test_model_polling_in_a_loop_current_behaviour(poll_loop):
-	"""Current behaviour: each wait-less check returns at once, so the model burns a turn per
+	"""Current behaviour: a check never blocks, so the model burns a turn per
 	poll - it hits the POLL_CAP before the ~2 min job ends (each turn is a model call + tokens)."""
 	assert poll_loop['count'] >= 50, poll_loop['count']
 	assert poll_loop['stamps'][-1] < POLL_JOB_S, 'the polls were spread over the whole job'
