@@ -53,7 +53,7 @@ def _show_map(reports, *args, picked=None):
 	     mock.patch('secator.tasks.ai.show_session_picker', lambda sessions=None: picked):
 		console.export_text(clear=True)
 		result = click.testing.CliRunner().invoke(
-			cli, ['x', 'ai', '--show-map', '-ws', WS, '--driver', 'json', *args], catch_exceptions=False)
+			cli, ['x', 'ai', 'example.com', '--show-map', '-ws', WS, '--driver', 'json', *args], catch_exceptions=False)
 		output = console.export_text(clear=True)
 	assert result.exit_code == 0, result.output
 	assert sorted(reports.rglob('*')) == files  # nothing written: no runner, no report
