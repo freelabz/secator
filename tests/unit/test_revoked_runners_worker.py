@@ -69,23 +69,29 @@ class _RevokedRunners:
 				pass
 		return statuses
 
-	def _run(self, scenario, count):
+	def _run(self, scenario, expected):
 		shutil.rmtree(self.reports, ignore_errors=True)
 		subprocess.run(
 			[sys.executable, FIXTURES / 'client.py', scenario], env=self.env, cwd=self.tmp,
 			stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=True)
 		deadline = time.time() + 45  # the commands sleep 120s
 		statuses = self.runner_statuses()
-		while time.time() < deadline and not (len(statuses) == count and set(statuses) <= FINAL_STATUSES):
+		while time.time() < deadline and not (len(statuses) == len(expected) and set(statuses) <= FINAL_STATUSES):
 			time.sleep(0.5)
 			statuses = self.runner_statuses()
-		self.assertEqual(statuses, ['REVOKED'] * count, self.log.read_text()[-6000:])
+		self.assertEqual(sorted(statuses), sorted(expected), self.log.read_text()[-6000:])
 
 	def test_stopped_chunked_task_is_finalized(self):
-		self._run('chunked', count=3)  # the task and its 2 chunks
+		self._run('chunked', ['REVOKED'] * 3)  # the task and its 2 chunks
+
+	def test_chunked_task_revoked_by_id_is_finalized(self):
+		self._run('revoke_id', ['REVOKED'] * 3)
+
+	def test_failed_chunk_fails_the_chunked_task(self):
+		self._run('chunk_fails', ['FAILURE', 'SUCCESS'])  # the task, and the chunk that ran
 
 	def test_revoked_task_stops_its_inprocess_children(self):
-		self._run('batch', count=2)
+		self._run('batch', ['REVOKED'] * 2)
 
 
 class TestRevokedRunnersPrefork(_RevokedRunners, unittest.TestCase):

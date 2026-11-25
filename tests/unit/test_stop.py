@@ -92,6 +92,22 @@ class TestRevokeTask(unittest.TestCase):
 		)
 		self.assertEqual([c.args[0] for c in revoke.call_args_list], ['some-id', 'chunk-1', 'chunk-2'])
 
+	def test_chunks_are_read_before_the_broadcast(self):
+		# A worker receiving the revoke stores REVOKED over the task's state, chunk ids included.
+		meta = {'status': 'RUNNING', 'result': {'celery_ids': ['chunk-1']}}
+		revoked = {'status': states.REVOKED, 'result': None}
+
+		def broadcast(task_id, **kwargs):
+			meta.update(revoked)
+
+		with (
+			mock.patch.object(app.control, 'revoke', side_effect=broadcast) as revoke,
+			mock.patch.object(app.backend, 'get_task_meta', side_effect=lambda task_id: dict(meta)),
+			mock.patch.object(app.backend, 'mark_as_revoked'),
+		):
+			revoke_task('some-id')
+		self.assertEqual([c.args[0] for c in revoke.call_args_list], ['some-id', 'chunk-1'])
+
 
 class TestRevokedBeforeStart(unittest.TestCase):
 
@@ -207,26 +223,29 @@ class TestChunkedTaskChordError(unittest.TestCase):
 	"""A revoked or failed chunk fails the chord, which skips its callback: the callback's error
 	callback finalizes the chunked task instead."""
 
-	def _fail_chord(self, exc):
+	def _fail_chord(self, exc, chunk_states=(states.SUCCESS, states.SUCCESS)):
 		task = Sleep(['10', '11'], enable_reports=False, quiet=True, context={'celery_id': 'task-id'})
 		task.has_children = True
 		callback = break_task(task, {}).body
+		chunk_states = dict(zip(task.celery_ids_map, chunk_states))
 		with (
 			mock.patch.object(secator_celery.mark_runner_completed, 'si') as si,
 			mock.patch.object(app.backend, 'fail_from_current_stack'),
+			mock.patch.object(app, 'AsyncResult', side_effect=lambda task_id: mock.Mock(state=chunk_states[task_id])),
 		):
 			app.backend.chord_error_from_stack(callback, exc)
 		return si
 
 	def test_revoked_chunk_ends_the_task_revoked(self):
-		si = self._fail_chord(ChordError("Dependency chunk-id raised TaskRevokedError('terminated')"))
-		runner = si.call_args.kwargs['runner']
-		self.assertTrue(runner.revoked)
+		si = self._fail_chord(ChordError('Dependency chunk-id raised ...'), (states.SUCCESS, states.REVOKED))
+		self.assertTrue(si.call_args.kwargs['runner'].revoked)
+		self.assertIsNone(si.call_args.kwargs['error'])
 		si.return_value.apply_async.assert_called_once_with(queue='results')
 
-	def test_failed_chunk_ends_the_task(self):
-		si = self._fail_chord(ChordError("Dependency chunk-id raised ValueError('boom')"))
+	def test_failed_chunk_ends_the_task_failed(self):
+		si = self._fail_chord(ChordError("Dependency chunk-id raised ValueError('boom')"), (states.SUCCESS, states.FAILURE))
 		self.assertFalse(si.call_args.kwargs['runner'].revoked)
+		self.assertIn("ValueError('boom')", si.call_args.kwargs['error'].message)
 		si.return_value.apply_async.assert_called_once_with(queue='results')
 
 	def test_failed_callback_is_left_alone(self):

@@ -13,3 +13,8 @@ class revoke_sleep(Command):
 	input_chunk_size = 1  # 2+ targets are chunked
 	install_cmd = None
 	profile = 'revoke-test'
+
+	def __init__(self, inputs=[], **run_opts):
+		if run_opts.get('chunk') and 'boom' in inputs:
+			raise RuntimeError('boom')  # the chunk fails in Celery (FAILURE), not in its command
+		super().__init__(inputs, **run_opts)

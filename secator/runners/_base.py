@@ -764,16 +764,17 @@ class Runner:
 
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
-			error = Error.from_exception(e)
-			self.add_result(error)
+			stopped = isinstance(e, (SystemExit, GreenletExit))  # by its worker (revoked task)
+			if not stopped:
+				self.add_result(Error.from_exception(e))
 			self.revoked = True
 			if not self.sync:  # yield latest results from Celery
 				self.stop_celery_tasks()
 				for item in self.yielder():
 					yield from self._process_item(item)
 					self.run_hooks('on_interval', sub='item')
-			if isinstance(e, (SystemExit, GreenletExit)):
-				raise  # stopped by its worker (revoked task): let Celery record it, not SUCCESS
+			if stopped:
+				raise  # let Celery record it REVOKED, not SUCCESS
 
 		finally:
 			yield from self.results_buffer

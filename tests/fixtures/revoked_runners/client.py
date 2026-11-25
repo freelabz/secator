@@ -32,6 +32,21 @@ def chunked():
 	task.run()
 
 
+def revoke_id():
+	"""A chunked task, revoked by its task id (no client polls it, so only revoke_task can stop its chunks)."""
+	config = TemplateLoader(input={'type': 'task', 'name': 'revoke_sleep'})
+	task = Task(config, SLEEPS, run_opts={'sync': False, 'no_poll': True}, context={'drivers': ['json']})
+	task.run()
+	wait_for_commands()
+	revoke_task(task.celery_result.id)
+
+
+def chunk_fails():
+	"""A chunked task one chunk of which raises."""
+	config = TemplateLoader(input={'type': 'task', 'name': 'revoke_sleep'})
+	Task(config, ['1', 'boom'], run_opts={'sync': False, 'print_item': False}, context={'drivers': ['json']}).run()
+
+
 def batch():
 	"""A task running its children in-process, in parallel threads: revoke it."""
 	result = app.send_task('tests.run_batch_children', args=[SLEEPS], queue='revoke-test')
@@ -40,4 +55,4 @@ def batch():
 
 
 if __name__ == '__main__':
-	{'chunked': chunked, 'batch': batch}[sys.argv[1]]()
+	{'chunked': chunked, 'revoke_id': revoke_id, 'chunk_fails': chunk_fails, 'batch': batch}[sys.argv[1]]()
