@@ -17,6 +17,7 @@ from secator.output_types import (
 )
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
+from secator.utils import strip_ansi
 from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, USAGE_COUNTERS
 )
@@ -28,7 +29,9 @@ from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
 	normalize_mode, AI_MAX_RESULTS,
 )
-from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
+from secator.ai.tools import (
+	build_tool_schemas, tool_call_to_action, tool_call_rejection_reason, coerce_stringified_args, TOOL_SCHEMAS
+)
 from secator.ai.session import (
 	save_history, show_session_picker, pick_session_via_backend, replay_session, restore_history_from_db,
 	print_session_results)
@@ -118,6 +121,20 @@ def _truncate_label(text, fallback):
 	return (text[:80] + '...') if text and len(text) > 80 else (text or fallback)
 
 
+def _strip_ansi_deep(value):
+	"""Strip ANSI escape sequences from every string in ``value`` (nested dicts/lists).
+
+	Tool results go to the model as plain text. Some items carry terminal colour codes, e.g. a
+	failed command's output ends with its console error line (``Error`` repr)."""
+	if isinstance(value, str):
+		return strip_ansi(value)
+	if isinstance(value, dict):
+		return {k: _strip_ansi_deep(v) for k, v in value.items()}
+	if isinstance(value, list):
+		return [_strip_ansi_deep(v) for v in value]
+	return value
+
+
 def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason, blocked=False):
 	"""Shared body for rejecting a tool call: encrypt the error, record it as the
 	tool result in history, and return the ``tool_result`` Ai event to yield.
@@ -172,7 +189,7 @@ def _yield_tool_results(runner, collected):
 		strip_fields = tuple(f for f in INTERNAL_FIELDS if f != "_uuid") \
 			if tc_name == "query_workspace" else INTERNAL_FIELDS
 		serialized = [
-			{k: v for k, v in r.items() if k not in strip_fields}
+			_strip_ansi_deep({k: v for k, v in r.items() if k not in strip_fields})
 			for r in group_results
 		]
 		# Secret findings (secret scanners) often hold secrets with no recognizable format the
@@ -263,6 +280,21 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def _empty_tool_result(tc_name, action):
+	"""Tool result for a dispatched call that produced no result item.
+
+	A query that matched nothing yields no finding, but it did run: answer with an explicit
+	empty result (count 0) so the model can tell "no match" apart from a bare acknowledgement.
+	Any other result-less tool gets the generic acknowledgement."""
+	if tc_name == "query_workspace":
+		message = "No findings match this query."
+		if action.get("offset"):
+			message = f"No findings match this query at offset {action['offset']}."
+		return json.dumps({"task": tc_name, "status": "success", "count": 0, "results": [],
+		                   "message": message}, separators=(',', ':'))
+	return TOOL_ACK_RESULT
+
+
 def _ack_resultless_calls(runner, actions, collected):
 	"""Record an acknowledged tool result for each dispatched call that produced none.
 
@@ -281,7 +313,7 @@ def _ack_resultless_calls(runner, actions, collected):
 		if not tc_id or tc_id in answered or tc_name == "stop":
 			continue
 		answered.add(tc_id)
-		content = maybe_encrypt(TOOL_ACK_RESULT, runner.encryptor)
+		content = maybe_encrypt(_empty_tool_result(tc_name, action), runner.encryptor)
 		runner.history.add_tool_result(tc_name, tc_id, content)
 		yield Ai(content=f"[{tc_name}] done",
 		         ai_type="tool_result",
@@ -2094,7 +2126,7 @@ class ai(PythonRunner):
 			# Convert to action
 			action = tool_call_to_action(name, args)
 			if not action:
-				reason = "empty arguments" if not args else f"unknown tool '{name}'"
+				reason = tool_call_rejection_reason(name, args)
 				self.debug(f'[tool_call] skipping {name}: {reason}', sub='llm')
 				schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
 				params = schema.get("parameters", {})

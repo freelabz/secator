@@ -91,11 +91,6 @@ def test_resume_a_stopped_chat(run_ai, mongo, remote):
 	assert calls == {m['tool_call_id'] for m in first.tool_messages()}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug (json driver): a sync child task run by the ai task leaves a second report file '
-	'(report_<task>.json, its inner runner) at status RUNNING with the same task_chunk_id as the '
-	'finished task\'s report.json, so a reader of the runner reports (by task id) can see a '
-	'finished task as RUNNING, depending on file order'))
 def test_json_child_reports_are_final(run_ai, lab):
 	ctx = driver_context('json', session_id='sess-life-json-final')
 	run = run_ai('life_json_final', [

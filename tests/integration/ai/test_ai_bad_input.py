@@ -112,9 +112,6 @@ def test_parallel_mix_of_bad_and_good_calls(run_ai, lab):
 	assert 'fine' in nxt.tool_result('good')
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug: list_runners() with no arguments (all of them are optional) is rejected as "empty '
-	'arguments": tool_call_to_action only exempts stop'))
 def test_tool_with_only_optional_args_accepts_no_args(run_ai):
 	run = run_ai('bad_list_runners_noargs', [
 		tools(call('list_runners', id='lr')),
@@ -123,10 +120,6 @@ def test_tool_with_only_optional_args_accepts_no_args(run_ai):
 	assert 'rejected' not in run.tool_result('lr')
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug: the rejection reason is picked from the arguments alone ("empty arguments" if they are '
-	'empty, else "unknown tool"): a known tool sent non-object JSON (an array) is told "unknown '
-	'tool \'run_shell\'", and an unknown tool sent no arguments is told "empty arguments"'))
 @pytest.mark.parametrize('bad,wrong', [
 	(lambda: raw_call('run_shell', '["echo", "hi"]', id='bad'), 'unknown tool'),
 	(lambda: call('frobnicate', id='bad'), 'empty arguments'),
