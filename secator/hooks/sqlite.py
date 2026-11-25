@@ -18,6 +18,7 @@ from secator.query._base import strip_leading_glob
 from secator.hooks._dedup import compute_duplicate_updates
 
 _conns = {}
+_conn_owners = {}  # same keys as _conns: the thread that opened each connection
 _conn_lock = threading.Lock()
 
 
@@ -57,18 +58,47 @@ SCHEMA = [
 ]
 
 
+def _thread_alive(thread):
+	"""``thread.is_alive()``; a dummy thread (e.g. a gevent greenlet) raises instead of returning False."""
+	try:
+		return thread.is_alive()
+	except RuntimeError:
+		return False
+
+
 def get_sqlite_conn(db_path=None):
-	"""Get or create a cached SQLite connection (one per db path) with schema + REGEXP."""
-	key = str(db_path) if db_path else str(_get_db_path())
+	"""Get or create a cached SQLite connection (one per db path AND thread) with schema + REGEXP.
+
+	A connection must not be used by two threads at once (interleaved statements and commits fail
+	with ``InterfaceError: bad parameter or other API misuse``), and one process can have several
+	threads writing at once (e.g. an ai task's background jobs). So each thread gets its own
+	connection; WAL mode + busy_timeout already serialize writers across connections. Connections of
+	threads that have ended are closed when a new one is opened, so the cache stays bounded. The
+	owner is ``threading.current_thread()``, not ``threading.enumerate()``: under gevent a raw
+	greenlet is not listed there, and its live connection would be closed under it.
+	"""
+	path = str(db_path) if db_path else str(_get_db_path())
+	key = (path, threading.get_ident())
+	me = threading.current_thread()
 	conn = _conns.get(key)
-	if conn is None:
+	# A thread ident can be reused once its thread ended: a cached connection is this thread's
+	# only if this thread opened it.
+	if conn is None or _conn_owners.get(key) is not me:
 		with _conn_lock:
 			conn = _conns.get(key)
+			if conn is not None and _conn_owners.get(key) is not me:
+				_conn_owners.pop(key, None)
+				_conns.pop(key).close()  # its owner ended: nothing else uses it
+				conn = None
 			if conn is None:
-				db_file = Path(key)
+				for stale in [k for k, owner in _conn_owners.items() if not _thread_alive(owner)]:
+					_conn_owners.pop(stale, None)
+					if stale in _conns:
+						_conns.pop(stale).close()
+				db_file = Path(path)
 				db_file.parent.mkdir(parents=True, exist_ok=True)
 				timeout = CONFIG.addons.sqlite.busy_timeout_ms / 1000
-				conn = sqlite3.connect(key, check_same_thread=False, timeout=timeout)
+				conn = sqlite3.connect(path, check_same_thread=False, timeout=timeout)
 				try:
 					conn.execute('PRAGMA journal_mode=WAL')
 					conn.execute(f'PRAGMA busy_timeout={CONFIG.addons.sqlite.busy_timeout_ms}')
@@ -78,6 +108,7 @@ def get_sqlite_conn(db_path=None):
 						conn.execute(stmt)
 					conn.commit()
 					_conns[key] = conn
+					_conn_owners[key] = threading.current_thread()
 				except Exception:
 					conn.close()
 					raise

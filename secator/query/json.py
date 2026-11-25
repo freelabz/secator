@@ -12,7 +12,6 @@ from secator.query._base import QueryBackend, sort_runners_chronologically, vali
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
 from secator.utils import debug
-from secator.query._base import strip_leading_glob
 
 
 def resolve_local_report_paths(report_query, workspace_name):
@@ -56,7 +55,12 @@ def resolve_local_report_paths(report_query, workspace_name):
 def _regex_match(field, pattern):
 	if field is None:
 		return False
-	pattern = strip_leading_glob(pattern)
+	pattern = str(pattern)
+	# Strip the leading-glob convention, honoring an inline (?i) case-insensitivity flag.
+	if pattern.startswith('(?i)'):
+		pattern = '(?i)' + pattern[4:].lstrip('*')
+	else:
+		pattern = pattern.lstrip('*')
 	try:
 		return re.search(pattern, str(field)) is not None
 	except re.error:
@@ -65,9 +69,7 @@ def _regex_match(field, pattern):
 
 OPERATORS = {
 	"$regex": _regex_match,
-	# Backend queries reach here with $contains already rewritten to an escaped (?i) $regex
-	# (QueryBackend._merge_query); kept, with the same case-insensitive semantics, for direct callers.
-	"$contains": lambda field, value: str(value).lower() in str(field).lower() if field else False,
+	"$contains": lambda field, value: value in str(field) if field else False,
 	"$in": lambda field, values: field in values if field else False,
 	"$nin": lambda field, values: field not in values if field else False,
 	"$gt": lambda field, value: field > value if field is not None else False,
@@ -257,14 +259,10 @@ class JsonBackend(QueryBackend):
 		self.reports_dir = Path(reports_dir).expanduser()
 
 	def get_base_query(self) -> dict:
-		"""Base query for JSON: the display filters only.
-
-		Workspace filtering is implicit (we only load from the workspace directory), and local
-		JSON records may not carry ``_context.workspace_id``, so it is not part of the query. The
-		false-positive filter is, like on every other backend (``scope_only`` reads and updates
-		drop it).
-		"""
-		return {'is_false_positive': {'$ne': True}}
+		"""No base query needed for JSON - workspace filtering is done by directory."""
+		# Don't filter by _context fields since local JSON files may not have them
+		# Workspace filtering is implicit (we only load from the workspace directory)
+		return {}
 
 	def _get_workspace_path(self) -> Path:
 		"""Get path to workspace reports directory."""
@@ -576,19 +574,26 @@ class JsonBackend(QueryBackend):
 		keys = (f'{rtype}_chunk_id', f'{rtype}_id')
 		dirs = sorted(self._report_dirs(), key=lambda d: d.stat().st_mtime, reverse=True)
 		for d in dirs:
+			# Several reports of one dir can carry the same ids (e.g. a dispatcher's child report and
+			# the worker's own report for a Celery task): prefer a final one, else the newest.
+			matches = []
 			for path in d.glob('report*.json'):
 				try:
 					with open(path, 'r') as f:
 						info = json.load(f).get('info', {})
+					mtime = path.stat().st_mtime
 				except Exception as e:
 					debug(f'failed to load runner report {path}: {e}', sub='query.json')
 					continue
 				ctx = info.get('context') or {}
 				if (info.get('config') or {}).get('type', rtype) == rtype and runner_id in (ctx.get(keys[0]), ctx.get(keys[1])):
-					info['_id'] = runner_id
-					info['_type'] = f'{rtype}s'
-					info['_path'] = str(path)
-					return info
+					matches.append((bool(info.get('done')), mtime, str(path), info))
+			if matches:
+				_, _, path, info = max(matches, key=lambda m: (m[0], m[1]))
+				info['_id'] = runner_id
+				info['_type'] = f'{rtype}s'
+				info['_path'] = path
+				return info
 		return None
 
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,

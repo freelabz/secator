@@ -2,7 +2,8 @@
 
 Each tool is one self-contained :class:`~secator.ai.tools.base.BaseTool` subclass. The
 built-in tools are grouped by the resource they act on: ``runners.py`` (run_task,
-run_workflow, run_shell, run_subagent, list_runners, get_runner, stop_runner), ``findings.py`` (query_workspace,
+run_workflow, run_shell, run_subagent, list_runners, get_runner, stop_runner,
+check_background_jobs, cancel_background_job), ``findings.py`` (query_workspace,
 add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search)
 and ``session.py`` (update_plan, change_mode, stop). The class
 carries everything that used to be hand-synced across 5 places (schema, dispatch
@@ -40,6 +41,7 @@ from secator.ai.tools.findings import (
 )
 from secator.ai.tools.web import FetchUrl, WebSearch
 from secator.ai.tools.session import UpdatePlan, ChangeMode, Stop
+from secator.ai.tools.runners import CheckBackgroundJobs, CancelBackgroundJob
 
 
 # Order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas emits tools
@@ -64,6 +66,8 @@ _TOOL_CLASSES = [
 	GetRunner,
 	StopRunner,
 	ChangeMode,
+	CheckBackgroundJobs,
+	CancelBackgroundJob,
 	Stop,
 ]
 
@@ -419,6 +423,9 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		# needs arguments, so keep rejecting those. Covers native + text-parsed stop.
 		if tool_name == "stop":
 			return {"action": action_type, "description": "stopped"}
+		# check_background_jobs() with no args (= check all jobs, no wait) is valid too.
+		if tool_name == "check_background_jobs":
+			return {"action": action_type, "description": "Check background jobs"}
 		return None
 	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
 	# below would raise and abort the loop, so reject cleanly and let the caller retry.

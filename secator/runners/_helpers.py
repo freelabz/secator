@@ -1,12 +1,44 @@
 import fcntl
 import os
 import re
+import threading
+from contextlib import contextmanager
 
 from secator.config import CONFIG
 from secator.output_types import Error, Warning
 from secator.query.ast import substitute_ctx_constants
 from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
+
+
+_JOIN_LOCK = threading.Lock()
+_JOIN_STATE = {"depth": 0, "saved": None}
+
+
+@contextmanager
+def allow_join_result_shared():
+	"""``celery.result.allow_join_result`` that is safe when eager runs overlap in one process.
+
+	Celery's "never call result.get() within a task" guard is a PROCESS-GLOBAL flag, and
+	``allow_join_result`` saves and restores it per call. When two in-process sync children
+	overlap (threads of one ai task's background jobs, or a threads pool), the first to exit
+	restores the guard while the other still runs, and its nested ``.get()`` then raises.
+	Here the first enter lifts the guard and only the last exit restores it. The lock only
+	covers the counter, never the wrapped run.
+	"""
+	from celery._state import _set_task_join_will_block, task_join_will_block
+	with _JOIN_LOCK:
+		if _JOIN_STATE["depth"] == 0:
+			_JOIN_STATE["saved"] = task_join_will_block()
+			_set_task_join_will_block(False)
+		_JOIN_STATE["depth"] += 1
+	try:
+		yield
+	finally:
+		with _JOIN_LOCK:
+			_JOIN_STATE["depth"] -= 1
+			if _JOIN_STATE["depth"] == 0:
+				_set_task_join_will_block(_JOIN_STATE["saved"])
 
 
 def get_task_overrides(task_name):

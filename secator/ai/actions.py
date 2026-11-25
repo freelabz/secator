@@ -82,6 +82,9 @@ class ActionContext:
 		for i in ids:
 			if i:
 				self.spawned_runners[str(i)] = runner
+	# Background job registry (secator.ai.background.BackgroundJobs) of the ai task that
+	# owns this context; None disables background calls (they then run in the foreground).
+	background: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).
