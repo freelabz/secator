@@ -419,10 +419,14 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		# `stop` ends the turn and carries no required data (its `reason` is optional),
 		# so a bare stop() with empty/no args is VALID and must succeed — otherwise the
 		# empty-args reject below bounces every clean stop as "empty arguments" and the
-		# model falls back into a follow-up nag loop instead of ending. Every other tool
-		# needs arguments, so keep rejecting those. Covers native + text-parsed stop.
+		# model falls back into a follow-up nag loop instead of ending. Covers native +
+		# text-parsed stop. A tool with no required parameter (e.g. list_suggestions) is
+		# also valid with no args; any other tool needs arguments, so keep rejecting those.
 		if tool_name == "stop":
 			return {"action": action_type, "description": "stopped"}
+		tool = TOOLS_BY_NAME.get(tool_name)
+		if tool and not tool.schema["function"]["parameters"].get("required"):
+			return {"action": action_type}
 		return None
 	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
 	# below would raise and abort the loop, so reject cleanly and let the caller retry.

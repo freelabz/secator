@@ -325,3 +325,8 @@ class TestListSuggestions(unittest.TestCase):
 			engine.list_suggestions.assert_called_with(51)
 			[ai] = [o for o in out if isinstance(o, Ai)]
 			self.assertEqual((ai.extra_data['count'], ai.extra_data['has_more']), (50, has_more))
+
+	def test_argument_free_call_converts(self):
+		from secator.ai.tools import tool_call_to_action
+		self.assertEqual(tool_call_to_action('list_suggestions', {}), {'action': 'list_suggestions'})
+		self.assertIsNone(tool_call_to_action('add_suggestion', {}))  # has required parameters
