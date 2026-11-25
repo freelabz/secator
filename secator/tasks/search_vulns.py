@@ -10,7 +10,8 @@ from secator.definitions import (
 from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
-from secator.cpe import cpe23
+from secator.cpe import _CPE_ANY, cpe23, cpe_attrs
+from secator.technology import entry, lookup
 
 # search_vulns match reason for a CVE whose only link to the query is the general product.
 UNCERTAIN_MATCH = 'general_product_uncertain'
@@ -83,10 +84,8 @@ class search_vulns(Vuln):
 	@staticmethod
 	def on_json_loaded(self, item):
 		"""Load vulnerability items from search_vulns JSON output."""
-		if self.matched_at:
-			matched_ats = self.matched_at.split(',')
-		else:
-			matched_ats = [self.inputs[0] if self.inputs else '']
+		query = self.inputs[0] if self.inputs else ''
+		matched_ats = self.matched_at.split(',') if self.matched_at else [query]
 		if not getattr(self, '_targets_info_yielded', False):
 			targets_str = ', '.join(matched_ats)
 			yield Info(message=f'Targets: {targets_str}')
@@ -127,7 +126,7 @@ class search_vulns(Vuln):
 			cvss_vector = vuln_data.get('severity', {}).get('CVSS', {}).get('vector', '')
 			epss_score = float(vuln_data.get('severity', {}).get('EPSS', {}).get('score', 0))
 			extra_data = search_vulns.extract_extra_data(vuln_data)
-			extra_data['service_name'] = self.inputs[0] if self.inputs else ''
+			extra_data.update(search_vulns.extract_service(query))
 			references = search_vulns.extract_references(vuln_data)
 			data = {
 				'id': cve_id,
@@ -233,6 +232,18 @@ class search_vulns(Vuln):
 			refs.extend(exploits)
 
 		return refs
+
+	@staticmethod
+	def extract_service(query):
+		"""Service extra data for a query: a CPE is named as its technology reads ('Microsoft IIS 8.5')
+		and kept in ``cpe``; free text is the name as is."""
+		attrs = cpe_attrs(query)
+		if not attrs:
+			return {'service_name': query}
+		_, _, product, version = attrs
+		key, _ = lookup('', cpes=[query], fuzzy=False)
+		name = entry(key)['name'] if key else product.replace('_', ' ')
+		return {'service_name': f'{name} {version}' if version not in _CPE_ANY else name, 'cpe': [query]}
 
 	@staticmethod
 	def extract_extra_data(item):

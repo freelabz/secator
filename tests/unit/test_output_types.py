@@ -81,6 +81,11 @@ class TestVulnerabilityRich(unittest.TestCase):
 		vuln = Vulnerability(name='CVE-2023-38408', extra_data={'service_name': 'OpenSSH/8.2p1', 'cpes': cpes})
 		assert 'cpe:/a:openbsd:openssh:8.2p1[/] +1 more]' in vuln.__rich__()
 
+	def test_cpes_matches_queried_cpe(self):
+		extra_data = {'service_name': 'PostgreSQL 14.1', 'cpe': ['cpe:2.3:a:postgresql:postgresql:14.1:*:*:*:*:*:*:*']}
+		vuln = Vulnerability(name='CVE-2023-39417', extra_data={**extra_data, 'cpes': self.CPES})
+		assert 'cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*[/] +2 more]' in vuln.__rich__()
+
 	def test_cpes_falls_back_to_first(self):
 		vuln = Vulnerability(name='CVE-2023-39417', extra_data={'cpes': self.CPES[:1]})
 		assert 'cpe:/a:redhat:enterprise_linux:8::appstream[/]]' in vuln.__rich__()
