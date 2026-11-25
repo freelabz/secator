@@ -519,6 +519,7 @@ class Kev(StrictModel):
 class CveNames(StrictModel):
 	# Readable CVE names dataset (https://github.com/freelabz/vulnamer), bundled with the
 	# package and refreshed by `secator update`; names vulnerabilities whose name is a bare CVE id.
+	# Not the copy on main (which can lag this release): the startup update check compares sizes, not shas.
 	url: str = 'https://github.com/freelabz/vulnamer/releases/download/dataset/vuln_names.min.jsonl.gz'
 	path: str = ''  # use only this TSV file; default: the bundled file, or <dirs.cves>/cve_names.tsv if larger
 

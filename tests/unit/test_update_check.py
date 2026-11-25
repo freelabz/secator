@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from secator.cli import cli
 from secator.config import CONFIG
 import secator.kev as kev
+from secator.cve_names import CVE_NAMES_FILENAME
 from secator.installer import check_updates, warn_github_unreachable
 from secator.kev import KEV_FILENAME
 from secator.requests import requests
@@ -28,10 +29,12 @@ class TestCheckUpdates(unittest.TestCase):
 		self._tmp = Path(tempfile.mkdtemp())
 		self._orig_data = CONFIG.dirs.data
 		CONFIG.dirs.data = self._tmp  # holds the once-a-day stamp file
+		(self._tmp / CVE_NAMES_FILENAME).write_bytes(b'x' * 100)  # local CVE names: 100 bytes
 		self._session = MagicMock()
 		self._patches = [
 			patch('secator.installer.get_session', return_value=self._session),
 			patch('secator.installer.get_kev_sha', return_value='local-sha'),
+			patch('secator.installer.cve_names_path', return_value=self._tmp / CVE_NAMES_FILENAME),
 			patch('secator.installer.VERSION', '1.0.0'),
 			patch('secator.installer.console'),
 		]
@@ -44,10 +47,14 @@ class TestCheckUpdates(unittest.TestCase):
 		CONFIG.dirs.data = self._orig_data
 		shutil.rmtree(self._tmp, ignore_errors=True)
 
-	def _github(self, latest='1.0.0', kev_sha='local-sha'):
+	def _github(self, latest='1.0.0', kev_sha='local-sha', names_size=100):
 		self._session.get.side_effect = [
 			_resp({'tag_name': f'v{latest}'}),
-			_resp([{'name': KEV_FILENAME, 'sha': kev_sha}, {'name': 'technologies.yaml', 'sha': 'x'}]),
+			_resp([
+				{'name': KEV_FILENAME, 'sha': kev_sha, 'size': 1},
+				{'name': CVE_NAMES_FILENAME, 'sha': 'names-sha', 'size': names_size},
+				{'name': 'technologies.yaml', 'sha': 'x', 'size': 1},
+			]),
 		]
 
 	def _output(self):
@@ -69,7 +76,35 @@ class TestCheckUpdates(unittest.TestCase):
 	def test_data_file_change_suggests_data_only(self):
 		self._github(kev_sha='remote-sha')
 		check_updates()
+		self.assertIn('(CISA KEV catalog)', self._output())
 		self.assertIn('secator update --data-only', self._output())
+
+	def test_cve_names_change_suggests_data_only(self):
+		self._github(names_size=200)
+		check_updates()
+		self.assertIn('(CVE names)', self._output())
+		self.assertIn('secator update --data-only', self._output())
+
+	def test_missing_cve_names_suggests_data_only(self):
+		(self._tmp / CVE_NAMES_FILENAME).unlink()
+		self._github()
+		check_updates()
+		self.assertIn('(CVE names)', self._output())
+
+	def test_both_data_files_changed_names_both(self):
+		self._github(kev_sha='remote-sha', names_size=200)
+		check_updates()
+		self.assertIn('(CISA KEV catalog, CVE names)', self._output())
+
+	def test_cve_names_up_to_date_is_not_listed(self):
+		self._github(kev_sha='remote-sha')
+		check_updates()
+		self.assertNotIn('CVE names', self._output())
+
+	def test_cve_names_newer_than_main_prints_nothing(self):
+		self._github(names_size=50)  # refreshed from the vulnamer release ahead of main
+		check_updates()
+		self._console.print.assert_not_called()
 
 	def test_unparsable_version_prints_nothing(self):
 		self._github(latest='not-a-version')
