@@ -117,7 +117,7 @@ class AITUI(TUIApp):
 		self._model_source = source
 
 	def on_mount(self) -> None:
-		super().on_mount()
+		# Textual already dispatches on_mount along the MRO: calling super() would start the runner twice.
 		self._mv_lock = asyncio.Lock()   # one refresh / toggle at a time (they await mounts)
 		self.query_one("#views").mount(ConversationScroll(id="model-view", classes="subview"))
 		self.set_interval(1.0, self._tick_model_view)   # follow the history while the view is on

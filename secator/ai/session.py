@@ -10,6 +10,7 @@ from pathlib import Path
 from secator.config import CONFIG
 from secator.output_types import Error, Warning
 from secator.rich import console
+from secator.utils import get_workspace_folder_name
 
 
 # Small sidecar written next to history.json: the session identity the store docs are stamped
@@ -110,7 +111,7 @@ def _first_user_message(messages):
 	return ''
 
 
-def list_sessions(max_sessions=20):
+def list_sessions(max_sessions=20, workspace=None):
 	"""Scan reports folders for resumable AI sessions.
 
 	A session IS its history.json (that's what a resume replays). It is written locally by
@@ -126,11 +127,13 @@ def list_sessions(max_sessions=20):
 
 	Args:
 		max_sessions: Maximum number of sessions to return.
+		workspace: Only list the sessions of this workspace name (all workspaces when None).
 
 	Returns:
 		list: Session dicts sorted by mtime (most recent first), capped at max_sessions.
 	"""
-	pattern = str(Path(CONFIG.dirs.reports) / '*/tasks/*/history.json')
+	workspace_folder = glob.escape(get_workspace_folder_name(workspace)) if workspace else '*'
+	pattern = str(Path(CONFIG.dirs.reports) / workspace_folder / 'tasks/*/history.json')
 	candidates = []
 	for history_path_str in glob.glob(pattern):
 		try:

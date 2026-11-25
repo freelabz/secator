@@ -949,6 +949,7 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		task.sync = True
 		task._reports_folder = tempfile.mkdtemp(prefix="secator-test-")
 		task.context = {"workspace_id": "ws1"}
+		task.workspace_name = "ws1"
 		task.debug = MagicMock()
 
 		opt_values = {
@@ -1124,6 +1125,18 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		# initial id; the resume must re-point the TUI findings panel at the resumed session).
 		on_session_calls = [c for c in tui_backend.on_session.call_args_list if c.args[2] == "PRIOR"]
 		self.assertEqual(len(on_session_calls), 1)
+
+	@patch('secator.tasks.ai.show_session_picker', return_value=None)
+	@patch('secator.ai.session.list_sessions', return_value=[])
+	def test_resume_lists_only_the_run_workspace_sessions(self, mock_list, mock_picker):
+		"""The picker offers the sessions of the run's workspace (the active one, or -ws)."""
+		task, _ = self._make_task()
+		task.workspace_name = "wsB"
+		with contextlib.ExitStack() as stack:
+			for p in self._patches():
+				stack.enter_context(p)
+			list(task.yielder())
+		mock_list.assert_called_once_with(workspace="wsB")
 
 	@patch('secator.tasks.ai.pick_session_via_backend')
 	@patch('secator.ai.session.list_sessions', return_value=[])
@@ -1633,6 +1646,14 @@ class TestListSessionsRobustness(unittest.TestCase):
 		if mtime is not None:
 			os.utime(hp, (mtime, mtime))
 		return str(hp)
+
+	@patch('secator.ai.session.glob.glob', return_value=[])
+	def test_workspace_scopes_the_listing(self, mock_glob):
+		from secator.ai.session import list_sessions
+		list_sessions(workspace='wsA')
+		self.assertTrue(mock_glob.call_args.args[0].endswith(os.path.join('wsA', 'tasks', '*', 'history.json')))
+		list_sessions()
+		self.assertTrue(mock_glob.call_args.args[0].endswith(os.path.join('*', 'tasks', '*', 'history.json')))
 
 	def test_read_json_tolerates_none_and_missing_path(self):
 		from secator.ai.session import _read_json

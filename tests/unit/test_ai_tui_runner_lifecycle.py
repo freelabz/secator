@@ -196,6 +196,28 @@ class TestAiTuiRunnerLifecycle(unittest.TestCase):
 		app.tui_render.assert_not_called()
 
 
+class TestAiTuiStartsRunnerOnce(unittest.TestCase):
+
+	def test_mounting_the_app_builds_the_runner_once(self):
+		"""Textual calls on_mount of every class in the MRO: the app must not start the runner
+		again from AITUI.on_mount, or two runners run (two reports, two end messages)."""
+		import asyncio
+		from secator.tui.ai import AITUI
+		builds = []
+
+		def build():
+			builds.append(1)
+			return iter(())
+
+		async def body():
+			app = AITUI(build, session='ai', mode='chat')
+			async with app.run_test(size=(120, 40)) as pilot:
+				await pilot.pause(0.2)
+
+		asyncio.run(body())
+		self.assertEqual(builds, [1])
+
+
 class TestAiCliDriverParity(unittest.TestCase):
 	"""A driver from drivers.defaults must set up the TUI exactly like --driver."""
 

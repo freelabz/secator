@@ -497,7 +497,7 @@ class ai(PythonRunner):
 			# Scanning the reports folders can take a moment: say what is happening, so the
 			# wait isn't mistaken for the model answering.
 			with maybe_status("[bold orange3]Loading sessions…[/]", spinner="dots"):
-				sessions = list_sessions()
+				sessions = list_sessions(workspace=self.workspace_name)
 			if getattr(self.backend, "owns_display", False):
 				# `show_session_picker` prints its own "no sessions" notice on the console; a
 				# display-owning backend has no console, so surface the same thing as a Warning
