@@ -33,6 +33,7 @@ def reports(tmp_path):
 	docs = [
 		_map_doc('s1', ['b.example.com', '10.0.0.1']),
 		_map_doc('s2', ['a.example.com', 'b.example.com']),  # same placeholder as s1: shown once
+		{**_map_doc('s4', []), 'extra_data': {'pii_map': {'[SECRET:0123456789ab]': 'pa[/]ss'}}},  # shown literally
 		_map_doc('s3', ['other.example.com'], workspace='wsother')]
 	for i, doc in enumerate(docs):
 		folder = tmp_path / doc['_context']['workspace_name'] / 'tasks' / str(i)
@@ -53,7 +54,7 @@ def _show_map(reports, *args, picked=None):
 	     mock.patch('secator.tasks.ai.show_session_picker', lambda sessions=None: picked):
 		console.export_text(clear=True)
 		result = click.testing.CliRunner().invoke(
-			cli, ['x', 'ai', 'example.com', '--show-map', '-ws', WS, '--driver', 'json', *args], catch_exceptions=False)
+			cli, ['x', 'ai', '--show-map', '-ws', WS, '--driver', 'json', *args], catch_exceptions=False)
 		output = console.export_text(clear=True)
 	assert result.exit_code == 0, result.output
 	assert sorted(reports.rglob('*')) == files  # nothing written: no runner, no report
@@ -64,7 +65,7 @@ def _show_map(reports, *args, picked=None):
 def test_shows_every_map_of_the_workspace_deduped_and_sorted(reports):
 	rows, _ = _show_map(reports)
 	assert [(ph_type, value) for _, ph_type, value in rows] == [
-		('HOST', 'a.example.com'), ('HOST', 'b.example.com'), ('IPV4', '10.0.0.1')]
+		('HOST', 'a.example.com'), ('HOST', 'b.example.com'), ('IPV4', '10.0.0.1'), ('SECRET', 'pa[/]ss')]
 	assert all(ph.startswith(f'[{ph_type}:') for ph, ph_type, _ in rows)
 
 
@@ -75,7 +76,7 @@ def test_resume_shows_the_picked_chat_map(reports):
 
 def test_resume_of_a_chat_with_unknown_id_shows_the_workspace_maps(reports):
 	rows, output = _show_map(reports, '--resume', picked={'store_session_id': ''})
-	assert [value for _, _, value in rows] == ['a.example.com', 'b.example.com', '10.0.0.1']
+	assert [value for _, _, value in rows] == ['a.example.com', 'b.example.com', '10.0.0.1', 'pa[/]ss']
 	assert 'session id is unknown' in output
 
 

@@ -445,6 +445,7 @@ class ai(PythonRunner):
 		session, so merging dedupes).
 		"""
 		from rich.table import Table
+		from rich.text import Text
 		from secator.query import QueryEngine
 		query = {"_type": "ai", "ai_type": "pii_map"}
 		if resume:
@@ -471,8 +472,8 @@ class ai(PythonRunner):
 			table.add_column(column)
 		rows = sorted((ph[1:].split(":", 1)[0], value, ph) for ph, value in pii_map.items())
 		for ph_type, value, ph in rows:
-			table.add_row(ph, ph_type, value)
-		console.print(table, highlight=False)
+			table.add_row(Text(ph), ph_type, Text(value))  # literal: a stored value may hold markup
+		console.print(table)
 
 	@classmethod
 	def requires_local_execution(cls, inputs, run_opts):

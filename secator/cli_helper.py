@@ -276,9 +276,9 @@ def register_runner(cli_endpoint, config):
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 
-		# Expand input
+		# Expand input (`ai --show-map` takes none: never wait on stdin for it)
 		inputs = opts.pop('inputs')
-		inputs = expand_input(inputs, ctx)
+		inputs = [] if opts.get('show_map', False) else expand_input(inputs, ctx)
 
 		# Build hooks from driver name
 		hooks = []
