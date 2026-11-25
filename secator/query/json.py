@@ -528,6 +528,19 @@ class JsonBackend(QueryBackend):
 								count += 1
 		return count
 
+	def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
+		"""Read every run's ``suggestions.ndjson`` in the workspace, most recent first; the last
+		record of a ``_uuid`` wins (append-only, like results)."""
+		latest = {}
+		for path in self._get_workspace_path().glob('**/suggestions.ndjson'):
+			for line in path.read_bytes().splitlines():
+				try:
+					record = orjson.loads(line)
+				except orjson.JSONDecodeError:  # a torn last line
+					continue
+				latest[record.get('_uuid')] = record
+		return sorted(latest.values(), key=lambda r: r.get('_timestamp') or 0, reverse=True)[:limit]
+
 	def _execute_create_note(self, note: dict) -> int:
 		"""Append the note to a workspace-level ``notes.ndjson`` (append-only, like the
 		findings store). Notes live beside the runner report dirs, not inside one, so they

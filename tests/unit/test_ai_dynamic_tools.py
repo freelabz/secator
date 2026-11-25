@@ -18,9 +18,8 @@ def _reset():
 	from secator import loader
 	from secator.ai import tools
 	loader.discover_ai_tools.cache_clear()
-	# Drop any tool registered by a previous test (keep the built-ins) and rebuild the derived views.
-	builtin = {cls.name for cls in tools._TOOL_CLASSES}
-	tools.TOOLS[:] = [t for t in tools.TOOLS if t.name in builtin]
+	# Drop any external tool registered by a previous test and rebuild the derived views.
+	tools.TOOLS[:] = [t for t in tools.TOOLS if not getattr(t, 'external', False)]
 	tools._rebuild_registry()
 	for key in [k for k in sys.modules if k.startswith('secator.ai.tools_ext.')]:
 		del sys.modules[key]
@@ -388,8 +387,7 @@ class TestExtraToolsGlobs(unittest.TestCase):
 		from secator.ai.tools import TOOLS_BY_NAME, resolve_extra_tools
 		external = [n for n, t in TOOLS_BY_NAME.items() if t.external]
 		self.assertEqual(sorted(resolve_extra_tools(["*"])), sorted(external))
-		# add_suggestion is the built-in opt-in tool; the other three are dropped in.
-		self.assertEqual(sorted(external), ["add_suggestion", "ping_pong", "report_pull", "report_push"])
+		self.assertEqual(sorted(external), ["ping_pong", "report_pull", "report_push"])
 		chat_names = self._names("chat")
 		names = self._names("chat", extra_tools=["*"])
 		self.assertEqual(sorted(set(names) - set(chat_names)), sorted(external))

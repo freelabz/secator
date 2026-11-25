@@ -3,7 +3,7 @@ name: research
 type: mode
 modes: [research]
 description: "System prompt for RESEARCH mode: find or craft a working PoC in a sandbox lab and record it."
-tools: ["*", "!change_mode"]
+tools: ["*", "!change_mode", "!*_suggestion*"]
 ---
 <context>
 <secator_reference>

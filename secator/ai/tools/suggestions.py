@@ -1,24 +1,30 @@
-"""AI tool that records a runner suggestion: ``add_suggestion``.
+"""AI tools for runner suggestions, in chat mode only: ``list_suggestions`` (read the
+workspace's suggestions) and ``add_suggestion`` (record one).
 
-Not in any mode's baseline (``external = True``): a caller grants it to a run through the
-``ai`` task's ``extra_tools`` option. The tool yields a :class:`Suggestion`, which every
-driver stores in its own suggestions store (see the drivers' ``update_finding`` hooks).
+``add_suggestion`` yields a :class:`Suggestion`, which every driver stores in its own
+suggestions store (see the drivers' ``update_finding`` hooks); ``list_suggestions`` reads
+that store back through the active query backend.
 """
 from typing import Dict, Generator
 
-from secator.output_types import Error, Suggestion
+from secator.output_types import Ai, Error, Info, Suggestion
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA
 
 _RUNNER_TYPES = ("task", "workflow", "scan")
 _PRIORITIES = ("low", "medium", "high")
+_MAX_LISTED = 50  # most recent suggestions shown to the model
+_MAX_LISTED_TARGETS = 20
+_NO_DUPLICATE_RULE = (
+	"Call list_suggestions first and never add a suggestion that already exists (same type, name "
+	"and targets), even when it is done or dismissed."
+)
 
 
 class AddSuggestion(BaseTool):
 	name = "add_suggestion"
 	action = "add_suggestion"
 	auto_allow = True  # records a suggestion only: no target or path side effect
-	external = True  # never in a mode's baseline; granted per run through extra_tools
 	schema = {
 		"type": "function",
 		"function": {
@@ -26,7 +32,8 @@ class AddSuggestion(BaseTool):
 			"description": (
 				"Suggest a secator task, workflow or scan to run next on some targets. It is NOT run: "
 				"the suggestion is stored for the user to review and launch. Give the real config name, "
-				"the targets it should run on, only the options that matter, and a one-sentence reason."
+				"the targets it should run on, only the options that matter, and a one-sentence reason. "
+				+ _NO_DUPLICATE_RULE
 			),
 			"parameters": {
 				"type": "object",
@@ -77,3 +84,58 @@ class AddSuggestion(BaseTool):
 			name=name, type=runner_type, targets=targets, opts=opts, reason=reason, priority=priority,
 			source="ai", _context=context,
 		)
+
+
+def _summary(doc):
+	"""One compact row from a stored suggestion: the ``suggestions`` collection shape (``data`` /
+	``context``) or a flat :class:`Suggestion` record."""
+	if "data" in doc:
+		data, context = doc.get("data") or {}, doc.get("context") or {}
+		runner_type, name = data.get("type"), (data.get("config_query") or {}).get("config.name") or data.get("name")
+		targets, reason = data.get("targets") or [], doc.get("message")
+		status = doc.get("status") or ("done" if context.get("done") else "pending")
+		status = "dismissed" if context.get("dismissed") else status
+	else:
+		runner_type, name, targets = doc.get("type"), doc.get("name"), doc.get("targets") or []
+		reason, status = doc.get("reason"), "pending"
+	targets = [targets] if isinstance(targets, str) else targets
+	return {
+		"type": runner_type, "name": name, "targets": targets[:_MAX_LISTED_TARGETS], "targets_count": len(targets),
+		"source": doc.get("source") or "", "status": status, "reason": reason,
+	}
+
+
+class ListSuggestions(BaseTool):
+	name = "list_suggestions"
+	action = "list_suggestions"
+	auto_allow = True  # read-only
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "list_suggestions",
+			"description": (
+				f"List the workspace's existing runner suggestions, most recent first (at most {_MAX_LISTED}): "
+				"type, name, targets, source, status (pending / running / done / dismissed) and reason. "
+				"Call it before add_suggestion so you never suggest the same thing twice."
+			),
+			"parameters": {"type": "object", "properties": {}, "required": []},
+		}
+	}
+
+	def run(self, action: Dict, ctx: ActionContext) -> Generator:
+		"""Read the suggestions back through the active query backend; rows go to the model only."""
+		context = _get_result_context(action, ctx)
+		try:
+			docs = ctx.get_query_engine().list_suggestions(_MAX_LISTED)
+		except Exception as e:
+			yield Error(message=f"Failed to list suggestions: {e}", _context=context)
+			return
+		rows = [_summary(doc) for doc in docs]
+		yield Ai(
+			content="suggestions", ai_type="list_suggestions",
+			extra_data={"count": len(rows), "has_more": len(rows) >= _MAX_LISTED}, _context=context,
+		)
+		if not rows:
+			yield Info(message="No suggestions yet.", _context=context)
+		for row in rows:
+			yield {**row, "_type": "suggestion", "_context": {**context, "ai_query_result": True}}

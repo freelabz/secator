@@ -70,18 +70,22 @@ class TestAddSuggestionTool(unittest.TestCase):
 			[item] = self._run(**action)
 			self.assertIsInstance(item, Error, action)
 
-	def test_only_granted_through_extra_tools(self):
+	def test_chat_mode_only(self):
 		from secator.ai.prompts import MODES
 		from secator.ai.tools import build_tool_schemas
-
-		def names(mode, **kw):
-			return [s['function']['name'] for s in build_tool_schemas(mode, **kw)]
-
 		for mode in MODES:
-			self.assertNotIn('add_suggestion', names(mode), mode)
-		self.assertIn('add_suggestion', names('chat', extra_tools=['add_suggestion']))
-		# It is an opt-in (external) tool, so a glob over opt-in tools grants it too.
-		self.assertIn('add_suggestion', names('chat', extra_tools=['add_*']))
+			names = [s['function']['name'] for s in build_tool_schemas(mode)]
+			for tool in ('add_suggestion', 'list_suggestions'):
+				self.assertEqual(tool in names, mode == 'chat', (mode, tool))
+
+	def test_no_duplicate_rule_in_description_and_chat_prompt(self):
+		from secator.ai.prompts import get_system_prompt
+		from secator.ai.tools import TOOLS_BY_NAME
+		description = TOOLS_BY_NAME['add_suggestion'].schema['function']['description']
+		self.assertIn('Call list_suggestions first', description)
+		self.assertIn('done or dismissed', description)
+		self.assertIn('Call list_suggestions first', get_system_prompt('chat'))
+		self.assertNotIn('list_suggestions', get_system_prompt('scan'))
 
 
 class TestDriversStoreSuggestions(unittest.TestCase):
@@ -171,3 +175,89 @@ class TestDriversStoreSuggestions(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+class TestListSuggestions(unittest.TestCase):
+	"""list_suggestions reads each driver's store back, most recent first, capped."""
+
+	def setUp(self):
+		self.temp_dir = tempfile.mkdtemp()
+
+	def tearDown(self):
+		shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+	def _list(self, drivers, workspace='ws1'):
+		"""Run the list_suggestions tool in a session on ``drivers``; return the rows the model sees."""
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools import TOOLS_BY_NAME
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': workspace, 'drivers': drivers})
+		return [r for r in TOOLS_BY_NAME['list_suggestions'].handle({}, ctx) if isinstance(r, dict)]
+
+	@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+	def test_sqlite_session(self):
+		import secator.hooks.sqlite as sqlite_mod
+		from secator.config import CONFIG
+		orig = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = str(Path(self.temp_dir) / 'test.db')
+		sqlite_mod._conns.clear()
+		try:
+			for i in range(55):
+				sqlite_mod.update_finding(MagicMock(), _suggestion(targets=[f'h{i}.com']))
+			rows = self._list(['sqlite'])
+			self.assertEqual(len(rows), 50)  # capped
+			self.assertEqual(rows[0]['targets'], ['h54.com'])  # most recent first
+			self.assertEqual(
+				{k: rows[0][k] for k in ('type', 'name', 'source', 'status', 'reason')},
+				{'type': 'task', 'name': 'httpx', 'source': 'ai', 'status': 'pending', 'reason': 'probe the hosts'})
+			self.assertEqual(self._list(['sqlite'], workspace='other'), [])
+		finally:
+			for conn in sqlite_mod._conns.values():
+				conn.close()
+			sqlite_mod._conns.clear()
+			CONFIG.addons.sqlite.path = orig
+
+	@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+	def test_json_session(self):
+		from secator.config import CONFIG
+		from secator.hooks import json as mod
+		from secator.utils import get_workspace_folder_name
+		reports = Path(self.temp_dir)
+		for i, run in enumerate(('tasks/1', 'tasks/2')):
+			folder = reports / get_workspace_folder_name('ws1', reports) / run
+			folder.mkdir(parents=True)
+			item = mod.update_finding(MagicMock(reports_folder=str(folder)), _suggestion(targets=[f'h{i}.com']))
+		mod.update_finding(MagicMock(reports_folder=str(folder)), item)  # re-emitted: last record wins
+		with patch.object(CONFIG.dirs, 'reports', reports):
+			rows = self._list(['json'])
+		self.assertEqual([r['targets'] for r in rows], [['h1.com'], ['h0.com']])
+
+	def test_mongodb_backend(self):
+		mongomock = pytest.importorskip('mongomock')
+		pytest.importorskip('pymongo')
+		from secator.hooks import mongodb
+		from secator.query.mongodb import MongoDBBackend
+		client = mongomock.MongoClient()
+		with patch.object(mongodb, 'get_mongodb_client', return_value=client):
+			mongodb.update_finding(MagicMock(), _suggestion(targets=['a.com']))
+			mongodb.update_finding(MagicMock(), _suggestion(targets=['b.com']))
+		client.main.suggestions.update_one({'data.targets': ['a.com']}, {'$set': {'context.dismissed': True}})
+		backend = MongoDBBackend('ws1')
+		backend._client = client
+		from secator.ai.tools.suggestions import _summary
+		rows = [_summary(d) for d in backend.list_suggestions(50)]
+		self.assertEqual([(r['targets'], r['status']) for r in rows], [(['b.com'], 'pending'), (['a.com'], 'dismissed')])
+		self.assertEqual(rows[0]['name'], 'httpx')
+		other = MongoDBBackend('other')
+		other._client = client
+		self.assertEqual(other.list_suggestions(50), [])
+
+	def test_api_backend(self):
+		from secator.query.api import ApiBackend
+		from secator.ai.tools.suggestions import _summary
+		doc = {'data': {'type': 'scan', 'name': 'Basic domain scan', 'targets': ['a.com']}, 'context': {'done': True},
+			'message': 'm', 'updated_at': '2026-01-01'}
+		backend = ApiBackend('a' * 24)
+		with patch.object(backend, '_make_request', return_value={'items': [doc]}) as req:
+			[row] = [_summary(d) for d in backend.list_suggestions(50)]
+		self.assertEqual(req.call_args.args, ('GET', f'workspace/{"a" * 24}/suggestions?skip=0&limit=50'))
+		self.assertEqual((row['type'], row['name'], row['status'], row['source']), ('scan', 'Basic domain scan', 'done', ''))

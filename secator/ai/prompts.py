@@ -136,7 +136,7 @@ MODES = {
 		# and NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
 		# changing findings is an active action that belongs in scan/exploit.
 		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
-		"allowed_actions": ["query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["query", "fetch_url", "update_plan", "web_search", "list_runners", "get_runner", "subagent", "list_suggestions", "add_suggestion", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {

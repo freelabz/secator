@@ -5,7 +5,7 @@ built-in tools are grouped by the resource they act on: ``runners.py`` (run_task
 run_workflow, run_shell, run_subagent, list_runners, get_runner, stop_runner), ``findings.py`` (query_workspace,
 add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search),
 ``session.py`` (update_plan, change_mode, stop) and ``suggestions.py`` (add_suggestion,
-only granted per run through ``extra_tools``). The class
+list_suggestions; chat mode only). The class
 carries everything that used to be hand-synced across 5 places (schema, dispatch
 action, mode exposure, permission auto-allow, handler), and every drift-prone view
 derives from the ``TOOLS`` registry:
@@ -41,7 +41,7 @@ from secator.ai.tools.findings import (
 )
 from secator.ai.tools.web import FetchUrl, WebSearch
 from secator.ai.tools.session import UpdatePlan, ChangeMode, Stop
-from secator.ai.tools.suggestions import AddSuggestion
+from secator.ai.tools.suggestions import AddSuggestion, ListSuggestions
 
 
 # Order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas emits tools
@@ -67,6 +67,7 @@ _TOOL_CLASSES = [
 	StopRunner,
 	ChangeMode,
 	Stop,
+	ListSuggestions,
 	AddSuggestion,
 ]
 
@@ -211,8 +212,7 @@ def resolve_extra_tools(extra_tools=None):
 	  name that is not loaded raises ``ValueError`` with a clear message, so a
 	  misconfigured/absent tool fails loudly rather than being silently dropped.
 	* A GLOB expands to every loaded EXTERNAL tool (templates dir / ``SECATOR_AI_TOOLS_DIRS``
-	  / bundle, plus the built-in opt-in ``add_suggestion``: an external tool is one in no
-	  mode's baseline) whose name matches, in registry order. Globs never match other built-in tools —
+	  / bundle) whose name matches, in registry order. Globs never match built-in tools —
 	  the mirror of a mode's ``tools:`` globs, which match built-in tools only — so a broad
 	  pattern cannot widen a mode with core tools it hides; a built-in tool is only added by
 	  its exact name. ``*`` therefore means "every loaded external tool". A glob that matches

@@ -371,11 +371,11 @@ class TestPrompts(unittest.TestCase):
 		# (subagent), stop. `change_mode` lets an AUTO-resolved chat turn self-escalate — it
 		# is withheld from a user-PINNED chat in build_tool_schemas (see
 		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
-		# else here acts on the world or the data.
+		# else here acts on the world or the data, except recording runner suggestions (which run nothing).
 		self.assertEqual(
 			set(actions),
 			{"query", "fetch_url", "web_search", "list_runners", "get_runner", "update_plan",
-			 "subagent", "change_mode", "stop"},
+			 "subagent", "list_suggestions", "add_suggestion", "change_mode", "stop"},
 		)
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding", "stop_runner",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
@@ -1058,8 +1058,11 @@ class TestModeToolPatterns(unittest.TestCase):
 		(frontmatter `tools:`) and the authz mirror (allowed_actions) from drifting apart."""
 		from secator.ai.tools import TOOLS
 		from secator.ai.prompts import MODES, tool_matches_mode
+		name2action = {t.name: t.action for t in TOOLS}
+		names = [t.name for t in TOOLS]
 		for mode, cfg in MODES.items():
-			actions = {t.action for t in TOOLS if tool_matches_mode(t.name, cfg["tools"], external=t.external)}
+			exposed = {n for n in names if tool_matches_mode(n, cfg["tools"], external=False)}
+			actions = {name2action[n] for n in exposed}
 			self.assertEqual(actions, set(cfg["allowed_actions"]), f"{mode}: tools globs != allowed_actions")
 
 	def test_every_include_pattern_matches_a_known_tool(self):

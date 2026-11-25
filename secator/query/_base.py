@@ -355,6 +355,11 @@ class QueryBackend(ABC):
 		debug(f'create_note not supported by {self.name} backend', sub='query')
 		return 0
 
+	def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
+		"""This workspace's stored runner suggestions, most recent first (at most ``limit``).
+		Default: no suggestions store on this backend."""
+		return []
+
 
 # list_runners sort orders: 'asc' = oldest first, most recent last (the default, used by
 # the CLI so the most recent runs are the last lines printed); 'desc' = most recent first
