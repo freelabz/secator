@@ -63,6 +63,32 @@ class TestVulnerabilityStatus(unittest.TestCase):
 		assert vuln1._compare_key() == vuln2._compare_key()
 
 
+class TestVulnerabilityRich(unittest.TestCase):
+
+	CPES = ['cpe:/a:redhat:enterprise_linux:8::appstream'] * 2 + [
+		'cpe:/a:redhat:enterprise_linux:9::appstream', 'cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*']
+
+	def test_cpes_shows_matched_product_and_count(self):
+		service = 'cpe:2.3:a:postgresql:postgresql:14.1:*:*:*:*:*:*:*'
+		vuln = Vulnerability(name='CVE-2023-39417', extra_data={'service_name': service, 'cpes': self.CPES})
+		rich_str = vuln.__rich__()
+		assert 'cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*[/] +2 more]' in rich_str
+		assert 'redhat' not in rich_str
+		assert vuln.extra_data['cpes'] == self.CPES
+
+	def test_cpes_matches_nmap_service_name(self):
+		cpes = ['cpe:/a:redhat:enterprise_linux:8', 'cpe:/a:openbsd:openssh:8.2p1']
+		vuln = Vulnerability(name='CVE-2023-38408', extra_data={'service_name': 'OpenSSH/8.2p1', 'cpes': cpes})
+		assert 'cpe:/a:openbsd:openssh:8.2p1[/] +1 more]' in vuln.__rich__()
+
+	def test_cpes_falls_back_to_first(self):
+		vuln = Vulnerability(name='CVE-2023-39417', extra_data={'cpes': self.CPES[:1]})
+		assert 'cpe:/a:redhat:enterprise_linux:8::appstream[/]]' in vuln.__rich__()
+
+	def test_empty_cpes_not_shown(self):
+		assert 'cpes' not in Vulnerability(name='CVE-2023-39417', extra_data={'cpes': []}).__rich__()
+
+
 class TestErrorRich(unittest.TestCase):
 
 	def test_error_rich_with_node_id(self):
