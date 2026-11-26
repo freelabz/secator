@@ -490,5 +490,114 @@ class TestWebSearch(unittest.TestCase):
 		self.assertEqual(_unwrap_ddg_url(wrapped), 'https://x.example/?a=1%26b=2')
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestKeenableSearch(unittest.TestCase):
+	"""Opt-in Keenable engine: off by default, keyed vs keyless endpoint, fail-soft fallback."""
+
+	class _Resp:
+		def __init__(self, payload):
+			self._payload = payload
+
+		def raise_for_status(self):
+			return None
+
+		def json(self):
+			return self._payload
+
+	def _use_cfg(self, **kw):
+		"""Patch addons.ai.web_search for this test only."""
+		from types import SimpleNamespace
+		from secator.ai.tools import web
+		base = {'tavily_api_key': '', 'keenable_api_key': '', 'keenable_keyless': False}
+		base.update(kw)
+		patcher = mock.patch.object(web.CONFIG.addons.ai, 'web_search', SimpleNamespace(**base))
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def _patch(self, target, **kw):
+		patcher = mock.patch(target, **kw)
+		self.addCleanup(patcher.stop)
+		return patcher.start()
+
+	def test_disabled_by_default_makes_no_request(self):
+		from secator.ai.tools.web import keenable_search
+		post = self._patch('secator.ai.tools.web.requests.post')
+		self.assertEqual(keenable_search('q'), [])
+		post.assert_not_called()
+
+	def test_default_config_keeps_duckduckgo(self):
+		from secator.config import CONFIG
+		from secator.ai.tools import web
+		self.assertEqual(CONFIG.addons.ai.web_search.keenable_api_key, '')
+		self.assertFalse(CONFIG.addons.ai.web_search.keenable_keyless)
+		ddg = [{'_type': 'web_result', 'title': 'D', 'url': 'https://d.example/', 'snippet': ''}]
+		self._use_cfg()
+		post = self._patch('secator.ai.tools.web.requests.post')
+		self._patch('secator.ai.tools.web.duckduckgo_search', return_value=ddg)
+		results, engine = web.web_search('q', mode='links')
+		post.assert_not_called()
+		self.assertEqual(engine, 'duckduckgo')
+		self.assertEqual(results, ddg)
+
+	def test_keyless_uses_public_endpoint_with_title_header(self):
+		from secator.ai.tools import web
+		payload = {'results': [
+			{'title': 'A', 'url': 'https://a.example/', 'description': '', 'snippet': '# A\n' + 'x' * 2000},
+			{'title': 'no url'},
+		]}
+		self._use_cfg(keenable_keyless=True)
+		post = self._patch('secator.ai.tools.web.requests.post', return_value=self._Resp(payload))
+		results, engine = web.web_search('q', mode='links', max_results=3)
+		self.assertEqual(engine, 'keenable')
+		self.assertEqual(post.call_args.args[0], web._KEENABLE_PUBLIC_URL)
+		headers = post.call_args.kwargs['headers']
+		self.assertEqual(headers['X-Keenable-Title'], 'secator')
+		self.assertNotIn('X-API-Key', headers)
+		self.assertEqual(post.call_args.kwargs['json'], {'query': 'q', 'max_results': 3})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['url'], 'https://a.example/')
+		self.assertEqual(len(results[0]['snippet']), web._KEENABLE_SNIPPET_CHARS)
+
+	def test_key_uses_keyed_endpoint(self):
+		from secator.ai.tools import web
+		payload = {'results': [{'title': 'A', 'url': 'https://a.example/', 'snippet': 'body'}]}
+		self._use_cfg(keenable_api_key='k-123')
+		post = self._patch('secator.ai.tools.web.requests.post', return_value=self._Resp(payload))
+		results, engine = web.web_search('q', mode='answer')
+		self.assertEqual(engine, 'keenable')
+		self.assertEqual(post.call_args.args[0], web._KEENABLE_URL)
+		self.assertEqual(post.call_args.kwargs['headers']['X-API-Key'], 'k-123')
+		self.assertEqual(results[0]['snippet'], 'body')
+
+	def test_tavily_stays_first_for_answer(self):
+		from secator.ai.tools import web
+		tav = [{'_type': 'web_answer', 'title': 'Synthesized answer', 'url': '', 'snippet': 'x'}]
+		self._use_cfg(tavily_api_key='tv', keenable_keyless=True)
+		self._patch('secator.ai.tools.web.tavily_search', return_value=tav)
+		kn = self._patch('secator.ai.tools.web.keenable_search')
+		_, engine = web.web_search('q', mode='answer')
+		self.assertEqual(engine, 'tavily')
+		kn.assert_not_called()
+
+	def test_error_falls_back_to_duckduckgo(self):
+		from secator.ai.tools import web
+		ddg = [{'_type': 'web_result', 'title': 'D', 'url': 'https://d.example/', 'snippet': ''}]
+		self._use_cfg(keenable_keyless=True)
+		self._patch('secator.ai.tools.web.requests.post', side_effect=RuntimeError('boom'))
+		self._patch('secator.ai.tools.web.duckduckgo_search', return_value=ddg)
+		results, engine = web.web_search('q', mode='links')
+		self.assertEqual(engine, 'duckduckgo')
+		self.assertEqual(results, ddg)
+
+	def test_exploit_mode_never_uses_keenable(self):
+		from secator.ai.tools import web
+		self._use_cfg(keenable_keyless=True)
+		self._patch('secator.ai.tools.web.sploitus_search', return_value=[])
+		kn = self._patch('secator.ai.tools.web.keenable_search')
+		_, engine = web.web_search('q', mode='exploit')
+		self.assertEqual(engine, 'sploitus')
+		kn.assert_not_called()
+
+
 if __name__ == "__main__":
 	unittest.main()

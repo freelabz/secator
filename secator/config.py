@@ -404,6 +404,11 @@ class WebSearchConfig(StrictModel):
 	# When empty, web_search uses the keyless DuckDuckGo/Sploitus engines only.
 	# Env: SECATOR_ADDONS_AI_WEB_SEARCH_TAVILY_API_KEY.
 	tavily_api_key: Secret = ''
+	# Optional Keenable search engine (opt-in). Used for 'answer' (after Tavily) and 'links'
+	# before DuckDuckGo only when a key is set or keenable_keyless is true; off by default.
+	# Env: SECATOR_ADDONS_AI_WEB_SEARCH_KEENABLE_API_KEY / ..._KEENABLE_KEYLESS.
+	keenable_api_key: Secret = ''
+	keenable_keyless: bool = False
 
 
 class AiAddon(StrictModel):
