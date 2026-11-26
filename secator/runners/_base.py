@@ -14,7 +14,7 @@ from rich.errors import MarkupError as RichMarkupError
 import humanize
 from celery.result import allow_join_result
 
-from secator.definitions import ADDONS_ENABLED, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, PATH, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
@@ -24,6 +24,7 @@ from secator.report import Report
 from secator.rich import console, console_stdout, live_is_active
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.scope import as_scope_list, host_in_scope
+from secator.sources import is_git_url
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, get_workspace_folder_name
@@ -1592,6 +1593,8 @@ class Runner:
 		for _input in list(inputs):
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
+				if PATH in self.config.input_types and is_git_url(_input):
+					continue  # Command._clone_git_inputs clones it (unless the task fetches URLs itself)
 				runner_name = format_runner_name(self)
 				message = f'Target [bold blue]{_input}[/] skipped ([bold]{input_type}[/] not supported by {runner_name})'
 				info = Info(message=message)

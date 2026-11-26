@@ -9,19 +9,22 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 
+from dataclasses import fields
 from time import time
 
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED, PATH, URL
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
 from secator.runners._helpers import apply_task_overrides, chunking_needed, get_task_overrides
+from secator.sources import clone_git_repo, is_git_url
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -263,6 +266,11 @@ class Command(Runner):
 
 		# Apply task-specific config overrides (tasks.overrides.<task>.<attr>).
 		apply_task_overrides(self)
+
+		# Clone git URL inputs of a path-only task (removed when the runner finalizes)
+		self.clone_folder = None
+		self.cloned_inputs = {}
+		self._clone_git_inputs()
 
 		# Build command input
 		self._build_cmd_input()
@@ -1432,6 +1440,48 @@ class Command(Runner):
 					val = shlex.quote(str(val))
 				opts_str += f'{opt_name} {val} '
 		return opts_str.strip()
+
+	def _clone_git_inputs(self):
+		"""Replace each git URL input of a path task that can't fetch URLs itself by a shallow local clone.
+
+		Skipped when the command won't run here: dry run, invalid inputs, or a run split into chunks
+		(each chunk clones its own input). A failed clone is an error that stops the task.
+		"""
+		if PATH not in (self.input_types or []) or URL in self.input_types or self.dry_run:
+			return
+		urls = [i for i in self.inputs if is_git_url(i)]
+		# Same chunking decision as celery.run_command, which builds this runner then chunks it.
+		if not urls or not self.inputs_valid or self.errors_count or self.needs_chunking(sync=not IN_WORKER):
+			return
+		self.clone_folder = tempfile.mkdtemp(dir=f'{self.reports_folder}/.inputs')
+		for url in urls:
+			try:
+				path = clone_git_repo(url, tempfile.mkdtemp(dir=self.clone_folder))
+			except (OSError, subprocess.SubprocessError) as e:
+				self.add_result(Error(message=f'Could not clone {url}: {getattr(e, "stderr", None) or e}'))
+				return
+			self.inputs[self.inputs.index(url)] = path
+			self.cloned_inputs[path] = url
+		self.resolved_hooks['on_item'].insert(0, self._restore_git_urls)
+
+	@staticmethod
+	def _restore_git_urls(self, item):
+		"""Point the item's paths inside a clone (fields and ``extra_data`` values) back at the git URL."""
+		def restore(value):
+			if isinstance(value, dict):
+				return {k: restore(v) for k, v in value.items()}
+			if isinstance(value, str):
+				for path, url in self.cloned_inputs.items():
+					value = value.replace(path, url)
+			return value
+		for field in fields(item):
+			setattr(item, field.name, restore(getattr(item, field.name)))
+		return item
+
+	def _finalize(self):
+		if self.clone_folder:
+			shutil.rmtree(self.clone_folder, ignore_errors=True)
+		super()._finalize()
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a

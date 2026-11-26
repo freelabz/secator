@@ -295,7 +295,7 @@ def abandon_task(name, targets, opts, delivery_count=None):
 		),
 		_source=task.unique_name,
 	))
-	task.mark_completed()
+	task._finalize()  # marks it completed and removes any input checkout built by its init
 	return []
 
 
