@@ -57,7 +57,7 @@ def clone_git_repo(url, folder, token=None, timeout=300):
 		config[f'http.https://{origin.netloc}/.extraHeader'] = f'Authorization: Basic {credentials}'
 	# Never prompt (credentials, ssh host key): fail instead of waiting on stdin.
 	env = {
-		**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_SSH_COMMAND': 'ssh -o BatchMode=yes',
+		**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_SSH_COMMAND': f"{os.environ.get('GIT_SSH_COMMAND', 'ssh')} -o BatchMode=yes",  # noqa: E501
 		'GIT_ALLOW_PROTOCOL': 'http:https:ssh:git',
 	}
 	env['GIT_CONFIG_COUNT'] = str(len(config))
