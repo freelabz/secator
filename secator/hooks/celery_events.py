@@ -10,9 +10,12 @@ the task to publish, e.g.:
 	SECATOR_ADDONS_CELERY_EVENTS_RUN_END_TASK=myapp.tasks.on_run_end
 	SECATOR_ADDONS_CELERY_EVENTS_QUEUE=post-run   # optional, default routing otherwise
 
-The task receives keyword arguments only: ``runner_type``, ``runner_id``, ``name``, ``status``,
-``workspace_id`` and ``end_time`` (ISO 8601). Delivery is best effort: the run has already
-finished, so a broker error is logged at debug level and never fails or alters the run.
+The task receives keyword arguments only: ``runner_type``, ``runner_id``, ``runner_chunk_id``,
+``name``, ``status``, ``workspace_id`` and ``end_time`` (ISO 8601). ``runner_chunk_id`` is the
+run's ``{type}_chunk_id`` when it has one (a task spawned by the ``ai`` task): the mongodb store
+keys such a run on it, so look the run up by ``runner_chunk_id or runner_id``. Delivery is best
+effort: the run has already finished, so a broker error is logged at debug level and never fails
+or alters the run.
 """
 from secator.config import CONFIG
 from secator.runners import Scan, Task, Workflow
@@ -33,6 +36,9 @@ def run_end_payload(runner):
 	return {
 		'runner_type': runner_type,
 		'runner_id': runner.context.get(f'{runner_type}_id'),
+		# A task spawned by the `ai` task carries its own chunk id, which the mongodb store keys its
+		# doc on (its `task_id` is never stored there), while other stores key it on `runner_id`.
+		'runner_chunk_id': runner.context.get(f'{runner_type}_chunk_id'),
 		'name': runner.config.name,
 		'status': runner.status,
 		'workspace_id': runner.context.get('workspace_id'),

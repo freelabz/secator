@@ -109,6 +109,31 @@ class TestCeleryEventsDriver(unittest.TestCase):
 				self.assertEqual(payload['status'], 'SUCCESS')
 				self.assertTrue(payload['end_time'])
 
+	def test_top_level_run_has_no_chunk_id(self):
+		self._configure()
+		self._run('json')
+		self.assertIsNone(self.send_task.call_args.kwargs['kwargs']['runner_chunk_id'])
+
+	def test_payload_names_the_mongodb_doc_of_an_ai_spawned_task(self):
+		# A task the `ai` task spawns carries its own task_chunk_id (no `chunk` run opt). The
+		# mongodb store keys its doc on that id, never on task_id, so the event must carry it.
+		if importlib.util.find_spec('pymongo') is None:
+			self.skipTest('mongodb driver needs the optional pymongo extra')
+		from secator.hooks import mongodb
+		self._configure()
+		written = []
+		client = mock.MagicMock()
+		client.main.__getitem__.return_value.update_one.side_effect = (
+			lambda query, update, upsert=False: written.append(str(query['_id'])))
+		mock.patch.object(mongodb, 'get_mongodb_client', return_value=client).start()
+		context = {'drivers': ['mongodb', 'celery_events'], 'workspace_id': 'ws1',
+			'task_id': 'run-scope-uuid', 'task_chunk_id': 'child-uuid'}
+		task = _build_task(context=context)
+		task.mark_completed()
+		payload = self.send_task.call_args.kwargs['kwargs']
+		self.assertEqual(written[-1], payload['runner_chunk_id'])
+		self.assertNotEqual(written[-1], payload['runner_id'])
+
 	def test_no_op_when_unconfigured_on_every_store_driver(self):
 		self._configure(task_name='')
 		for store in STORE_DRIVERS:
