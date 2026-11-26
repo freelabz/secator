@@ -278,9 +278,10 @@ def abandon_task(name, targets, opts, delivery_count=None):
 		list: Topology-only (empty) — the Error lives in the store, not the payload.
 	"""
 	opts['sync'] = True
-	# Build the runner on the context earlier deliveries persisted (e.g. the ai task's token
-	# counters), as its updates store its context in place of the persisted one. The message
-	# context wins on shared keys: it only carries what the dispatcher and this delivery set.
+	# When the message carries the runner id (a pre-created runner doc), build the runner on the
+	# context earlier deliveries persisted (e.g. the ai task's token counters), as its updates
+	# store its context in place of the persisted one. The message context wins on shared keys:
+	# it only carries what the dispatcher and this delivery set.
 	context = opts.get('context', {})
 	runner_id = context.get('task_chunk_id') or context.get('task_id')
 	if runner_id:
@@ -302,7 +303,7 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	task.add_result(Error(
 		message=(
 			f'Task {name} abandoned after {attempts} '
-			f'(retry cap: {task_cls.max_retries}; worker repeatedly lost — likely OOM kill, '
+			f'(retry cap: {task_cls.max_retries}; worker lost — likely OOM kill, '
 			'eviction, or the worker exiting before the task was acknowledged).'
 		),
 		_source=task.unique_name,
@@ -339,6 +340,8 @@ def run_command(self, results, name, targets, opts={}):
 		console.print(Info(message=f'Task {name} was revoked before it started, skipping'))
 		raise Ignore()
 
+	task_cls = Task.get_task_class(name)
+
 	# Set routing key in context
 	if IN_WORKER:
 		quiet = not CONFIG.cli.worker_command_verbose
@@ -362,7 +365,7 @@ def run_command(self, results, name, targets, opts={}):
 		# after the task class's max_retries (default: task_max_retries), so a task that OOMs every
 		# run can't loop forever and block the surrounding chord/workflow. reject_on_worker_lost is
 		# what actually re-queues the task on abrupt worker death, so gate on it too (not just late acks).
-		max_retries = Task.get_task_class(name).max_retries
+		max_retries = task_cls.max_retries
 		if (
 			max_retries != -1
 			and CONFIG.celery.task_acks_late
@@ -382,7 +385,6 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Initialize task
 	sync = not IN_WORKER
-	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	chunk_it = task.needs_chunking(sync)
 	task.has_children = chunk_it
