@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.57.1](https://github.com/freelabz/secator/compare/v0.57.0...v0.57.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **ai:** do not redeliver an ai task lost with its worker ([#1759](https://github.com/freelabz/secator/issues/1759)) ([57b46a8](https://github.com/freelabz/secator/commit/57b46a808c14a059f3e39ad3e6cc0490adcd2636))
+* **config:** validate and coerce SECATOR_* environment overrides ([#1766](https://github.com/freelabz/secator/issues/1766)) ([80c29bf](https://github.com/freelabz/secator/commit/80c29bf45fa183a71a76e95b6a35e8fab6a3f11c))
+* **config:** wire config options that had no effect ([#1768](https://github.com/freelabz/secator/issues/1768)) ([926af7e](https://github.com/freelabz/secator/commit/926af7e75b862eee90658f80c1fe5c4b23ce2560))
+* **output_types:** handle None value and match in Tag.__rich__ ([#1761](https://github.com/freelabz/secator/issues/1761)) ([fd924af](https://github.com/freelabz/secator/commit/fd924af35772aa0adf06f1ac371137acbe101cd2))
+* **output:** render bracketed text literally in warnings and escaped strings ([#1758](https://github.com/freelabz/secator/issues/1758)) ([2631352](https://github.com/freelabz/secator/commit/26313528c316d9831f68e5bbf2ef81a9d960dd80))
+* **tui:** show web_search and fetch_url calls in the ai TUI ([#1764](https://github.com/freelabz/secator/issues/1764)) ([1960f7b](https://github.com/freelabz/secator/commit/1960f7b2489b344022a7747babbd992a6e45f386))
+
 ## [0.57.0](https://github.com/freelabz/secator/compare/v0.56.1...v0.57.0) (2026-11-26)
 
 
