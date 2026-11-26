@@ -279,14 +279,16 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	"""
 	opts['sync'] = True
 	# Build the runner on the context earlier deliveries persisted (e.g. the ai task's token
-	# counters): its updates store its context in place of the persisted one.
+	# counters), as its updates store its context in place of the persisted one. The message
+	# context wins on shared keys: it only carries what the dispatcher and this delivery set.
 	context = opts.get('context', {})
 	runner_id = context.get('task_chunk_id') or context.get('task_id')
-	try:
-		persisted = runner_id and QueryEngine(context.get('workspace_id'), context=context).get_runner(runner_id, 'task')
-		opts['context'] = {**((persisted or {}).get('context') or {}), **context}
-	except Exception as e:  # noqa: BLE001 - abandoning must not fail, or the chord hangs
-		debug(f'abandon: failed to load the persisted context of {name}: {e}', sub='celery.state')
+	if runner_id:
+		try:
+			persisted = QueryEngine(context.get('workspace_id'), context=context).get_runner(runner_id, 'task') or {}
+			opts['context'] = {**(persisted.get('context') or {}), **context}
+		except Exception as e:  # noqa: BLE001 - abandoning must not fail, or the chord hangs
+			debug(f'abandon: failed to load the persisted context of {name}: {e}', sub='celery.state')
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	# An abandoned task spawned no children. A task that is a node of a workflow/scan
@@ -296,7 +298,7 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	# zero child docs, and any consumer listing child runners shows the failed task as "waiting" forever.
 	task.has_children = False
 	task.mark_started()
-	if name == 'ai':  # abandoned on its first redelivery (see run_command)
+	if name == 'ai':  # abandoned on its first redelivery (see run_command): resumed, not retried
 		message = 'Worker lost; send a message to resume.'
 	else:
 		attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
