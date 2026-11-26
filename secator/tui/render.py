@@ -126,8 +126,10 @@ def message_text(item, d: dict):
 			if isinstance(s, str):
 				text = _from_markup(s)
 				if text is None and isinstance(getattr(item, "message", None), str):
-					# not markup in the message (e.g. code from a tool): keep the tag, escape the text
-					text = _from_markup(dataclasses.replace(item, message=escape(item.message)).__rich__())
+					# not markup in the message (e.g. code from a tool): keep the tag, escape the text.
+					# A Warning keeps its unstripped message in message_color.
+					msg = getattr(item, "message_color", None) or item.message
+					text = _from_markup(dataclasses.replace(item, message=escape(msg)).__rich__())
 				return text if text is not None else Text(s)
 			return s
 		except Exception:  # noqa: BLE001

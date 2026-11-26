@@ -811,7 +811,7 @@ class TUIApp(App):
 	def _set_findings_title(self, total, note: str = "") -> None:
 		label = "Findings" if total is None else f"Findings ({total})"
 		if note:
-			label += f"  [dim]{note}[/]"
+			label += f"  [dim]{escape(note)}[/]"
 		self.query_one("#findings-title", Static).update(Text.from_markup(label))
 
 	def _add_finding_options(self, options) -> None:

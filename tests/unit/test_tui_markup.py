@@ -66,14 +66,19 @@ def test_tool_output_literal():
 
 def test_info_warning_error_messages_literal():
 	# a message's VALID markup is still applied (as on the console); text that is not markup shows as is
-	async def feed(app, text):
+	async def info(app, text):
 		await app._render(Info(message=f"read {text}", _source="ai"))
-		if "[/]" not in text:   # Warning() itself rejects a stray closing tag
-			await app._render(Warning(message=f"careful {text}", _source="ai"))
+
+	async def warning(app, text):
+		await app._render(Warning(message=f"careful {text}", _source="ai"))
+
+	async def error(app, text):
 		await app._render({"_type": "error", "message": f"failed {text}", "_source": "ai"})
-	screens = _show(feed, NOT_MARKUP)
+	screens = _show(info, NOT_MARKUP)
 	_assert_literal(screens)
 	assert all("[INF]" in s for s in screens.values())   # the item's own markup still renders
+	_assert_literal(_show(warning, [t for t in NOT_MARKUP if "[/]" not in t]))   # Warning() rejects a stray [/]
+	_assert_literal(_show(error, NOT_MARKUP))
 
 
 # rich_escape() turns "]" into a "\\]" that markup keeps, so the closing bracket shows as "\\]"
