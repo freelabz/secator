@@ -20,7 +20,7 @@ from secator.tui.model_view import (
 from secator.tui.render import finding_text, markdown_text
 from secator.tui.widgets import (
 	ActionPanel, ConversationScroll, HandbackPanel, ModelMessagePanel, RunnerPanel, SelectableStatic, SlashCommand,
-	SubagentRow)
+	SubagentRow, ToolCallPanel)
 
 
 def _finding_sig(d: dict) -> tuple:
@@ -44,6 +44,7 @@ _ACTION_VERBS = {
 	"mark_vuln_exploited": "Exploited",
 	"mark_vuln_exploit_failed": "Failed to exploit",
 	"mark_vuln_false_positive": "Marked false positive",
+	"mark_vuln_fixed": "Marked fixed",
 }
 
 
@@ -450,6 +451,16 @@ class AITUI(TUIApp):
 			if content:
 				await self._append(SelectableStatic(markdown_text(content), classes="ai"))
 			self._set_status("stopped", False)
+		elif at and at == (d.get("_context") or {}).get("tool_call_name"):
+			# A tool's own display item (its ai_type is the tool name, e.g. web_search, fetch_url)
+			# with no dedicated card above: show it as the finished tool card the resume replay
+			# uses, so the call is not silently dropped. A short content (a search query) titles
+			# the card. Loop-internal items a subagent emits carry the subagent's call name, never
+			# their own ai_type, so they stay hidden.
+			ed = {k: v for k, v in (d.get("extra_data") or {}).items() if k != "ai_query_result"}
+			if content and len(content) <= 80 and "\n" not in content:
+				ed = {"description": content, **ed}
+			await self._append(ToolCallPanel(at, ed, content))
 
 
 def _tui_feed(self, item):
