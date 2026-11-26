@@ -8,10 +8,10 @@ workflow output later).
 import dataclasses
 import re
 
-from rich.default_styles import DEFAULT_STYLES
 from rich.markup import escape
-from rich.style import Style
 from rich.text import Text
+
+from secator.utils import rich_from_markup
 
 
 def markdown_text(content: str):
@@ -48,24 +48,6 @@ def flatten_renderable(renderable, width: int, console=None) -> "tuple[Text, int
 			if not seg.control:
 				text.append(seg.text, seg.style)
 	return text, len(lines)
-
-
-def _from_markup(s: str):
-	"""``s`` parsed as Rich markup, or None if it is malformed or names an unknown style.
-
-	Bracketed text that is not markup (e.g. code like ``[e.__cause__, e.__context__]``)
-	parses as a style tag; the console drops an unknown style, but Textual raises on it at
-	render time and the whole app crashes. Checking every style here lets callers fall back
-	to literal text instead.
-	"""
-	try:
-		text = Text.from_markup(s)
-		for span in text.spans:
-			if isinstance(span.style, str) and span.style not in DEFAULT_STYLES:
-				Style.parse(span.style)
-	except Exception:  # noqa: BLE001
-		return None
-	return text
 
 
 def command_text(cmd: str) -> Text:
@@ -108,7 +90,7 @@ def finding_text(item, d: dict) -> Text:
 		try:
 			s = obj.__rich__()
 			if isinstance(s, str):
-				text = _from_markup(s)   # stray markup in target-controlled fields: show literally
+				text = rich_from_markup(s)   # stray markup in target-controlled fields: show literally
 				return text if text is not None else Text(s)
 			return s
 		except Exception:  # noqa: BLE001
@@ -124,18 +106,18 @@ def message_text(item, d: dict):
 		try:
 			s = item.__rich__()
 			if isinstance(s, str):
-				text = _from_markup(s)
+				text = rich_from_markup(s)
 				if text is None and isinstance(getattr(item, "message", None), str):
 					# not markup in the message (e.g. code from a tool): keep the tag, escape the text.
-					# A Warning keeps its unstripped message in message_color.
+					# A Warning keeps its markup (or its escaped literal message) in message_color.
 					msg = getattr(item, "message_color", None) or item.message
-					text = _from_markup(dataclasses.replace(item, message=escape(msg)).__rich__())
+					text = rich_from_markup(dataclasses.replace(item, message=escape(msg)).__rich__())
 				return text if text is not None else Text(s)
 			return s
 		except Exception:  # noqa: BLE001
 			pass
 	msg = str(d.get("message", ""))
-	text = _from_markup(msg)
+	text = rich_from_markup(msg)
 	return text if text is not None else Text(msg)
 
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import strip_rich_markup, rich_to_ansi, rich_escape as _s
+from secator.utils import rich_from_markup, rich_to_ansi, rich_escape as _s
 
 
 @dataclass
@@ -22,8 +22,11 @@ class Warning(OutputType):
 
 	def __post_init__(self):
 		super().__post_init__()
-		self.message_color = self.message
-		self.message = strip_rich_markup(self.message)
+		text = rich_from_markup(self.message)
+		if text is None:  # not markup (e.g. code like '[e.__cause__]' or a stray '[/]'): show it literally
+			self.message_color = _s(self.message)
+		else:
+			self.message_color, self.message = self.message, text.plain
 
 	def __rich__(self):
 		source = (self._context or {}).get('node_id') or self._source

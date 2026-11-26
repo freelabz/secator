@@ -1,7 +1,13 @@
 import unittest
+from rich.text import Text
 from secator.output_types import Vulnerability
 from secator.output_types.error import Error
 from secator.output_types.warning import Warning
+from secator.utils import rich_escape
+
+# text that is not markup, or markup to show as is
+NOT_MARKUP = [']', r'\]', '[/]', '[bold]', 'arr[0]', "[e.__cause__, e.__context__, getattr(e, 'reason', None)]"]
+
 
 class TestOutputTypes(unittest.TestCase):
 	def test_merge_with(self):
@@ -120,6 +126,11 @@ class TestErrorRich(unittest.TestCase):
 		assert 'workflow_node' in rich_str
 		assert 'nmap' not in rich_str
 
+	def test_error_from_exception_message_literal(self):
+		for text in NOT_MARKUP:
+			err = Error.from_exception(ValueError(text))
+			assert Text.from_markup(err.__rich__()).plain.startswith(f'[ERR] ValueError: {text}')
+
 
 class TestWarningRich(unittest.TestCase):
 
@@ -139,6 +150,24 @@ class TestWarningRich(unittest.TestCase):
 		warn = Warning(message='watch out')
 		rich_str = warn.__rich__()
 		assert 'watch out' in rich_str
+
+	def test_warning_not_markup_rendered_literally(self):
+		for text in [t for t in NOT_MARKUP if t != '[bold]']:   # '[bold]' is valid markup: applied
+			warn = Warning(message=f'careful {text}', _source='ai')
+			assert warn.message == f'careful {text}'
+			assert Text.from_markup(warn.__rich__()).plain == f'[WRN] ai careful {text}'
+
+	def test_warning_keeps_valid_markup(self):
+		warn = Warning(message='[bold]careful[/] now')
+		assert warn.message == 'careful now'
+		assert Text.from_markup(warn.__rich__()).spans[-1].style == 'bold'
+
+
+class TestRichEscape(unittest.TestCase):
+
+	def test_escaped_text_renders_as_input(self):
+		for text in NOT_MARKUP + ['a [/] b'] + ['trailing ' + '\\' * n for n in (1, 2, 3)]:
+			assert Text.from_markup(f'[dim]{rich_escape(text)}[/]').plain == text
 
 
 class TestFindingVerdictFields(unittest.TestCase):

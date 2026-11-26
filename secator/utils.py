@@ -508,18 +508,26 @@ def rich_to_ansi(text):
 		return text
 
 
-def strip_rich_markup(text):
-	"""Strip rich markup from text.
+def rich_from_markup(s):
+	"""``s`` parsed as Rich markup, or None if it is malformed or names an unknown style.
 
-	Args:
-		text (str): Text.
-
-	Returns:
-		str: Text without rich markup.
+	Bracketed text that is not markup (e.g. code like ``[e.__cause__, e.__context__]``)
+	parses as a style tag; the console drops an unknown style, but Textual raises on it at
+	render time and the whole app crashes. Checking every style here lets callers fall back
+	to literal text instead.
 	"""
+	from rich.default_styles import DEFAULT_STYLES
+	from rich.style import Style
 	from rich.text import Text
 
-	return Text.from_markup(text).plain
+	try:
+		text = Text.from_markup(s)
+		for span in text.spans:
+			if isinstance(span.style, str) and span.style not in DEFAULT_STYLES:
+				Style.parse(span.style)
+	except Exception:  # noqa: BLE001
+		return None
+	return text
 
 
 def rich_escape(obj):
@@ -532,7 +540,9 @@ def rich_escape(obj):
 		any: Initial object, or escaped Rich string.
 	"""
 	if isinstance(obj, str):
-		return obj.replace('[', r'\[').replace(']', r'\]').replace(r'\[/', r'\[\/')
+		from rich.markup import escape
+		text = obj.rstrip('\\')   # escape() leaves a run of 2+ trailing backslashes as is: double the whole run
+		return escape(text) + '\\' * 2 * (len(obj) - len(text))
 	return obj
 
 
