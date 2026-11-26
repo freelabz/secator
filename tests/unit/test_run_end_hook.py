@@ -115,8 +115,9 @@ class TestCeleryEventsDriver(unittest.TestCase):
 		self.assertIsNone(self.send_task.call_args.kwargs['kwargs']['runner_chunk_id'])
 
 	def test_payload_names_the_mongodb_doc_of_an_ai_spawned_task(self):
-		# A task the `ai` task spawns carries its own task_chunk_id (no `chunk` run opt). The
-		# mongodb store keys its doc on that id, never on task_id, so the event must carry it.
+		# The command run of a task the `ai` task spawned: it carries the task's own task_chunk_id
+		# (no `chunk` run opt) and runs top-level. The mongodb store keys its doc on that id, never
+		# on task_id, so the event must carry it.
 		if importlib.util.find_spec('pymongo') is None:
 			self.skipTest('mongodb driver needs the optional pymongo extra')
 		from secator.hooks import mongodb
@@ -133,6 +134,26 @@ class TestCeleryEventsDriver(unittest.TestCase):
 		payload = self.send_task.call_args.kwargs['kwargs']
 		self.assertEqual(written[-1], payload['runner_chunk_id'])
 		self.assertNotEqual(written[-1], payload['runner_id'])
+
+	def test_payload_keeps_the_api_doc_id_of_an_ai_spawned_task(self):
+		# The api store keys the same run on task_id (the id its POST returned): runner_id stays it.
+		from secator.hooks import api
+		self._configure()
+		mock.patch.object(api, 'resolve_workspace', return_value=('ws1', 'ws')).start()
+		requests = []
+
+		def fake_request(method, endpoint, data=None):
+			requests.append((method, endpoint))
+			return {'id': '0' * 24}
+		mock.patch.object(api, '_make_request', side_effect=fake_request).start()
+		context = {'drivers': ['api', 'celery_events'], 'workspace_id': 'ws1',
+			'task_id': 'run-scope-uuid', 'task_chunk_id': 'child-uuid'}
+		task = _build_task(context=context)
+		task.mark_completed()
+		self.assertEqual(requests[0][0], 'POST')
+		payload = self.send_task.call_args.kwargs['kwargs']
+		self.assertEqual(payload['runner_id'], '0' * 24)
+		self.assertEqual(payload['runner_chunk_id'], 'child-uuid')
 
 	def test_no_op_when_unconfigured_on_every_store_driver(self):
 		self._configure(task_name='')
