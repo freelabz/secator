@@ -26,8 +26,8 @@ class TestWorkerCommandVerbose(unittest.TestCase):
 		run_command.push_request(id='verbose-test', delivery_info={'routing_key': 'q'}, is_eager=True)
 		try:
 			with mock.patch.object(celery_mod, 'IN_WORKER', True), \
-					mock.patch.object(CONFIG.celery, 'worker_command_verbose', verbose), \
-					mock.patch.object(CONFIG.celery, 'task_acks_late', False), \
+					mock.patch.dict(CONFIG.celery, {'worker_command_verbose': verbose}), \
+					mock.patch.dict(CONFIG.celery, {'task_acks_late': False}), \
 					mock.patch.object(celery_mod.Task, 'get_task_class', return_value=Stub):
 				with self.assertRaises(RuntimeError):
 					run_command.run([], 'stub', ['example.com'], {'context': {}})
@@ -78,7 +78,7 @@ class TestSchemaKeys(unittest.TestCase):
 		from secator.ai import guardrails
 		config = Config.parse({'addons': {'ai': {'exec_wrappers': ['firejail']}}})
 		self.assertEqual(config.addons.ai.exec_wrappers, ['firejail'])
-		with mock.patch.object(CONFIG.addons.ai, 'exec_wrappers', ['firejail']):
+		with mock.patch.dict(CONFIG.addons.ai, {'exec_wrappers': ['firejail']}):
 			wrappers = guardrails._exec_wrappers()
 		self.assertIn('firejail', wrappers)
 		self.assertTrue(guardrails.EXEC_WRAPPERS.issubset(wrappers))
@@ -103,7 +103,7 @@ class TestCveCacheDir(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as tmp:
 			cve_id = 'CVE-2099-0001'
 			(Path(tmp) / f'{cve_id}.json').write_text('{"name": "CVE-2099-0001", "matched_at": "x", "id": "CVE-2099-0001"}')
-			with mock.patch.object(CONFIG.dirs, 'cves', Path(tmp)):
+			with mock.patch.dict(CONFIG.dirs, {'cves': Path(tmp)}):
 				vuln = CVEProvider.lookup_local_cve(cve_id)
 		self.assertIsNotNone(vuln)
 		self.assertEqual(vuln.id, cve_id)
@@ -119,7 +119,7 @@ class TestHttpxResponseCleanup(unittest.TestCase):
 			index.write_text('x')
 			runner = mock.Mock(reports_folder=tmp)
 			runner.get_opt_value.side_effect = lambda name: opts.get(name)
-			with mock.patch.object(CONFIG.http, 'store_responses', True):
+			with mock.patch.dict(CONFIG.http, {'store_responses': True}):
 				httpx.on_end(runner)
 			return index.exists()
 
@@ -147,14 +147,14 @@ class TestGcsCredentials(unittest.TestCase):
 		self.gcs._gcs_client = None
 
 	def test_credentials_path(self):
-		with mock.patch.object(CONFIG.addons.gcs, 'credentials_path', '/tmp/sa.json'), \
+		with mock.patch.dict(CONFIG.addons.gcs, {'credentials_path': '/tmp/sa.json'}), \
 				mock.patch.object(self.gcs.storage, 'Client') as client:
 			self.gcs.get_gcs_client()
 		client.from_service_account_json.assert_called_once_with('/tmp/sa.json')
 		client.assert_not_called()
 
 	def test_default_credentials(self):
-		with mock.patch.object(CONFIG.addons.gcs, 'credentials_path', ''), \
+		with mock.patch.dict(CONFIG.addons.gcs, {'credentials_path': ''}), \
 				mock.patch.object(self.gcs.storage, 'Client') as client:
 			self.gcs.get_gcs_client()
 		client.assert_called_once_with()
