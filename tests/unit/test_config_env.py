@@ -126,6 +126,11 @@ class TestOverrideValidation(unittest.TestCase):
 		config = _fresh({'SECATOR_DIRS_WORDLISTS': '~/my-wordlists'})
 		self.assertEqual(config.dirs.wordlists, Path.home() / 'my-wordlists')
 
+	def test_unexpandable_directory_rejected(self):
+		config, printed = self._notices({'SECATOR_DIRS_WORDLISTS': '~secator_no_such_user_xyz/wordlists'})
+		self.assertEqual(config.dirs.wordlists, config.dirs.data / 'wordlists')
+		self.assertIn('SECATOR_DIRS_WORDLISTS (override failed, ignored)', printed)
+
 	def test_dynamic_dict_key(self):
 		config = _fresh({'SECATOR_TASKS_OVERRIDES_NMAP_MAX_TIMEOUT': '500'})
 		self.assertEqual(config.tasks.overrides['nmap']['max_timeout'], 500)

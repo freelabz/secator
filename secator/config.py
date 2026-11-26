@@ -1240,7 +1240,10 @@ class Config(DotMap):
 			# Validate the overridden config with the schema: an invalid value (e.g. a non-integer for an
 			# int key, a non-JSON value for a dict key) is rejected, and a valid one is stored with the
 			# schema's coercion applied (e.g. '5' -> 5 for an int key, '~' expanded for a directory).
-			validated = Config.load(SecatorConfig, self._values(), print_errors=False)
+			try:
+				validated = Config.load(SecatorConfig, self._values(), print_errors=False)
+			except (RuntimeError, TypeError, ValueError):  # e.g. Path.expanduser() on '~unknown_user'
+				validated = None
 			if validated is None:
 				self[parts[0]] = snapshot
 				if print_errors:
