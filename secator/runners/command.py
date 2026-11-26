@@ -311,6 +311,9 @@ class Command(Runner):
 				'return_code': self.return_code,
 			}
 		)
+		cloned_inputs = getattr(self, 'cloned_inputs', {})  # toDict runs from hooks before __init__ sets it
+		if cloned_inputs:
+			res['targets'] = [cloned_inputs.get(i, i) for i in self.inputs]
 		return res
 
 	def needs_chunking(self, sync):

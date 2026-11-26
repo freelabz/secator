@@ -48,20 +48,24 @@ def clone_git_repo(url, folder, token=None, timeout=300):
 	the user name.
 	"""
 	url = url.removeprefix('git+')
-	path = os.path.join(folder, os.path.basename(url.rstrip('/')).removesuffix('.git') or 'repo')
+	name = os.path.basename(url.rstrip('/')).removesuffix('.git')
+	path = os.path.join(folder, name if name.strip('.') else 'repo')
 	config = {'http.followRedirects': 'false'}
 	origin = urlparse(url)
 	if token and origin.scheme == 'https':
 		credentials = b64encode((token if ':' in token else f'x-access-token:{token}').encode()).decode()
 		config[f'http.https://{origin.netloc}/.extraHeader'] = f'Authorization: Basic {credentials}'
-	# GIT_TERMINAL_PROMPT=0: fail instead of waiting for credentials on stdin.
-	env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_ALLOW_PROTOCOL': 'http:https:ssh:git'}
+	# Never prompt (credentials, ssh host key): fail instead of waiting on stdin.
+	env = {
+		**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_SSH_COMMAND': 'ssh -o BatchMode=yes',
+		'GIT_ALLOW_PROTOCOL': 'http:https:ssh:git',
+	}
 	env['GIT_CONFIG_COUNT'] = str(len(config))
 	for index, (key, value) in enumerate(config.items()):
 		env[f'GIT_CONFIG_KEY_{index}'] = key
 		env[f'GIT_CONFIG_VALUE_{index}'] = value
 	subprocess.run(
 		['git', 'clone', '--depth', '1', '--quiet', '--', url, path],
-		check=True, capture_output=True, text=True, timeout=timeout, env=env,
+		check=True, capture_output=True, text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL,
 	)
 	return path

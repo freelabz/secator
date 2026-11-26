@@ -16,7 +16,7 @@ from celery.result import allow_join_result
 
 from secator.definitions import ADDONS_ENABLED, PATH, STATE_COLORS
 from secator.celery_utils import CeleryData
-from secator.config import CONFIG, is_secret_key
+from secator.config import CONFIG
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
 )
@@ -360,9 +360,9 @@ class Runner:
 	@property
 	def resolved_opts(self):
 		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_') and k != 'env'}  # noqa: E501
-		sensitive = self.sensitive_opt_names
-		# Also redact undeclared credential opts by name (e.g. `git_token`, read by Command._clone_git_inputs).
-		return {k: (REDACTED_OPT_VALUE if v and (k in sensitive or is_secret_key(k)) else v) for k, v in opts.items()}
+		# git_token is read by Command._clone_git_inputs and declared on no task.
+		sensitive = self.sensitive_opt_names | {'git_token'}
+		return {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
 
 	@property
 	def resolved_print_opts(self):

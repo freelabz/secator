@@ -57,6 +57,7 @@ class TestCloneGitRepo(unittest.TestCase):
 		url = 'https://github.com/octocat/Hello-World.git'
 		self.assertEqual(argv, ['git', 'clone', '--depth', '1', '--quiet', '--', url, path])
 		self.assertEqual(env['GIT_TERMINAL_PROMPT'], '0')
+		self.assertEqual(env['GIT_SSH_COMMAND'], 'ssh -o BatchMode=yes')
 		self.assertEqual(env['GIT_ALLOW_PROTOCOL'], 'http:https:ssh:git')
 		self.assertEqual(config, {'http.followRedirects': 'false'})
 
@@ -139,6 +140,7 @@ class TestCloneGitInputs(unittest.TestCase):
 		self.assertEqual(clone.call_args.kwargs['token'], 'S3CR3T')
 		self.assertNotIn('S3CR3T', str(task.toDict()))
 		self.assertNotIn('S3CR3T', task.cmd)
+		self.assertEqual(task.toDict()['targets'], [REPO])
 
 	def test_dry_run_does_not_clone(self):
 		with mock.patch('secator.runners.command.clone_git_repo') as clone:
