@@ -321,6 +321,7 @@ class Runners(StrictModel):
 	threads: int = 50
 	prompt_timeout: int = 20
 	chunk_rate_limit: bool = True
+	show_subtasks: bool = False  # show non-chunk subtasks in the CLI progress panel of Celery runs
 
 
 class Security(StrictModel):
@@ -338,7 +339,7 @@ class HTTP(StrictModel):
 	socks5_proxy: str = ''
 	http_proxy: str = ''
 	store_responses: bool = True
-	response_max_size_bytes: int = 100000  # 100MB
+	response_max_size_bytes: int = 100000  # 100KB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
 	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
@@ -490,7 +491,11 @@ class AiAddon(StrictModel):
 	inline_max_targets: int = Field(default=10, ge=1)
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
-	encrypt_pii: bool = True
+	encrypt_pii: bool = True  # default of the ai task's --sensitive option
+	# Extra exec wrappers (e.g. `firejail`) whose wrapped command the AI shell guardrails
+	# unwrap and re-check, on top of the built-in ones (sudo, timeout, env, ...).
+	# Env: SECATOR_ADDONS_AI_EXEC_WRAPPERS.
+	exec_wrappers: List[str] = []
 	# Max subagents ONE AI run may spawn in total, across all its turns (on top of the
 	# per-turn fan-out cap). Past it, `run_subagent` is refused and the model is told to
 	# do the remaining work itself. 0 disables subagents. Env: SECATOR_ADDONS_AI_MAX_SUBAGENTS.

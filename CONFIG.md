@@ -203,6 +203,10 @@ celery:
   result_expires: 172800  # 2 days
 ```
 
+Celery's own `CELERY_BROKER_URL`, `CELERY_BROKER_READ_URL`, `CELERY_BROKER_WRITE_URL` and
+`CELERY_RESULT_BACKEND` variables take precedence over `celery.broker_url` / `celery.result_backend`
+inside the Celery app; secator prints a warning when one of them is set to a different value.
+
 ---
 
 ## cli
@@ -247,6 +251,7 @@ Settings that control how tasks, workflows, and scans execute.
 | `runners.threads` | `int` | `50` | Default thread count |
 | `runners.prompt_timeout` | `int` | `20` | Interactive prompt timeout (s) |
 | `runners.chunk_rate_limit` | `bool` | `true` | Rate-limit chunk processing |
+| `runners.show_subtasks` | `bool` | `false` | Show non-chunk subtasks in the CLI progress panel of Celery runs |
 | `runners.skip_cve_search` | `bool` | `false` | Skip CVE enrichment |
 | `runners.skip_cve_low_confidence` | `bool` | `false` | Skip low-confidence CVEs |
 | `runners.remove_duplicates` | `bool` | `false` | Deduplicate results |
@@ -561,7 +566,7 @@ Optional integrations and addon configurations.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `addons.gcs.bucket_name` | `string` | `''` | GCS bucket name |
-| `addons.gcs.credentials_path` | `string` | `''` | Path to credentials JSON |
+| `addons.gcs.credentials_path` | `string` | `''` | Path to a service account key JSON (default: application default credentials) |
 
 ### addons.mongodb — MongoDB
 
@@ -637,6 +642,7 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.ai.max_tokens_total` | `int` | `100000` | Max tokens per session |
 | `addons.ai.user_response_timeout` | `int` | `600` | User interaction timeout (s) |
 | `addons.ai.encrypt_pii` | `bool` | `true` | Encrypt PII before sending |
+| `addons.ai.exec_wrappers` | `list[str]` | `[]` | Extra exec wrappers whose wrapped command the AI shell guardrails re-check |
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |
 | `addons.ai.fetch_url_ssrf_protection` | `bool` | `false` | Strict SSRF mode for the AI `fetch_url` tool: resolve the host locally and require public IPs, plus a connected-peer check (DNS rebinding). Off = no address filtering (http/https only). Enable on shared or server-side deployments. |
 | `addons.ai.web_proxy_url` | `string` | `''` | Proxy for the AI's own web calls only (`fetch_url`, `web_search`): `http://`, `https://` or `socks5h://` (socks needs `pip install 'requests[socks]'`). `HTTP(S)_PROXY` env vars are ignored by `fetch_url`. In strict mode the target host must still resolve locally. |
@@ -802,6 +808,10 @@ security:
   force_source_install: false
   prompt_sudo_password: false
 ```
+
+`SECATOR_PACKAGE_MANAGER` (environment only) forces the system package manager used to install tool
+dependencies. It takes a known package manager name (`apt`, `pacman`, `apk`, `dnf`, `yum`, `zypper`,
+`brew`, `winget`, `choco`, `scoop`) or a full install command (e.g. `apt-get install -y`).
 
 ---
 

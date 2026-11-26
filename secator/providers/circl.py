@@ -51,7 +51,7 @@ class circl(CVEProvider):
 			if convert:
 				cve_info = circl.convert_cve_info(cve_info)
 				debug(f'{cve_id}: converted CVE info:\n{json.dumps(cve_info.toDict(), indent=2)}', sub='cve.circl', verbose=True)  # noqa: E501
-			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
+			cve_path = f'{CONFIG.dirs.cves}/{cve_id}.json'
 			with open(cve_path, 'w') as f:
 				if convert:
 					f.write(json.dumps(cve_info.toDict(), indent=2))

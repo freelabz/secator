@@ -900,14 +900,14 @@ class TestSessionContext(unittest.TestCase):
 		# Host block must NOT falsely claim the Alpine sandbox.
 		self.assertNotIn("this run's sandbox container", blk)
 
-	def test_package_manager_override_is_a_bare_string(self):
-		# get_distro_config returns a bare string when SECATOR_PACKAGE_MANAGER is set.
+	def test_package_manager_override(self):
+		# SECATOR_PACKAGE_MANAGER forces the package manager shown to the model.
 		from secator.ai import prompts
 		prompts._SHELL_ENV_CACHE.clear()
-		with patch("secator.installer.get_distro_config", return_value="apt"):
+		with patch.dict("os.environ", {"SECATOR_PACKAGE_MANAGER": "apk"}):
 			blk = prompts.build_session_context(isolated=False)
 		prompts._SHELL_ENV_CACHE.clear()
-		self.assertIn("Package manager: apt", blk)
+		self.assertIn("Package manager: apk — install packages with `apk add --no-cache <pkg>`.", blk)
 
 	# --- sudo status branches (no real sudo call) ---
 

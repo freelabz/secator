@@ -24,7 +24,12 @@ def get_gcs_client():
 	"""Get or create GCS client"""
 	global _gcs_client
 	if _gcs_client is None:
-		_gcs_client = storage.Client()
+		credentials_path = CONFIG.addons.gcs.credentials_path
+		if credentials_path:
+			# Explicit service account key file; otherwise use application default credentials.
+			_gcs_client = storage.Client.from_service_account_json(str(Path(credentials_path).expanduser()))
+		else:
+			_gcs_client = storage.Client()
 	return _gcs_client
 
 
