@@ -242,3 +242,36 @@ class TestUrlIsRoot(unittest.TestCase):
 			'http://example.com/#top',
 		]:
 			self.assertFalse(Url(url).is_root, url)
+
+
+class TestTagRich(unittest.TestCase):
+
+	def test_none_value_renders_without_type_error(self):
+		from rich.text import Text
+		from secator.output_types import Tag
+		tag = Tag(name='missing-value', value=None, match='https://example.com')
+		markup = tag.__rich__()
+		plain = Text.from_markup(markup).plain
+		self.assertIn('missing-value', plain)
+		self.assertIn('https://example.com', plain)
+		self.assertNotIn('None', plain)
+
+	def test_none_value_and_none_match_renders_cleanly(self):
+		from rich.text import Text
+		from secator.output_types import Tag
+		tag = Tag(name='empty-tag', value=None, match=None)
+		plain = Text.from_markup(tag.__rich__()).plain
+		self.assertIn('empty-tag', plain)
+		self.assertNotIn('found @', plain)
+
+	def test_short_and_long_values(self):
+		from secator.output_types import Tag
+		short_tag = Tag(name='aws-key', value='AKIA123', match='http://a.com', category='secret')
+		self.assertIn('AKIA123', short_tag.__rich__())
+		self.assertIn('found @', short_tag.__rich__())
+
+		long_val = 'x' * 120
+		long_tag = Tag(name='whois', value=long_val, match='example.com')
+		self.assertIn('value', long_tag.__rich__())
+		self.assertIn(long_val, long_tag.__rich__())
+
