@@ -1,3 +1,4 @@
+import copy
 import os
 import re
 from collections.abc import MutableMapping
@@ -38,6 +39,10 @@ NON_CONFIG_ENV_VARS = frozenset({
 	'SECATOR_AI_SANDBOX_PIDS',
 	'SECATOR_PACKAGE_MANAGER',  # package manager override (secator.installer)
 })
+
+# String values accepted for boolean config keys (case-insensitive).
+TRUE_VALUES = frozenset({'true', 't', '1', 'yes', 'y', 'on'})
+FALSE_VALUES = frozenset({'false', 'f', '0', 'no', 'n', 'off', ''})
 
 USER_AGENTS = {
 	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
@@ -670,7 +675,8 @@ class Config(DotMap):
 			for part in key.split('.'):
 				value = value[part]
 		if value is None:
-			console.print(f'[bold red]Key {key} does not exist.[/]')
+			if print:
+				console.print(f'[bold red]Key {key} does not exist.[/]')
 			return None
 		if print:
 			if key:
@@ -771,7 +777,12 @@ class Config(DotMap):
 							value = json.loads(value)
 				elif isinstance(existing_value, bool):
 					if isinstance(value, str):
-						value = value.lower() in ('true', '1', 't')
+						lowered = value.strip().lower()
+						if lowered in TRUE_VALUES:
+							value = True
+						elif lowered in FALSE_VALUES:
+							value = False
+						# else: keep the raw string so validation rejects it
 					elif isinstance(value, (int, float)):
 						value = True if value == 1 else False
 				elif isinstance(existing_value, int):
@@ -1054,6 +1065,10 @@ class Config(DotMap):
 		# Override config values with environment variables
 		config.apply_env_overrides(print_errors=print_errors)
 
+		# Default result backend, computed after env overrides so SECATOR_DIRS_CELERY_RESULTS applies
+		if not config.celery.result_backend:
+			config.celery.result_backend = f'file://{config.dirs.celery_results}'
+
 		# Validate config
 		config.validate(print_errors=print_errors)
 
@@ -1074,10 +1089,6 @@ class Config(DotMap):
 		self._path = original_path
 		self._partial = Config(original_data)
 		self._keymap = Config.build_key_map(self)
-
-		# HACK: set default result_backend if unset
-		if not self.celery.result_backend:
-			self.celery.result_backend = f'file://{self.dirs.celery_results}'
 
 	@staticmethod
 	def load(schema, data: dict = {}, print_errors=True):
@@ -1266,9 +1277,29 @@ class Config(DotMap):
 				if print_errors:
 					console.print(f'[bold orange1]{var} (unknown config key, ignored)[/]')
 				continue
+			parts = path.split('.')
+			snapshot = copy.deepcopy(self[parts[0]])
 			self.set(path, os.environ[var], set_partial=False)
-			if not self.validate(print_errors=False) and print_errors:
-				console.print(f'[bold red]{var} (override failed)[/]')
+			# Validate the overridden config with the schema: an invalid value (e.g. a non-integer for an
+			# int key, a non-JSON value for a dict key) is rejected, and a valid one is stored with the
+			# schema's coercion applied (e.g. '5' -> 5 for an int key, '~' expanded for a directory).
+			try:
+				validated = Config.load(SecatorConfig, self._values(), print_errors=False)
+			except (RuntimeError, TypeError, ValueError):  # e.g. Path.expanduser() on '~unknown_user'
+				validated = None
+			if validated is None:
+				self[parts[0]] = snapshot
+				if print_errors:
+					console.print(f'[bold red]{var} (override failed, ignored)[/]')
+				continue
+			target, source = self, validated
+			for part in parts[:-1]:
+				target, source = target[part], source[part]
+			target[parts[-1]] = source[parts[-1]]
+
+	def _values(self):
+		"""Return the config values as a plain dict, without the internal (underscored) attributes."""
+		return {k: v for k, v in self.toDict().items() if not k.startswith('_')}
 
 	def _resolve_env_key(self, key):
 		"""Resolve an env var key (``SECATOR_`` prefix already stripped) to a dotted config path.
