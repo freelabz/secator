@@ -298,16 +298,15 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	# zero child docs, and any consumer listing child runners shows the failed task as "waiting" forever.
 	task.has_children = False
 	task.mark_started()
-	if name == 'ai':  # abandoned on its first redelivery (see run_command): resumed, not retried
-		message = 'Worker lost; send a message to resume.'
-	else:
-		attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
-		message = (
+	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
+	task.add_result(Error(
+		message=(
 			f'Task {name} abandoned after {attempts} '
-			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — likely OOM kill, '
+			f'(retry cap: {task_cls.max_retries}; worker repeatedly lost — likely OOM kill, '
 			'eviction, or the worker exiting before the task was acknowledged).'
-		)
-	task.add_result(Error(message=message, _source=task.unique_name))
+		),
+		_source=task.unique_name,
+	))
 	task.mark_completed()
 	return []
 
@@ -359,13 +358,11 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Worker-loss redelivery cap. With task_acks_late + task_reject_on_worker_lost, a task
 		# whose worker is killed (cgroup OOMKill of the child, or a node-pressure eviction) is
-		# redelivered with the SAME Celery id. Count redeliveries on the result backend and
-		# abandon after task_max_retries, so a task that OOMs every run can't loop forever and
-		# block the surrounding chord/workflow. reject_on_worker_lost is what actually
-		# re-queues the task on abrupt worker death, so gate on it too (not just late acks).
-		# An ai task is never redelivered: replaying the chat spends its tokens again, and the user's
-		# next message resumes it from its saved history.
-		max_retries = 0 if name == 'ai' else CONFIG.celery.task_max_retries
+		# redelivered with the SAME Celery id. Count redeliveries on the result backend and abandon
+		# after the task class's max_retries (default: task_max_retries), so a task that OOMs every
+		# run can't loop forever and block the surrounding chord/workflow. reject_on_worker_lost is
+		# what actually re-queues the task on abrupt worker death, so gate on it too (not just late acks).
+		max_retries = Task.get_task_class(name).max_retries
 		if (
 			max_retries != -1
 			and CONFIG.celery.task_acks_late

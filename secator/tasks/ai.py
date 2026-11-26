@@ -328,6 +328,9 @@ class ai(PythonRunner):
 	# path that drives the loop before setup runs get_opt_value("isolated") — a resume/respawn
 	# via ai.__new__(ai), or the bare-task test harnesses. Real runs override this in setup.
 	isolated = False
+	# Never redelivered on worker loss: a replay spends the chat's tokens again, and the user's
+	# next message resumes it from its saved history.
+	max_retries = 0
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
