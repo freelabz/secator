@@ -1635,11 +1635,17 @@ def _runner_vuln_ref(runner, workspace_fallback=None):
 			runner_id = runner.get('_id')
 	if runner_id is None:
 		return None
-	workspace_id = (
+	# Keep the displayed workspace identity stable (API runner payloads may contain only
+	# the name), while preferring a resolved workspace ID for finding queries.
+	workspace_key = (
 		context.get('workspace_id') or runner.get('_workspace') or
 		context.get('workspace_name') or workspace_fallback
 	)
-	return str(workspace_id or ''), workspace_id, runner_type, runner_id
+	workspace_id = (
+		context.get('workspace_id') or runner.get('_workspace') or
+		workspace_fallback or context.get('workspace_name')
+	)
+	return str(workspace_key or ''), workspace_id, runner_type, runner_id
 
 
 @report.command('list')
@@ -1734,11 +1740,30 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	vuln_counts_by_runner = {}
 	if not is_local and runners:
 		runner_groups = {}
+		resolved_workspace_ids = {}
 		for runner in runners:
 			ref = _runner_vuln_ref(runner, list_workspace or workspace_name)
 			if not ref:
 				continue
 			workspace_key, scoped_workspace_id, runner_type_name, runner_id = ref
+			if effective_driver == 'api' and not (runner.get('context') or {}).get('workspace_id'):
+				# --all-workspaces API responses can omit workspace IDs. Resolve each name
+				# once so findings are queried with the tenant ID, while rows stay keyed by
+				# their workspace name. For a selected workspace, list_workspace is already
+				# the resolved ID.
+				if list_workspace:
+					scoped_workspace_id = list_workspace
+				else:
+					workspace_name_for_runner = (
+						(runner.get('context') or {}).get('workspace_name') or
+						runner.get('_workspace') or str(scoped_workspace_id or '')
+					)
+					if workspace_name_for_runner:
+						if workspace_name_for_runner not in resolved_workspace_ids:
+							from secator.hooks.api import resolve_workspace
+							resolved_workspace_ids[workspace_name_for_runner] = resolve_workspace(
+								workspace_name_for_runner)[0]
+						scoped_workspace_id = resolved_workspace_ids[workspace_name_for_runner]
 			if not scoped_workspace_id:
 				continue
 			group = runner_groups.setdefault(workspace_key, {

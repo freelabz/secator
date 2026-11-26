@@ -297,11 +297,41 @@ class TestReportListApi(unittest.TestCase):
 	def test_all_workspaces_sends_no_workspace_filter(self):
 		result, out, calls, resolve = self._invoke(['--all-workspaces'])
 		self.assertEqual(result.exit_code, 0, result.output)
-		resolve.assert_not_called()
+		# Listing is unfiltered; the API workspace name is resolved later for finding counts.
+		resolve.assert_called_once_with('ws1')
 		self.assertNotIn('workspace_id=', calls[0])
 		self.assertNotIn('workspace_name=', calls[0])
 		self.assertIn('Workspace', out)
 		self.assertIn('ws1', out)
+
+	def test_vulnerability_counts_use_resolved_workspace_id(self):
+		from secator.cli import cli
+		calls = []
+
+		def fake_request(method, endpoint, data=None):
+			calls.append((method, endpoint, data))
+			if 'runners' in endpoint:
+				return [{'name': 'alpha', 'status': 'SUCCESS', '_type': 'task', '_id': 't1',
+					'context': {'workspace_name': 'ws1'}}]
+			if 'findings/_search' in endpoint:
+				return [{'_id': 'v1', '_type': 'vulnerability', 'severity': 'high',
+					'_context': {'workspace_id': WS_ID, 'task_id': 't1'}}]
+			return []
+
+		resolve = mock.Mock(return_value=(WS_ID, 'ws1'))
+		with mock.patch.object(CONFIG.workspaces, 'current', 'ws1'):
+			with mock.patch('secator.query.api.ApiBackend._make_request', side_effect=fake_request):
+				with mock.patch('secator.hooks.api.resolve_workspace', resolve):
+					result = CliRunner().invoke(
+						cli, ['r', 'list', '--driver', 'api'], env={'COLUMNS': '400'})
+
+		out = ' '.join(_strip_ansi(result.output).split())
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('1H', out)
+		resolve.assert_called_once_with('ws1')
+		finding_queries = [data for _, endpoint, data in calls if 'findings/_search' in endpoint]
+		self.assertTrue(finding_queries)
+		self.assertIn(WS_ID, str(finding_queries[0]))
 
 	def test_most_recent_last_regardless_of_endpoint_order(self):
 		result, out, _, _ = self._invoke([])
