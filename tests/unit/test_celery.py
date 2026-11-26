@@ -579,38 +579,6 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			self.assertFalse(self._gate(httpx, 4))
 			self.assertTrue(self._gate(httpx, 5))
 
-	def test_abandon_task_keeps_persisted_context(self):
-		"""Abandoning builds the runner on the context an earlier delivery persisted, so the stored
-		context is not replaced by the redelivered message's."""
-		import shutil
-		from secator.celery import abandon_task
-		from secator.config import CONFIG
-		from secator.tasks import httpx
-		import secator.hooks.sqlite as sqlite_mod
-		from secator.query.sqlite import SqliteBackend
-		if 'httpx' not in TEST_TASK_NAMES:
-			self.skipTest('httpx not available')
-
-		orig_path = CONFIG.addons.sqlite.path
-		tmp = tempfile.mkdtemp()
-		CONFIG.addons.sqlite.path = str(Path(tmp) / 'test.db')
-		sqlite_mod._conns.clear()
-		try:
-			ctx = {'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws', 'task_id': 'run-1'}
-			first = httpx(['example.com'], context=dict(ctx), sync=True)
-			first.context['progress_marker'] = 7
-			first.mark_started()  # the first delivery persisted its context, then its worker was lost
-			abandon_task('httpx', ['example.com'], {'context': dict(ctx)}, delivery_count=5)
-			doc = SqliteBackend(workspace_id='ws').get_runner('run-1', 'task')
-			self.assertEqual(doc['status'], 'FAILURE')
-			self.assertEqual(doc['context']['progress_marker'], 7)
-		finally:
-			for conn in sqlite_mod._conns.values():
-				conn.close()
-			sqlite_mod._conns.clear()
-			CONFIG.addons.sqlite.path = orig_path
-			shutil.rmtree(tmp, ignore_errors=True)
-
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""
 		from secator.celery import worker_loss_retries_exhausted

@@ -18,7 +18,6 @@ from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
-from secator.query import QueryEngine
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import resolve_task_queue, run_extractors
@@ -278,18 +277,6 @@ def abandon_task(name, targets, opts, delivery_count=None):
 		list: Topology-only (empty) — the Error lives in the store, not the payload.
 	"""
 	opts['sync'] = True
-	# When the message carries the runner id (a pre-created runner doc), build the runner on the
-	# context earlier deliveries persisted (e.g. the ai task's token counters), as its updates
-	# store its context in place of the persisted one. The message context wins on shared keys:
-	# it only carries what the dispatcher and this delivery set.
-	context = opts.get('context', {})
-	runner_id = context.get('task_chunk_id') or context.get('task_id')
-	if runner_id:
-		try:
-			persisted = QueryEngine(context.get('workspace_id'), context=context).get_runner(runner_id, 'task') or {}
-			opts['context'] = {**(persisted.get('context') or {}), **context}
-		except Exception as e:  # noqa: BLE001 - abandoning must not fail, or the chord hangs
-			debug(f'abandon: failed to load the persisted context of {name}: {e}', sub='celery.state')
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	# An abandoned task spawned no children. A task that is a node of a workflow/scan
