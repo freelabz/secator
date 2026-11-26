@@ -6,7 +6,6 @@ message is edited in-place and findings are posted inside the thread.
 Without a bot_token, everything is posted as top-level messages.
 
 Configuration:
-	- addons.discord.enabled: Enable/disable the Discord hook
 	- addons.discord.webhook_url: Discord webhook URL
 	- addons.discord.bot_token: Discord bot token (enables thread creation)
 	- addons.discord.send_runner_updates: Send runner status updates

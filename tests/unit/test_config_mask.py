@@ -65,7 +65,7 @@ class TestMaskHelpers(unittest.TestCase):
 			{'tasks.overrides.probe.credentials.value': SECRET_MASK})
 
 	def test_non_secret_fields_untouched(self):
-		data = {'addons': {'ai': {'max_tokens': 30000, 'default_model': 'm'}, 'gdrive': {'credentials_path': '/x.json'}}}
+		data = {'addons': {'ai': {'max_tokens_total': 30000, 'default_model': 'm'}, 'gdrive': {'credentials_path': '/x.json'}}}
 		self.assertEqual(mask_secrets(data), data)
 
 

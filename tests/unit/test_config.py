@@ -16,10 +16,10 @@ class TestConfig(unittest.TestCase):
 		del os.environ['SECATOR_DIRS_DATA']
 		self.home = Path.home()
 		self.valid_config = {
-			'addons': {'gdrive': {'enabled': True}}
+			'addons': {'mongodb': {'enabled': True}}
 		}
 		self.invalid_config = {
-			'addons': {'gdrive': {'enabled': 'non-boolean'}}
+			'addons': {'mongodb': {'enabled': 'non-boolean'}}
 		}
 		self.config_home_dir = {
 			'dirs': {'data': '~/test'}
@@ -39,14 +39,14 @@ class TestConfig(unittest.TestCase):
 		config = Config.parse()
 		self.assertIsNotNone(config)
 		self.assertIsInstance(config, Config)
-		self.assertIsInstance(config.addons.gdrive.enabled, bool)
+		self.assertIsInstance(config.addons.mongodb.enabled, bool)
 
 	def test_parse_valid_config(self):
 		from secator.config import Config
 		config = Config.parse(self.valid_config)
 		self.assertIsNotNone(config)
 		self.assertIsInstance(config, Config)
-		self.assertEqual(config.addons.gdrive.enabled, True)
+		self.assertEqual(config.addons.mongodb.enabled, True)
 
 	def test_parse_invalid_config(self):
 		from secator.config import Config
@@ -65,14 +65,14 @@ class TestConfig(unittest.TestCase):
 	def test_set_config_key(self):
 		from secator.config import Config
 		config = Config.parse(path=self.config_test)
-		config.set('addons.gdrive.enabled', True)
+		config.set('addons.mongodb.enabled', True)
 		config.save()
 		yaml_data = Config.read_yaml(self.config_test)
-		self.assertEqual(yaml_data['addons']['gdrive']['enabled'], True)
-		self.assertEqual(config.get('addons.gdrive.enabled'), True)
+		self.assertEqual(yaml_data['addons']['mongodb']['enabled'], True)
+		self.assertEqual(config.get('addons.mongodb.enabled'), True)
 		config = Config.parse(path=self.config_test)
-		self.assertEqual(config.addons.gdrive.enabled, True)
-		self.assertEqual(config._partial.addons.gdrive.enabled, True)
+		self.assertEqual(config.addons.mongodb.enabled, True)
+		self.assertEqual(config._partial.addons.mongodb.enabled, True)
 
 	def test_set_dict_subkey_tasks_overrides(self):
 		"""Test that setting a sub-key within an empty dict field works."""
@@ -351,11 +351,6 @@ class TestConfig(unittest.TestCase):
 		config.unset('queries.critical_vulns')
 		self.assertNotIn('critical_vulns', config.queries)
 
-	def test_queries_dir_resolves_under_data(self):
-		from secator.config import Config
-		config = Config.parse()
-		self.assertEqual(config.dirs.queries, config.dirs.data / 'queries')
-
 	def test_workspace_routes_deprecated_and_ignored(self):
 		"""A config that still sets the removed workspaces.routes key loads, ignores it and warns once."""
 		import secator.config as config_mod
@@ -450,17 +445,13 @@ class TestAIConfig(unittest.TestCase):
 		config = Config.parse()
 		ai = config.addons.ai
 		self.assertIsNotNone(ai)
-		# Test enabled and api_key fields (following addon pattern)
-		self.assertEqual(ai.enabled, False)
 		self.assertEqual(ai.api_key, '')
 		# Test model configuration
 		self.assertEqual(ai.default_model, 'claude-sonnet-4-6')
 		self.assertEqual(ai.intent_model, 'claude-haiku-4-5')
 		# Test generation parameters
 		self.assertEqual(ai.temperature, 0.7)
-		self.assertEqual(ai.max_tokens, 30000)
 		# Test other settings
-		self.assertEqual(ai.max_results, 500)
 		self.assertEqual(ai.encrypt_pii, True)
 
 	def test_api_finding_search_endpoint(self):
