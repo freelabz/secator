@@ -377,10 +377,11 @@ class TestReportListApi(unittest.TestCase):
 				return {'items': findings}
 			return {'items': []}
 
-		with mock.patch.object(ApiBackend, '_make_request', side_effect=fake_request):
-			counts = ApiBackend(WS_ID).vuln_counts_by_runner({
-				'task': ['t1', 't2'], 'workflow': ['w1'],
-			})
+		with mock.patch.object(ApiBackend, '_search_all', side_effect=AssertionError('count path must stream')):
+			with mock.patch.object(ApiBackend, '_make_request', side_effect=fake_request):
+				counts = ApiBackend(WS_ID).vuln_counts_by_runner({
+					'task': ['t1', 't2'], 'workflow': ['w1'],
+				})
 
 		self.assertEqual(counts, {
 			'task': {'t1': {'critical': 1, 'high': 1}, 't2': {'low': 1}},
