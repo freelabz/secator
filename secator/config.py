@@ -47,6 +47,62 @@ USER_AGENTS = {
 
 _ROUTES_WARNED = False
 
+# Config keys removed because nothing read them. A config file (or SECATOR_* env var) that still sets one
+# keeps loading: the key is dropped with a one-time notice instead of failing schema validation.
+DEPRECATED_KEYS = {
+	'dirs.celery': 'unused',
+	'dirs.performance': 'unused',
+	'dirs.queries': 'unused, saved queries live in the "queries" key',
+	'cli.record': 'unused',
+	'runners.skip_exploit_search': 'unused',
+	'wordlists.lists': 'unused, use wordlists.templates',
+	'addons.gdrive.enabled': 'unused, the gdrive exporter is selected with -o gdrive',
+	'addons.gcs.enabled': 'unused, the gcs driver is selected with --driver gcs or drivers.defaults',
+	'addons.worker': 'unused, worker support only requires the worker extra',
+	'addons.mongodb.update_frequency': 'unused, use runners.backend_update_frequency',
+	'addons.sqlite.enabled': 'unused, the sqlite driver is selected with --driver sqlite or drivers.defaults',
+	'addons.ai.enabled': 'unused, AI support only requires the ai extra',
+	'addons.ai.max_tokens': 'unused',
+	'addons.ai.max_results': 'unused',
+	'addons.discord.enabled': 'unused, the discord driver is selected with --driver discord or drivers.defaults',
+	'addons.api.enabled': 'unused, the api driver is selected with --driver api or drivers.defaults',
+}
+DEPRECATED_ENV_VARS = {'SECATOR_' + key.upper().replace('.', '_'): key for key in DEPRECATED_KEYS}
+DEPRECATED_ENV_VARS['SECATOR_ADDONS_WORKER_ENABLED'] = 'addons.worker'
+_DEPRECATED_WARNED = set()
+
+
+def _warn_deprecated_key(key, source=None):
+	if key in _DEPRECATED_WARNED:
+		return
+	_DEPRECATED_WARNED.add(key)
+	where = f' ({source})' if source else ''
+	console.print(f'[bold orange1]Config key "{key}"{where} is deprecated and ignored: {DEPRECATED_KEYS[key]}.[/]')
+
+
+def _drop_deprecated_keys(data):
+	"""Remove deprecated keys from a config dict in place, warning once per key.
+
+	Args:
+		data (dict): Config data.
+
+	Returns:
+		bool: True if a key was removed.
+	"""
+	removed = False
+	for key in DEPRECATED_KEYS:
+		*parents, leaf = key.split('.')
+		node = data
+		for part in parents:
+			node = node.get(part) if isinstance(node, dict) else None
+			if node is None:
+				break
+		if isinstance(node, dict) and leaf in node:
+			del node[leaf]
+			_warn_deprecated_key(key)
+			removed = True
+	return removed
+
 
 def _warn_routes_deprecated():
 	global _ROUTES_WARNED
@@ -182,17 +238,14 @@ class Directories(StrictModel):
 	wordlists: Directory = ''
 	cves: Directory = ''
 	payloads: Directory = ''
-	performance: Directory = ''
 	revshells: Directory = ''
-	queries: Directory = ''
-	celery: Directory = ''
 	celery_data: Directory = ''
 	celery_results: Directory = ''
 
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'queries', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'revshells', 'celery_data', 'celery_results']:
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -238,7 +291,6 @@ class Celery(StrictModel):
 
 class Cli(StrictModel):
 	github_token: Secret = os.environ.get('GITHUB_TOKEN', '')
-	record: bool = False
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
 	show_command_output: bool = False
@@ -259,7 +311,6 @@ class Runners(StrictModel):
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
-	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
 	threads: int = 50
@@ -334,29 +385,21 @@ class Wordlists(StrictModel):
 		'directory_list_small': 'https://gist.githubusercontent.com/sl4v/c087e36164e74233514b/raw/c51a811c70bbdd87f4725521420cc30e7232b36d/directory-list-2.3-small.txt',  # noqa: E501
 		'burp-parameter-names': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt',  # noqa: E501
 	}
-	lists: Dict[str, List[str]] = {}
 
 
 class GoogleDriveAddon(StrictModel):
-	enabled: bool = False
 	drive_parent_folder_id: str = ''
 	credentials_path: str = ''
 
 
 class GoogleCloudStorageAddon(StrictModel):
-	enabled: bool = False
 	bucket_name: str = ''
 	credentials_path: str = ''
-
-
-class WorkerAddon(StrictModel):
-	enabled: bool = False
 
 
 class MongodbAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'mongodb://localhost'
-	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
 	max_items: int = -1
@@ -378,7 +421,6 @@ class MongodbAddon(StrictModel):
 
 
 class SqliteAddon(StrictModel):
-	enabled: bool = False
 	path: str = ''
 	busy_timeout_ms: int = 5000
 	max_items: int = -1
@@ -407,7 +449,6 @@ class WebSearchConfig(StrictModel):
 
 
 class AiAddon(StrictModel):
-	enabled: bool = False
 	api_key: Secret = ''
 	api_base: str = ''
 	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key"
@@ -427,9 +468,7 @@ class AiAddon(StrictModel):
 	# (a comma-separated value sets several). Env: SECATOR_ADDONS_AI_EXTRA_TOOLS.
 	extra_tools: List[str] = []
 	temperature: float = 0.7
-	max_tokens: int = 30000
 	max_tokens_total: int = 100000
-	max_results: int = 500
 	# Max agent loop iterations for an AI run. Env-overridable via
 	# SECATOR_ADDONS_AI_MAX_ITERATIONS (autonomous exploitation needs many steps —
 	# recon, clone/read a PoC, run, debug, retry). Mode configs impose a floor.
@@ -507,7 +546,7 @@ class AiAddon(StrictModel):
 
 
 class Providers(StrictModel):
-	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb', 'ghsa': 'ghsa'}
+	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb'}
 
 
 class Kev(StrictModel):
@@ -525,7 +564,6 @@ class CveNames(StrictModel):
 
 
 class DiscordAddon(StrictModel):
-	enabled: bool = False
 	webhook_url: Secret = ''
 	bot_token: Secret = ''
 	send_runner_updates: bool = True
@@ -540,7 +578,6 @@ class CeleryEventsAddon(StrictModel):
 
 
 class ApiAddon(StrictModel):
-	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
 	key: Secret = ''
 	header_name: str = 'Bearer'
@@ -566,7 +603,6 @@ class ApiAddon(StrictModel):
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
-	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 	sqlite: SqliteAddon = SqliteAddon()
 	vulners: VulnersAddon = VulnersAddon()
@@ -992,6 +1028,9 @@ class Config(DotMap):
 				console.print(f'[bold orange1]Migrating config key "workspaces.default" to "workspaces.current" in {path}[/]')
 			migrated = True
 
+		# Deprecated keys: accept and ignore them
+		_drop_deprecated_keys(data)
+
 		# Deprecated: 'workspaces.routes' was removed; accept and ignore it
 		if isinstance(ws_data, dict) and ws_data.pop('routes', None):
 			_warn_routes_deprecated()
@@ -1215,6 +1254,10 @@ class Config(DotMap):
 		prefix = 'SECATOR_'
 		for var in os.environ:
 			if not var.startswith(prefix) or var in NON_CONFIG_ENV_VARS:
+				continue
+			if var in DEPRECATED_ENV_VARS:
+				if print_errors:
+					_warn_deprecated_key(DEPRECATED_ENV_VARS[var], source=var)
 				continue
 			key = var[len(prefix):]  # remove prefix
 			path = self._resolve_env_key(key)

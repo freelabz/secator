@@ -15,7 +15,6 @@ from secator.utils import debug, escape_mongodb_url
 # gevent.monkey.patch_all()
 
 MONGODB_URL = CONFIG.addons.mongodb.url
-MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
 MONGODB_CONNECT_TIMEOUT = CONFIG.addons.mongodb.server_selection_timeout_ms
 MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 

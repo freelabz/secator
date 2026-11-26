@@ -5,7 +5,6 @@ API endpoints via HTTP requests. It supports both CREATE and UPDATE
 operations for runners and findings.
 
 Configuration:
-	- addons.api.enabled: Enable/disable the API hook
 	- addons.api.url: Base URL of the external API
 	- addons.api.api_key: API key for authentication
 	- addons.api.force_ssl: Enable/disable SSL certificate verification

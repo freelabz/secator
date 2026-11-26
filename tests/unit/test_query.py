@@ -716,7 +716,6 @@ class TestSqliteWiring(unittest.TestCase):
 
 	def test_sqlite_addon_config_exists(self):
 		from secator.config import CONFIG
-		self.assertFalse(CONFIG.addons.sqlite.enabled)
 		self.assertEqual(CONFIG.addons.sqlite.busy_timeout_ms, 5000)
 		self.assertEqual(CONFIG.addons.sqlite.max_items, -1)
 		self.assertIsInstance(CONFIG.addons.sqlite.duplicate_main_copy_fields, list)
