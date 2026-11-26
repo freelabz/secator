@@ -5,6 +5,7 @@ from secator.celery import app, join_results  # noqa: F401
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
 from secator.output_types import Url
 from celery import chain, chord
+from secator.definitions import ADDONS_ENABLED
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
 
@@ -526,6 +527,73 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			# opts carry has_children=True (inherited from the parent workflow)
 			abandon_task('httpx', ['example.com'], {'context': {}, 'has_children': True}, delivery_count=2)
 		self.assertFalse(captured.get('has_children'), 'abandoned task must not keep inherited has_children')
+
+	def _gate(self, name, delivery_count):
+		"""Run run_command's worker-loss gate on a delivery of ``name``; return whether it abandoned."""
+		from unittest import mock
+		from secator import celery as celery_mod
+		from secator.celery import run_command
+		conf = celery_mod.CONFIG.celery
+		run_command.push_request(id='wl-gate', delivery_info={'routing_key': 'q'}, is_eager=True)
+		try:
+			with mock.patch.object(celery_mod, 'IN_WORKER', True), \
+					mock.patch.object(conf, 'task_acks_late', True), \
+					mock.patch.object(conf, 'task_reject_on_worker_lost', True), \
+					mock.patch.object(conf, 'task_max_retries', 3), \
+					mock.patch.object(celery_mod, 'bump_worker_loss_count', return_value=delivery_count), \
+					mock.patch.object(celery_mod, 'abandon_task', return_value=[]) as abandon, \
+					mock.patch.object(celery_mod.Task, 'get_task_class', side_effect=RuntimeError('ran')):
+				try:
+					run_command.run([], name, ['example.com'], {'context': {}})
+				except RuntimeError:
+					pass  # not abandoned: went on to run the task
+			return abandon.called
+		finally:
+			run_command.pop_request()
+
+	def test_ai_task_abandoned_on_first_redelivery(self):
+		"""An ai task is never redelivered: its first redelivery abandons it, whatever the retry cap."""
+		self.assertFalse(self._gate('ai', 1))
+		self.assertTrue(self._gate('ai', 2))
+
+	def test_other_tasks_keep_retry_cap(self):
+		"""Other tasks are still redelivered up to task_max_retries."""
+		self.assertFalse(self._gate('httpx', 2))
+		self.assertFalse(self._gate('httpx', 4))
+		self.assertTrue(self._gate('httpx', 5))
+
+	@unittest.skipUnless(ADDONS_ENABLED.get('ai', False), 'ai addon required')
+	def test_abandon_ai_task_keeps_persisted_context(self):
+		"""An abandoned ai task ends FAILURE asking for a message, and keeps the token counters an
+		earlier delivery persisted (the redelivered message carries none)."""
+		import shutil
+		from secator.celery import abandon_task
+		from secator.config import CONFIG
+		from secator.tasks.ai import ai
+		import secator.hooks.sqlite as sqlite_mod
+		from secator.query.sqlite import SqliteBackend
+
+		orig_path = CONFIG.addons.sqlite.path
+		tmp = tempfile.mkdtemp()
+		CONFIG.addons.sqlite.path = str(Path(tmp) / 'test.db')
+		sqlite_mod._conns.clear()
+		try:
+			ctx = {'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws', 'task_id': 'chat-1'}
+			first = ai(['example.com'], context=dict(ctx), sync=True)
+			first.context['ai_tokens'] = 1234
+			first.mark_started()  # the first delivery persisted its counters, then its worker was lost
+			abandon_task('ai', ['example.com'], {'context': dict(ctx)}, delivery_count=2)
+			doc = SqliteBackend(workspace_id='ws').get_runner('chat-1', 'task')
+			self.assertEqual(doc['status'], 'FAILURE')
+			self.assertEqual(doc['context']['ai_tokens'], 1234)
+			errors = SqliteBackend(workspace_id='ws').search({'_type': 'error'})
+			self.assertEqual([e['message'] for e in errors], ['Worker lost; send a message to resume.'])
+		finally:
+			for conn in sqlite_mod._conns.values():
+				conn.close()
+			sqlite_mod._conns.clear()
+			CONFIG.addons.sqlite.path = orig_path
+			shutil.rmtree(tmp, ignore_errors=True)
 
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""

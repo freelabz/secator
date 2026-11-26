@@ -18,6 +18,7 @@ from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
+from secator.query import QueryEngine
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import resolve_task_queue, run_extractors
@@ -277,6 +278,15 @@ def abandon_task(name, targets, opts, delivery_count=None):
 		list: Topology-only (empty) — the Error lives in the store, not the payload.
 	"""
 	opts['sync'] = True
+	# Build the runner on the context earlier deliveries persisted (e.g. the ai task's token
+	# counters): its updates store its context in place of the persisted one.
+	context = opts.get('context', {})
+	runner_id = context.get('task_chunk_id') or context.get('task_id')
+	try:
+		persisted = runner_id and QueryEngine(context.get('workspace_id'), context=context).get_runner(runner_id, 'task')
+		opts['context'] = {**((persisted or {}).get('context') or {}), **context}
+	except Exception as e:  # noqa: BLE001 - abandoning must not fail, or the chord hangs
+		debug(f'abandon: failed to load the persisted context of {name}: {e}', sub='celery.state')
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	# An abandoned task spawned no children. A task that is a node of a workflow/scan
@@ -286,15 +296,16 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	# zero child docs, and any consumer listing child runners shows the failed task as "waiting" forever.
 	task.has_children = False
 	task.mark_started()
-	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
-	task.add_result(Error(
-		message=(
+	if name == 'ai':  # abandoned on its first redelivery (see run_command)
+		message = 'Worker lost; send a message to resume.'
+	else:
+		attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
+		message = (
 			f'Task {name} abandoned after {attempts} '
 			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — likely OOM kill, '
 			'eviction, or the worker exiting before the task was acknowledged).'
-		),
-		_source=task.unique_name,
-	))
+		)
+	task.add_result(Error(message=message, _source=task.unique_name))
 	task.mark_completed()
 	return []
 
@@ -350,13 +361,16 @@ def run_command(self, results, name, targets, opts={}):
 		# abandon after task_max_retries, so a task that OOMs every run can't loop forever and
 		# block the surrounding chord/workflow. reject_on_worker_lost is what actually
 		# re-queues the task on abrupt worker death, so gate on it too (not just late acks).
+		# An ai task is never redelivered: replaying the chat spends its tokens again, and the user's
+		# next message resumes it from its saved history.
+		max_retries = 0 if name == 'ai' else CONFIG.celery.task_max_retries
 		if (
-			CONFIG.celery.task_max_retries != -1
+			max_retries != -1
 			and CONFIG.celery.task_acks_late
 			and CONFIG.celery.task_reject_on_worker_lost
 		):
 			delivery_count = bump_worker_loss_count(self.request.id)
-			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
+			if worker_loss_retries_exhausted(delivery_count, max_retries):
 				# Attach the request context so the abandoned task doc still carries
 				# celery_id / worker_name / routing_key even when opts had none coming in.
 				opts['context'] = context
