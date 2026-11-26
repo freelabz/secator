@@ -153,6 +153,12 @@ class WorkspaceMigration:
 			if rtype not in RUNNER_CLASSES or not key:
 				console.print(Warning(message=f'Skipping runner "{doc.get("name")}" with no id.'))
 				continue
+			# Backends also match runners by workspace name: keep only the workspace keyed NAME (as its
+			# findings and notes are), not another workspace sharing that name. Locally the folder is the key.
+			ws_id = (doc.get('context') or {}).get('workspace_id')
+			if self.src != 'local' and ws_id and ws_id != self.src_ws:
+				console.print(Warning(message=f'Skipping runner "{doc.get("name")}" of workspace id {ws_id}.'))
+				continue
 			rank = (bool(doc.get('done')), doc.get('last_updated_db') or 0, doc.get('elapsed') or 0)
 			if key not in best or rank > best[key][0]:
 				best[key] = (rank, {**doc, 'config': {**(doc.get('config') or {}), 'type': rtype}})

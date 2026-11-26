@@ -330,6 +330,18 @@ class MigrateToMongodb(MigrateToSqlite):
 		self.assertTrue(self.findings()['u-url']['_tagged'])
 
 
+class MigrateFromMongodb(_MigrateCase):
+	dst = 'sqlite'
+
+	def test_runner_of_other_workspace_sharing_the_name_skipped(self):
+		WorkspaceMigration(WS, 'local', 'mongodb').apply()
+		self.mongo.main.tasks.insert_one({
+			'name': 'httpx', 'done': True, 'config': {'type': 'task', 'name': 'httpx'},
+			'context': {'workspace_id': str(ObjectId()), 'workspace_name': WS, 'task_id': str(ObjectId())}})
+		migration = WorkspaceMigration(WS, 'mongodb', 'sqlite', new_name=COPY)
+		self.assertEqual(len(migration.runners), 7)
+
+
 class MigrateToApi(_MigrateCase):
 	dst = 'api'
 
