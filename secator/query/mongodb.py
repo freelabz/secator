@@ -127,6 +127,17 @@ class MongoDBBackend(QueryBackend):
 			console.print(Warning(message=f'MongoDB create_note failed: {e}'))
 			return 0
 
+	def list_notes(self):
+		"""Notes of the workspace from the ``notes`` collection, ``_id`` as a string."""
+		try:
+			notes = list(self._get_client().main.notes.find({'_context.workspace_id': self.workspace_id}))
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB list_notes failed: {e}'))
+			return []
+		for note in notes:
+			note['_id'] = str(note['_id'])
+		return notes
+
 	def list_workspaces(self):
 		"""List workspaces for the mongodb backend.
 
