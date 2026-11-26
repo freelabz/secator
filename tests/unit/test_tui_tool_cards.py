@@ -20,7 +20,7 @@ from secator.tui.widgets import ToolCallPanel  # noqa: E402
 HITS = [{"_type": "url", "url": "https://example.com/poc", "title": "PoC"}]
 PAGE = {
 	"url": "https://example.com/", "status": 200, "title": "Example Domain",
-	"content_type": "text/html", "text": "Example Domain page text", "truncated": False,
+	"content_type": "text/html", "text": "Example Domain\nThis domain is for use in examples.", "truncated": False,
 }
 
 
@@ -40,7 +40,7 @@ async def _render(items):
 		for item in items:
 			await app._render(item)
 		await pilot.pause(0.05)
-		return [(p.tool_name, p.done, p._args, p._result_text) for p in app.query(ToolCallPanel)]
+		return [(p.tool_name, p.rname, p.done, p._args, p._result_text) for p in app.query(ToolCallPanel)]
 
 
 def test_web_search_call_renders_a_tool_card():
@@ -48,9 +48,9 @@ def test_web_search_call_renders_a_tool_card():
 	assert any(isinstance(i, Ai) and i.ai_type == "web_search" for i in items)
 	cards = asyncio.run(_render(items))
 	assert len(cards) == 1
-	name, done, args, result = cards[0]
+	name, title, done, args, result = cards[0]
 	assert name == "web_search" and done
-	assert result == "example cve poc"
+	assert title == "example cve poc" and result == "example cve poc"
 	assert args["count"] == 1 and args["results"][0]["url"] == "https://example.com/poc"
 
 
@@ -58,9 +58,9 @@ def test_fetch_url_call_renders_a_tool_card():
 	items = _tool_items("fetch_url", url="https://example.com/")
 	cards = asyncio.run(_render(items))
 	assert len(cards) == 1
-	name, done, args, result = cards[0]
-	assert name == "fetch_url" and done
-	assert result == "Example Domain page text"
+	name, title, done, args, result = cards[0]
+	assert name == "fetch_url" and title == "fetch_url" and done
+	assert result == "Example Domain\nThis domain is for use in examples."
 	assert args["url"] == "https://example.com/" and args["title"] == "Example Domain"
 	assert "ai_query_result" not in args
 
