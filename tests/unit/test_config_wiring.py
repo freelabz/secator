@@ -69,6 +69,13 @@ class TestCeleryEnvOverrides(unittest.TestCase):
 
 class TestSchemaKeys(unittest.TestCase):
 
+	def setUp(self):
+		prefixes = ('SECATOR_RUNNERS_', 'SECATOR_HTTP_', 'SECATOR_ADDONS_AI_')
+		env = {k: v for k, v in os.environ.items() if not k.startswith(prefixes)}
+		patcher = mock.patch.dict(os.environ, env, clear=True)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
 	def test_show_subtasks(self):
 		self.assertFalse(Config.parse().runners.show_subtasks)
 		config = Config.parse({'runners': {'show_subtasks': True}})

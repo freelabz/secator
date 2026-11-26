@@ -906,6 +906,14 @@ PACKAGE_MANAGERS = {
 	'scoop': ('scoop', None),
 }
 
+# Other commands of a known package manager, so that a full-command override (e.g. `apt-get install -y`)
+# selects the dependencies declared for that package manager (e.g. under the `apt` key).
+PACKAGE_MANAGER_ALIASES = {
+	'apt-get': 'apt',
+	'aptitude': 'apt',
+	'microdnf': 'dnf',
+}
+
 
 def get_distro_config():
 	"""Detects the system's package manager based on the OS distribution and return the default installation command.
@@ -961,6 +969,7 @@ def get_distro_config():
 		console.print(Error(message=f'Could not find installer for your distribution (system: {system}, distrib: {distrib})'))  # noqa: E501
 
 	manager = installer.split(' ')[0] if installer else ''
+	manager = PACKAGE_MANAGER_ALIASES.get(manager, manager)
 	config = Distribution(
 		pm_installer=installer,
 		pm_finalizer=finalizer,

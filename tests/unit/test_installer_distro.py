@@ -35,9 +35,21 @@ class TestGetDistroConfig(unittest.TestCase):
 	def test_override_full_command(self):
 		dist = self._get({'SECATOR_PACKAGE_MANAGER': 'apt-get install -y'})
 		self.assertIsInstance(dist, Distribution)
-		self.assertEqual(dist.pm_name, 'apt-get')
+		self.assertEqual(dist.pm_name, 'apt')  # matches dependencies declared under the `apt` key
 		self.assertEqual(dist.pm_installer, 'apt-get install -y')
 		self.assertIsNone(dist.pm_finalizer)
+
+	def test_override_full_command_selects_packages(self):
+		from secator.installer import InstallerStatus, PackageInstaller
+		dist = self._get({'SECATOR_PACKAGE_MANAGER': 'apt-get install -y'})
+		success = InstallerStatus.SUCCESS
+		with mock.patch('secator.installer.get_distro_config', return_value=dist):
+			with mock.patch('secator.installer.getpass.getuser', return_value='root'):
+				with mock.patch('secator.installer.SourceInstaller.install', return_value=success) as install:
+					status = PackageInstaller.install({'apt': ['libpcap-dev'], 'apk': ['libpcap-dev-apk']})
+		self.assertEqual(status, InstallerStatus.SUCCESS)
+		install.assert_called_once()
+		self.assertEqual(install.call_args.args[0].split(), ['apt-get', 'install', '-y', 'libpcap-dev'])
 
 	def test_override_on_unknown_distribution(self):
 		dist = self._get({'SECATOR_PACKAGE_MANAGER': 'dnf'}, distrib='unknownlinux')
