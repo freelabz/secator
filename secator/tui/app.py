@@ -887,7 +887,7 @@ class TUIApp(App):
 			label = label[:31] + "…"
 		for wid in ("#input-box", "#choice-host"):
 			try:
-				self.query_one(wid).border_title = label
+				self.query_one(wid).border_title = Text(label)   # a str would be parsed as markup
 			except Exception:  # noqa: BLE001 - not composed yet
 				pass
 

@@ -42,8 +42,8 @@ class Error(OutputType):
 		if self.traceback:
 			traceback_pretty = '   ' + _s(self.traceback).replace('\n', '\n   ')
 			if self.traceback_title:
-				traceback_pretty = f'   {self.traceback_title}:\n{traceback_pretty}'
-			s += f'\n[dim]{_s(traceback_pretty)}[/]'
+				traceback_pretty = f'   {_s(self.traceback_title)}:\n{traceback_pretty}'
+			s += f'\n[dim]{traceback_pretty}[/]'
 		return s
 
 	def __repr__(self):

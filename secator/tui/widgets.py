@@ -900,10 +900,10 @@ class ChoicePrompt(Vertical):
 		header = "Pick one or multiple choices" if self._multiple else "Pick one choice"
 		yield Static(Text.from_markup(f"[b #e6c15a]{header}[/]"), classes="choice-q")
 		if self._multiple:
-			yield _ChoiceSelections(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
+			yield _ChoiceSelections(*[(Text(str(c)), i) for i, c in enumerate(self._choices)], classes="choice-list")
 			hint = "space to toggle · enter to send · tab to add more details · esc to dismiss"
 		else:
-			yield _ChoiceOptions(*self._choices, classes="choice-list")
+			yield _ChoiceOptions(*(Text(str(c)) for c in self._choices), classes="choice-list")
 			hint = "↑/↓ to move · enter to send · tab to add more details · esc to dismiss"
 		yield _prompt_hint(hint, _DismissButton())
 
