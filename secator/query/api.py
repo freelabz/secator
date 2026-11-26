@@ -180,6 +180,27 @@ class ApiBackend(QueryBackend):
             seen.update(d.get("_id") for d in new)
             docs.extend(new)
 
+    def vuln_counts_by_runner(self, runner_ids_by_type: dict) -> dict:
+        """Fetch matching vulnerabilities in pages and group their counts locally.
+
+        The remote search API exposes filtering and totals, but no group-by endpoint.
+        One filtered search across all requested runner ids avoids a request per runner.
+        """
+        query = self._vulnerability_query(runner_ids_by_type)
+        if not query:
+            return {}
+        counts = {}
+        runner_id_sets = self._runner_id_sets_by_type(runner_ids_by_type)
+        try:
+            safe_query = self._merge_query(query)
+            for finding in self._search_all(safe_query):
+                self._add_vulnerability_count(counts, finding, runner_id_sets)
+        except QueryBackendError:
+            raise
+        except Exception as e:
+            console.print(Warning(message=f"API vulnerability count aggregation failed: {e}"))
+        return counts
+
     def _execute_create_note(self, note: dict) -> int:
         """POST the note to the remote notes endpoint.
 

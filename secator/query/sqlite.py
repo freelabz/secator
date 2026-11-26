@@ -190,6 +190,47 @@ class SqliteBackend(QueryBackend):
 			console.print(Warning(message=f'SQLite count failed: {e}'))
 			return 0
 
+	def vuln_counts_by_runner(self, runner_ids_by_type: dict) -> dict:
+		"""Group vulnerability severities by runner id in SQLite."""
+		query = self._vulnerability_query(runner_ids_by_type)
+		if not query:
+			return {}
+		try:
+			conn = self._get_conn()
+			counts = {}
+			for runner_type, runner_ids in (runner_ids_by_type or {}).items():
+				if runner_type not in ('task', 'workflow', 'scan') or not runner_ids:
+					continue
+				field = _col_expr(f'_context.{runner_type}_id')
+				severity = f"LOWER(COALESCE({_col_expr('severity')}, ''))"
+				# Filter per type so the group key is unambiguous, and keep the aggregation
+				# in SQLite instead of reading every matching finding into Python. Chunk ids
+				# to stay below SQLite builds with a 999-variable limit.
+				ids = list(runner_ids)
+				for offset in range(0, len(ids), 500):
+					type_query = self._merge_query({
+						'_type': 'vulnerability',
+						f'_context.{runner_type}_id': {'$in': ids[offset:offset + 500]},
+					})
+					type_where, type_params = _build_where(type_query)
+					sql = (
+						f"SELECT {field}, {severity}, COUNT(*) FROM findings "
+						f"WHERE {type_where or '1=1'} GROUP BY 1, 2"
+					)
+					for runner_id, severity_name, total in conn.execute(sql, type_params).fetchall():
+						if runner_id is None:
+							continue
+						severity_name = str(severity_name or '').lower()
+						if severity_name not in ('critical', 'high', 'medium', 'low'):
+							continue
+						by_id = counts.setdefault(runner_type, {})
+						severity_counts = by_id.setdefault(str(runner_id), {})
+						severity_counts[severity_name] = severity_counts.get(severity_name, 0) + total
+			return counts
+		except Exception as e:
+			console.print(Warning(message=f'SQLite vulnerability count aggregation failed: {e}'))
+			return {}
+
 	def _execute_update(self, query: dict, update: dict) -> int:
 		set_fields = update.get('$set', {})
 		if not set_fields:

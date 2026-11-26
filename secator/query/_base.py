@@ -311,6 +311,62 @@ class QueryBackend(ABC):
 		safe_query = self._merge_query(query)
 		return self._execute_count(safe_query)
 
+	@staticmethod
+	def _vulnerability_query(runner_ids_by_type: dict) -> dict:
+		"""Build one vulnerability query for the requested runner ids."""
+		clauses = []
+		for runner_type, runner_ids in (runner_ids_by_type or {}).items():
+			if runner_type not in ('task', 'workflow', 'scan'):
+				continue
+			ids = list(runner_ids or [])
+			if ids:
+				clauses.append({f'_context.{runner_type}_id': {'$in': ids}})
+		if not clauses:
+			return {}
+		query = {'_type': 'vulnerability'}
+		query.update(clauses[0] if len(clauses) == 1 else {'$or': clauses})
+		return query
+
+	@staticmethod
+	def _runner_id_sets_by_type(runner_ids_by_type: dict) -> dict:
+		"""Normalize requested runner ids once for efficient membership checks."""
+		return {
+			runner_type: {str(runner_id) for runner_id in runner_ids or []}
+			for runner_type, runner_ids in (runner_ids_by_type or {}).items()
+			if runner_type in ('task', 'workflow', 'scan')
+		}
+
+	@staticmethod
+	def _add_vulnerability_count(counts: dict, finding: dict, runner_id_sets: dict) -> None:
+		"""Add a finding's known severity to each matching runner bucket."""
+		context = finding.get('_context') or {}
+		severity = str(finding.get('severity') or '').strip().lower()
+		if severity not in ('critical', 'high', 'medium', 'low'):
+			return
+		for runner_type, runner_ids in runner_id_sets.items():
+			runner_id = context.get(f'{runner_type}_id')
+			if runner_id is None or str(runner_id) not in runner_ids:
+				continue
+			by_id = counts.setdefault(runner_type, {})
+			severity_counts = by_id.setdefault(str(runner_id), {})
+			severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+	def vuln_counts_by_runner(self, runner_ids_by_type: dict) -> dict:
+		"""Return known vulnerability severities grouped by runner type and id.
+
+		The default implementation makes one filtered, streaming query for all requested
+		runners. Backends with native grouping should override it to aggregate in storage.
+		"""
+		query = self._vulnerability_query(runner_ids_by_type)
+		if not query:
+			return {}
+		counts = {}
+		runner_id_sets = self._runner_id_sets_by_type(runner_ids_by_type)
+		for batch in self.iterate(query):
+			for finding in batch:
+				self._add_vulnerability_count(counts, finding, runner_id_sets)
+		return counts
+
 	@abstractmethod
 	def _execute_count(self, query: dict) -> int:
 		"""Backend-specific count implementation."""

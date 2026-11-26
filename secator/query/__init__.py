@@ -110,6 +110,10 @@ class QueryEngine:
         """Count findings matching query."""
         return self.backend.count(query)
 
+    def vuln_counts_by_runner(self, runner_ids_by_type: dict) -> dict:
+        """Count vulnerability severities grouped by runner type and id."""
+        return self.backend.vuln_counts_by_runner(runner_ids_by_type)
+
     def update(self, query: dict, update: dict) -> int:
         """Update records matching query."""
         return self.backend.update(query, update)
