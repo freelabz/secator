@@ -13,6 +13,7 @@ import tempfile
 import threading
 
 from dataclasses import fields
+from pathlib import Path
 from time import time
 
 import psutil
@@ -1453,7 +1454,9 @@ class Command(Runner):
 		# Same chunking decision as celery.run_command, which builds this runner then chunks it.
 		if not urls or not self.inputs_valid or self.errors_count or self.needs_chunking(sync=not IN_WORKER):
 			return
-		self.clone_folder = tempfile.mkdtemp(dir=f'{self.reports_folder}/.inputs')
+		inputs_folder = Path(self.reports_folder) / '.inputs'
+		inputs_folder.mkdir(exist_ok=True)
+		self.clone_folder = tempfile.mkdtemp(dir=inputs_folder)
 		for url in urls:
 			try:
 				path = clone_git_repo(url, tempfile.mkdtemp(dir=self.clone_folder))
@@ -1466,10 +1469,12 @@ class Command(Runner):
 
 	@staticmethod
 	def _restore_git_urls(self, item):
-		"""Point the item's paths inside a clone (fields and ``extra_data`` values) back at the git URL."""
+		"""Point the item's paths inside a clone (in fields, dicts and lists) back at the git URL."""
 		def restore(value):
 			if isinstance(value, dict):
 				return {k: restore(v) for k, v in value.items()}
+			if isinstance(value, list):
+				return [restore(v) for v in value]
 			if isinstance(value, str):
 				for path, url in self.cloned_inputs.items():
 					value = value.replace(path, url)

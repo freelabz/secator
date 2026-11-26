@@ -4,6 +4,7 @@ RUN apk add --no-cache \
     flock \
     gcc \
     git \
+    openssh-client \
     musl-dev \
     linux-headers \
     python3-dev \

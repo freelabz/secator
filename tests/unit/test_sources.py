@@ -53,7 +53,6 @@ class TestCloneGitInputs(unittest.TestCase):
 
 	def setUp(self):
 		self.reports = tempfile.mkdtemp()
-		os.mkdir(f'{self.reports}/.inputs')
 		self.opts = {'reports_folder': self.reports, 'print_target': False}
 
 	def test_path_task_scans_clone_and_removes_it(self):
@@ -80,13 +79,14 @@ class TestCloneGitInputs(unittest.TestCase):
 		with mock.patch('secator.runners.command.clone_git_repo', side_effect=fake_clone):
 			task = gitleaks(REPO, **self.opts)
 		path = task.inputs[0]
-		item = Vulnerability(name='leak', matched_at=f'{path}/app.py', extra_data={'fingerprint': f'{path}/app.py:rule:1'})
+		item = Vulnerability(name='leak', matched_at=f'{path}/app.py', extra_data={'locations': [{'path': f'{path}/app.py'}]})
 		item = task._restore_git_urls(task, item)
 		self.assertEqual(item.matched_at, f'{REPO}/app.py')
-		self.assertEqual(item.extra_data['fingerprint'], f'{REPO}/app.py:rule:1')
+		self.assertEqual(item.extra_data['locations'], [{'path': f'{REPO}/app.py'}])
 
 	def test_chunked_run_clones_in_each_chunk(self):
 		urls = [REPO, 'git@github.com:o/r.git']
+		os.mkdir(f'{self.reports}/.inputs')  # the multi-input file goes there
 		with mock.patch('secator.runners.command.IN_WORKER', True):
 			with mock.patch('secator.runners.command.clone_git_repo') as clone:
 				task = gitleaks(urls, caller='Task', **self.opts)
