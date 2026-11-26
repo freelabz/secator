@@ -589,6 +589,33 @@ class TestKeenableSearch(unittest.TestCase):
 		self.assertEqual(engine, 'duckduckgo')
 		self.assertEqual(results, ddg)
 
+	def test_malformed_response_falls_back_to_duckduckgo(self):
+		from secator.ai.tools import web
+		ddg = [{'_type': 'web_result', 'title': 'D', 'url': 'https://d.example/', 'snippet': ''}]
+		self._use_cfg(keenable_keyless=True)
+		self._patch('secator.ai.tools.web.duckduckgo_search', return_value=ddg)
+		for payload in (None, [], {'results': None}, {'results': 'x'}, {'results': [None, 1]}):
+			self._patch('secator.ai.tools.web.requests.post', return_value=self._Resp(payload))
+			results, engine = web.web_search('q', mode='links')
+			self.assertEqual(engine, 'duckduckgo')
+			self.assertEqual(results, ddg)
+
+	def test_malformed_hits_are_skipped(self):
+		from secator.ai.tools import web
+		payload = {'results': [
+			None,
+			{'url': 5, 'title': 'bad url'},
+			{'url': 'https://ok.example/', 'title': 7, 'snippet': ['x']},
+			{'url': 'https://good.example/', 'title': ' Good ', 'snippet': 'a  b'},
+		]}
+		self._patch('secator.ai.tools.web.requests.post', return_value=self._Resp(payload))
+		results = web.keenable_search('q', keyless=True)
+		self.assertEqual([r['url'] for r in results], ['https://ok.example/', 'https://good.example/'])
+		self.assertEqual(results[0]['title'], '')
+		self.assertEqual(results[0]['snippet'], '')
+		self.assertEqual(results[1]['title'], 'Good')
+		self.assertEqual(results[1]['snippet'], 'a b')
+
 	def test_exploit_mode_never_uses_keenable(self):
 		from secator.ai.tools import web
 		self._use_cfg(keenable_keyless=True)

@@ -779,15 +779,24 @@ def keenable_search(query, max_results=5, api_key='', keyless=False):
 	except Exception as e:  # noqa: BLE001 - fail soft: fall back to keyless engine
 		debug(f'keenable search failed: {e}', sub='ai.web_search')
 		return []
+	hits = data.get('results') if isinstance(data, dict) else None
+	if not isinstance(hits, list):
+		return []
 	results = []
-	for hit in (data.get('results') or [])[:max_results]:
-		url = hit.get('url') or ''
-		if not url:
+	for hit in hits:
+		if len(results) >= max_results:
+			break
+		if not isinstance(hit, dict):
 			continue
-		snippet = ' '.join((hit.get('description') or hit.get('snippet') or '').split())
+		url = hit.get('url')
+		if not isinstance(url, str) or not url:
+			continue
+		text = hit.get('description') or hit.get('snippet') or ''
+		title = hit.get('title') or ''
+		snippet = ' '.join(text.split()) if isinstance(text, str) else ''
 		results.append({
 			'_type': 'web_result',
-			'title': (hit.get('title') or '').strip(),
+			'title': title.strip() if isinstance(title, str) else '',
 			'url': url,
 			'snippet': snippet[:_KEENABLE_SNIPPET_CHARS],
 		})
