@@ -1000,12 +1000,13 @@ def workspace_summary(workspace_opt, driver, template_path):
 def workspace_migrate(name, src, dst, new_name, keep_status, apply):
 	"""Copy a workspace to another driver: runners, findings (incl. ai chats) and notes.
 
+	NAME is the workspace as runs stored it in context.workspace_id: its name for runs launched from
+	the CLI (or its id, e.g. an ObjectId); on the api driver, a name is resolved to its remote id.
+
 	Dry run by default. Re-running updates the docs a previous run wrote instead of duplicating them;
 	it is refused on a driver that does not return them (the api driver keeps no runner marker).
 	"""
 	from secator.workspace_migrate import WorkspaceMigration
-	if src == dst and (new_name or name) == name:
-		raise click.UsageError('Source and destination are the same workspace: use --as <name> or another --to driver.')
 	try:
 		migration = WorkspaceMigration(name, src, dst, new_name=new_name, keep_status=keep_status)
 	except ValueError as e:

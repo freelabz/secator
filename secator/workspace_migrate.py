@@ -28,7 +28,7 @@ from secator.output_types._base import load_output_types
 from secator.query import QueryEngine
 from secator.rich import console
 from secator.runners import Runner, Scan, Task, Workflow
-from secator.utils import import_dynamic, to_datetime
+from secator.utils import get_workspace_folder_name, import_dynamic, to_datetime
 
 # Context keys holding a runner or chat id, relinked to the destination's ids.
 ID_KEYS = ('scan_id', 'workflow_id', 'task_id', 'task_chunk_id', 'session_id')
@@ -119,12 +119,18 @@ class WorkspaceMigration:
 		if not self.src_ws:
 			raise ValueError(f'Workspace "{name}" not found on the {src} driver.')
 		self.dst_ws = resolve_workspace_id(dst, self.new_name)
+		if src == dst and self._store_key(self.src_ws) == self._store_key(self.dst_ws or ''):
+			raise ValueError('Source and destination are the same workspace: use --as <name> or another --to driver.')
 		self.ids = {}    # source runner / chat id -> destination id
 		self.uuids = {}  # source finding _uuid -> destination _uuid
 		self.runs = {}   # source runner id -> StoredRunner
 		self.failed = 0
 		self._read_source()
 		self._read_destination()
+
+	def _store_key(self, ws_id):
+		"""What the destination store keys the workspace by (local: its report folder)."""
+		return get_workspace_folder_name(ws_id) if self.dst == 'local' else ws_id
 
 	@staticmethod
 	def _engine(driver, ws_id, ws_name):
@@ -264,9 +270,11 @@ class WorkspaceMigration:
 				parent = next((self.runs[src['context'][k]] for k in pkeys if src['context'].get(k) in self.runs), None)
 			existing = self.existing_runners.get(key) or {}
 			folder = Path(existing['_path']).parent if existing.get('_path') else None
-			run = self.runs[key] = StoredRunner(doc, self.new_name, parent=parent, reports_folder=folder)
+			run = StoredRunner(doc, self.new_name, parent=parent, reports_folder=folder)
 			before = dict(run.context)
-			self._run_hooks(run, 'on_end')
+			if not self._run_hooks(run, 'on_end'):
+				continue  # not stored: its findings are skipped too
+			self.runs[key] = run
 			for k in ID_KEYS:  # the ids the driver replaced on write (mongodb ObjectIds, api remote ids)
 				if src['context'].get(k) and run.context.get(k) != before.get(k):
 					self.ids[src['context'][k]] = run.context[k]

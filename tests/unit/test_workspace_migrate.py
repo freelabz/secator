@@ -288,6 +288,21 @@ class MigrateToSqlite(_MigrateCase):
 		self.assertEqual(migration.failed, 1)
 		self.assertNotIn('u-lost', self.findings())
 
+	def test_runner_write_failure_skips_its_findings(self):
+		def fail_nmap(run):
+			if run.name == 'nmap':
+				raise RuntimeError('store down')
+		hooks = {cls: {**ev, 'on_end': [fail_nmap, *ev['on_end']]} for cls, ev in self._hooks().items()}
+		with mock.patch('secator.workspace_migrate.import_dynamic', side_effect=lambda p, n: hooks if n == 'HOOKS' else None):
+			migration = self.migrate()
+		self.assertNotIn(NMAP, self.runners())
+		self.assertNotIn('u-ip', self.findings())
+		self.assertEqual(migration.failed, 2)
+
+	def _hooks(self):
+		from secator.utils import import_dynamic
+		return import_dynamic(f'secator.hooks.{self.dst}', 'HOOKS')
+
 	def test_notes(self):
 		self.migrate()
 		notes = self.engine().list_notes()
@@ -354,8 +369,10 @@ class MigrateCli(_MigrateCase):
 
 	def test_same_workspace_refused(self):
 		from secator.cli import cli
-		result = CliRunner().invoke(cli, ['workspace', 'migrate', WS, '--from', 'local', '--to', 'local'])
-		self.assertNotEqual(result.exit_code, 0)
+		for extra in ([], ['--as', f'./{WS}']):
+			result = CliRunner().invoke(cli, ['workspace', 'migrate', WS, '--from', 'local', '--to', 'local', *extra])
+			self.assertIn('same workspace', result.output)
+			self.assertNotEqual(result.exit_code, 0)
 
 
 class MigrateToLocal(_MigrateCase):

@@ -128,12 +128,13 @@ class MongoDBBackend(QueryBackend):
 			return 0
 
 	def list_notes(self):
-		"""Notes of the workspace from the ``notes`` collection, ``_id`` as a string."""
+		"""Notes of the workspace from the ``notes`` collection, ``_id`` as a string (None if the
+		read fails: an empty list would claim the workspace has none)."""
 		try:
 			notes = list(self._get_client().main.notes.find({'_context.workspace_id': self.workspace_id}))
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB list_notes failed: {e}'))
-			return []
+			return None
 		for note in notes:
 			note['_id'] = str(note['_id'])
 		return notes
