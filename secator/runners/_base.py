@@ -113,6 +113,9 @@ class Runner:
 	# Opt-in: tasks that flood out-of-scope findings set this True to drop them in add_result.
 	output_scope_filter = False
 
+	# Worker-loss redeliveries allowed before a task run by run_command is abandoned (-1: no cap).
+	max_retries = CONFIG.celery.task_max_retries
+
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)

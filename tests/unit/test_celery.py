@@ -5,6 +5,7 @@ from secator.celery import app, join_results  # noqa: F401
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
 from secator.output_types import Url
 from celery import chain, chord
+from secator.definitions import ADDONS_ENABLED
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
 
@@ -526,6 +527,57 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			# opts carry has_children=True (inherited from the parent workflow)
 			abandon_task('httpx', ['example.com'], {'context': {}, 'has_children': True}, delivery_count=2)
 		self.assertFalse(captured.get('has_children'), 'abandoned task must not keep inherited has_children')
+
+	def _gate(self, task_cls, delivery_count):
+		"""Run run_command's worker-loss gate on a delivery of ``task_cls``; return whether it abandoned."""
+		from unittest import mock
+		from secator import celery as celery_mod
+		from secator.celery import run_command
+
+		class Stub(task_cls):  # keeps the class attributes, never runs
+			def __init__(self, *args, **kwargs):
+				raise RuntimeError('ran')
+
+		conf = celery_mod.CONFIG.celery
+		run_command.push_request(id='wl-gate', delivery_info={'routing_key': 'q'}, is_eager=True)
+		try:
+			with mock.patch.object(celery_mod, 'IN_WORKER', True), \
+					mock.patch.object(conf, 'task_acks_late', True), \
+					mock.patch.object(conf, 'task_reject_on_worker_lost', True), \
+					mock.patch.object(celery_mod, 'bump_worker_loss_count', return_value=delivery_count), \
+					mock.patch.object(celery_mod, 'abandon_task', return_value=[]) as abandon, \
+					mock.patch.object(celery_mod.Task, 'get_task_class', return_value=Stub):
+				try:
+					run_command.run([], task_cls.__name__, ['example.com'], {'context': {}})
+				except RuntimeError:
+					pass  # not abandoned: went on to run the task
+			return abandon.called
+		finally:
+			run_command.pop_request()
+
+	@unittest.skipUnless(ADDONS_ENABLED.get('ai', False), 'ai addon required')
+	def test_ai_task_abandoned_on_first_redelivery(self):
+		"""The ai task's max_retries = 0: its first redelivery abandons it instead of replaying the chat."""
+		from secator.tasks.ai import ai
+		self.assertFalse(self._gate(ai, 1))
+		self.assertTrue(self._gate(ai, 2))
+
+	def test_task_max_retries_honoured(self):
+		"""A task class's max_retries sets its cap; tasks without one keep the configured cap."""
+		from unittest import mock
+		from secator.config import CONFIG
+		from secator.runners import Runner, PythonRunner
+		from secator.tasks import httpx
+		self.assertEqual(httpx.max_retries, CONFIG.celery.task_max_retries)
+
+		class one_retry(PythonRunner):
+			max_retries = 1
+
+		self.assertFalse(self._gate(one_retry, 2))
+		self.assertTrue(self._gate(one_retry, 3))
+		with mock.patch.object(Runner, 'max_retries', 3):  # as set by task_max_retries=3
+			self.assertFalse(self._gate(httpx, 4))
+			self.assertTrue(self._gate(httpx, 5))
 
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""

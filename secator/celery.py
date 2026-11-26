@@ -290,7 +290,7 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	task.add_result(Error(
 		message=(
 			f'Task {name} abandoned after {attempts} '
-			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — likely OOM kill, '
+			f'(retry cap: {task_cls.max_retries}; worker lost — likely OOM kill, '
 			'eviction, or the worker exiting before the task was acknowledged).'
 		),
 		_source=task.unique_name,
@@ -327,6 +327,8 @@ def run_command(self, results, name, targets, opts={}):
 		console.print(Info(message=f'Task {name} was revoked before it started, skipping'))
 		raise Ignore()
 
+	task_cls = Task.get_task_class(name)
+
 	# Set routing key in context
 	if IN_WORKER:
 		quiet = not CONFIG.cli.worker_command_verbose
@@ -346,17 +348,18 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Worker-loss redelivery cap. With task_acks_late + task_reject_on_worker_lost, a task
 		# whose worker is killed (cgroup OOMKill of the child, or a node-pressure eviction) is
-		# redelivered with the SAME Celery id. Count redeliveries on the result backend and
-		# abandon after task_max_retries, so a task that OOMs every run can't loop forever and
-		# block the surrounding chord/workflow. reject_on_worker_lost is what actually
-		# re-queues the task on abrupt worker death, so gate on it too (not just late acks).
+		# redelivered with the SAME Celery id. Count redeliveries on the result backend and abandon
+		# after the task class's max_retries (default: task_max_retries), so a task that OOMs every
+		# run can't loop forever and block the surrounding chord/workflow. reject_on_worker_lost is
+		# what actually re-queues the task on abrupt worker death, so gate on it too (not just late acks).
+		max_retries = task_cls.max_retries
 		if (
-			CONFIG.celery.task_max_retries != -1
+			max_retries != -1
 			and CONFIG.celery.task_acks_late
 			and CONFIG.celery.task_reject_on_worker_lost
 		):
 			delivery_count = bump_worker_loss_count(self.request.id)
-			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
+			if worker_loss_retries_exhausted(delivery_count, max_retries):
 				# Attach the request context so the abandoned task doc still carries
 				# celery_id / worker_name / routing_key even when opts had none coming in.
 				opts['context'] = context
@@ -369,7 +372,6 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Initialize task
 	sync = not IN_WORKER
-	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	chunk_it = task.needs_chunking(sync)
 	task.has_children = chunk_it
