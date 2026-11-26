@@ -621,14 +621,16 @@ class JsonBackend(QueryBackend):
 					data = json.load(f)
 				info = data.get('info', {})
 				if path.name != 'report.json' and 'context' not in info:
-					continue  # not a child runner's report
+					continue  # a report_*.json that holds no runner
 				if has_parent is not None and info.get('has_parent', False) != has_parent:
 					continue
-				rtype = (info.get('config') or {}).get('type') or path_info.get('type', '').rstrip('s')
+				rtype = (info.get('config') or {}).get('type') or path_info.get('type', '').removesuffix('s')
 				if runner_type and rtype != runner_type.rstrip('s'):
 					continue
 				info['_type'] = f'{rtype}s' if rtype else ''
 				info['_id'] = path_info.get('type', '') + '/' + path_info.get('id', '')
+				if path.name != 'report.json':  # a child runner: <root type>/<root id>/<child name>
+					info['_id'] += '/' + path.stem.removeprefix('report_')
 				info['_workspace'] = path_info.get('workspace', '')
 				info['_path'] = str(path)
 				runners.append(info)

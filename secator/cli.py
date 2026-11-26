@@ -1000,9 +1000,10 @@ def workspace_summary(workspace_opt, driver, template_path):
 def workspace_migrate(name, src, dst, new_name, keep_status, apply):
 	"""Copy a workspace to another driver: runners, findings (incl. ai chats) and notes.
 
-	Dry run by default. Re-running updates the docs a previous run wrote instead of duplicating them.
+	Dry run by default. Re-running updates the docs a previous run wrote instead of duplicating them;
+	it is refused on a driver that does not return them (the api driver keeps no runner marker).
 	"""
-	from secator.query.migrate import WorkspaceMigration
+	from secator.workspace_migrate import WorkspaceMigration
 	if src == dst and (new_name or name) == name:
 		raise click.UsageError('Source and destination are the same workspace: use --as <name> or another --to driver.')
 	try:
@@ -1027,6 +1028,8 @@ def workspace_migrate(name, src, dst, new_name, keep_status, apply):
 		migration.apply()
 	except RuntimeError as e:
 		raise click.ClickException(str(e))
+	if migration.failed:
+		console.print(Warning(message=f'{migration.failed} doc(s) could not be migrated (see warnings above).'))
 	counts = migration.destination_counts()
 	table = Table(title='Migrated')
 	for col in ('Collection', 'Source', 'Destination'):

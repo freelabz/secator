@@ -7,7 +7,6 @@ from typing import List, Dict, Any, Optional
 from secator.output_types import Warning
 from secator.query._base import QueryBackend, sort_runners_chronologically, validate_runner_order
 from secator.rich import console
-from secator.utils import debug
 
 # Query fields that map to real indexed columns instead of json_extract.
 MIRRORED_COLUMNS = {
@@ -294,11 +293,14 @@ class SqliteBackend(QueryBackend):
 
 	def list_notes(self):
 		"""Notes of the workspace from the ``notes`` table (none until a note was created)."""
+		conn = self._get_conn()
+		if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notes'").fetchone():
+			return []
 		try:
-			rows = self._get_conn().execute("SELECT data FROM notes WHERE workspace_id = ?", (self.workspace_id,))
+			rows = conn.execute("SELECT data FROM notes WHERE workspace_id = ?", (self.workspace_id,))
 			return [json.loads(data) for (data,) in rows.fetchall()]
 		except Exception as e:
-			debug(f'SQLite list_notes: {e}', sub='query.sqlite')
+			console.print(Warning(message=f'SQLite list_notes failed: {e}'))
 			return []
 
 	def get_runner(self, runner_id: str, runner_type: str):

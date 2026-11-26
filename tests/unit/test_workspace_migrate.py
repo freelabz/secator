@@ -19,7 +19,7 @@ from click.testing import CliRunner  # noqa: E402
 
 from secator.config import CONFIG  # noqa: E402
 from secator.query import QueryEngine  # noqa: E402
-from secator.query.migrate import WorkspaceMigration  # noqa: E402
+from secator.workspace_migrate import WorkspaceMigration  # noqa: E402
 
 WS, COPY = 'acme', 'acme-copy'
 T0 = 1767225600.0  # 2026-01-01T00:00:00Z
@@ -279,6 +279,14 @@ class MigrateToSqlite(_MigrateCase):
 		self.assertTrue(all(old == n for _, n, _, old in migration.plan()))
 		self.assertEqual(dict(migration.destination_counts()), SOURCE_COUNTS)
 		self.assertEqual({k: v['_uuid'] for k, v in self.findings().items()}, first)
+
+	def test_finding_without_runner_skipped(self):
+		path = Path(CONFIG.dirs.reports) / WS / 'tasks' / '0' / 'results.ndjson'
+		with open(path, 'ab') as f:
+			f.write(orjson.dumps(_finding('u-lost', 'ip', {'task_id': 'gone'}, ip='192.0.2.30')) + b'\n')
+		migration = self.migrate()
+		self.assertEqual(migration.failed, 1)
+		self.assertNotIn('u-lost', self.findings())
 
 	def test_notes(self):
 		self.migrate()
