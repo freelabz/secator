@@ -197,7 +197,8 @@ class httpx(Http):
 
 	@staticmethod
 	def on_end(self):
-		store_responses = self.get_opt_value('store_responses') or CONFIG.http.store_responses
+		# Same condition as the -srd flag in on_init: httpx only writes the index files when it got a response dir.
+		store_responses = self.get_opt_value('store_responses') or self.get_opt_value('screenshot')
 		response_dir = f'{self.reports_folder}/.outputs'
 		if store_responses:
 			index_rpath = f'{response_dir}/response/index.txt'

@@ -512,22 +512,18 @@ def _host_shell_env_lines() -> List[str]:
 	try:
 		from secator.installer import get_distro_config
 		d = get_distro_config()
-		if isinstance(d, str):
-			# SECATOR_PACKAGE_MANAGER override: get_distro_config returns a bare string.
-			lines.append(f"Package manager: {d} (install packages with it).")
+		system = getattr(d, "system", "") or ""
+		name = getattr(d, "name", "") or ""
+		pm_name = getattr(d, "pm_name", "") or ""
+		pm_installer = getattr(d, "pm_installer", "") or ""
+		os_line = f"Operating system: {system}" + (f" ({name})" if name else "")
+		lines.append(os_line + ".")
+		if pm_installer:
+			lines.append(f"Package manager: {pm_name} — install packages with `{pm_installer} <pkg>`.")
+		elif pm_name:
+			lines.append(f"Package manager: {pm_name}.")
 		else:
-			system = getattr(d, "system", "") or ""
-			name = getattr(d, "name", "") or ""
-			pm_name = getattr(d, "pm_name", "") or ""
-			pm_installer = getattr(d, "pm_installer", "") or ""
-			os_line = f"Operating system: {system}" + (f" ({name})" if name else "")
-			lines.append(os_line + ".")
-			if pm_installer:
-				lines.append(f"Package manager: {pm_name} — install packages with `{pm_installer} <pkg>`.")
-			elif pm_name:
-				lines.append(f"Package manager: {pm_name}.")
-			else:
-				lines.append("Package manager: unknown — detect it before installing anything.")
+			lines.append("Package manager: unknown — detect it before installing anything.")
 	except Exception:
 		lines.append("Package manager: unknown — detect it before installing anything.")
 	lines.extend(_sudo_status_lines())

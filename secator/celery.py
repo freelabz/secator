@@ -17,7 +17,7 @@ from retry import retry
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
-from secator.output_types import Error, Info, Target as TargetOutput
+from secator.output_types import Error, Info, Target as TargetOutput, Warning as WarningOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import resolve_task_queue, run_extractors
@@ -123,6 +123,32 @@ app.conf.update(
 	}
 )
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
+
+
+def celery_env_overrides():
+	"""Return Celery's own env vars that take precedence over the secator broker / result backend config.
+
+	Celery reads ``CELERY_BROKER_URL``, ``CELERY_BROKER_READ_URL``, ``CELERY_BROKER_WRITE_URL`` and
+	``CELERY_RESULT_BACKEND`` from the environment and lets them win over the app configuration, so they
+	silently replace ``celery.broker_url`` / ``celery.result_backend``.
+
+	Returns:
+		list[tuple[str, str]]: (env var, secator config key) pairs whose value differs from the config.
+	"""
+	pairs = [
+		('CELERY_BROKER_URL', 'celery.broker_url', CONFIG.celery.broker_url),
+		('CELERY_BROKER_READ_URL', 'celery.broker_url', CONFIG.celery.broker_url),
+		('CELERY_BROKER_WRITE_URL', 'celery.broker_url', CONFIG.celery.broker_url),
+		('CELERY_RESULT_BACKEND', 'celery.result_backend', CONFIG.celery.result_backend),
+	]
+	return [
+		(var, key) for var, key, value in pairs
+		if os.environ.get(var) and os.environ[var] != value
+	]
+
+
+for _var, _key in celery_env_overrides():
+	console.print(WarningOutput(message=f'{_var} is set and overrides config {_key} (SECATOR_{_key.upper().replace(".", "_")})'))  # noqa: E501
 if IN_WORKER:
 	from secator.loader import discover_external_drivers, discover_external_exporters
 	discover_external_drivers()
@@ -331,7 +357,7 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Set routing key in context
 	if IN_WORKER:
-		quiet = not CONFIG.cli.worker_command_verbose
+		quiet = not CONFIG.celery.worker_command_verbose
 		opts.update(
 			{
 				'print_item': True,

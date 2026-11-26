@@ -582,7 +582,7 @@ class Command(Runner):
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
 
-					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.auto_install_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
 						yield Error(message=f'Failed installing {self.cmd_name}')
