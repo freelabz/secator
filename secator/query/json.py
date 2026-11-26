@@ -625,7 +625,7 @@ class JsonBackend(QueryBackend):
 				if has_parent is not None and info.get('has_parent', False) != has_parent:
 					continue
 				rtype = (info.get('config') or {}).get('type') or path_info.get('type', '').removesuffix('s')
-				if runner_type and rtype != runner_type.rstrip('s'):
+				if runner_type and rtype != runner_type.removesuffix('s'):
 					continue
 				info['_type'] = f'{rtype}s' if rtype else ''
 				info['_id'] = path_info.get('type', '') + '/' + path_info.get('id', '')

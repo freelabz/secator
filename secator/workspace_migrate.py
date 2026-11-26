@@ -18,6 +18,7 @@
 import hashlib
 import uuid
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import orjson
 from dotmap import DotMap
@@ -262,7 +263,7 @@ class WorkspaceMigration:
 				pkeys = ('workflow_id', 'scan_id') if rtype == 'task' else ('scan_id',)
 				parent = next((self.runs[src['context'][k]] for k in pkeys if src['context'].get(k) in self.runs), None)
 			existing = self.existing_runners.get(key) or {}
-			folder = existing['_path'].rsplit('/', 1)[0] if existing.get('_path') else None
+			folder = Path(existing['_path']).parent if existing.get('_path') else None
 			run = self.runs[key] = StoredRunner(doc, self.new_name, parent=parent, reports_folder=folder)
 			before = dict(run.context)
 			self._run_hooks(run, 'on_end')
@@ -348,7 +349,8 @@ class WorkspaceMigration:
 				self._run_hooks(run, 'on_run_end')
 		tag_duplicates = import_dynamic(f'secator.hooks.{driver}', 'tag_duplicates')
 		if tag_duplicates:
-			tag_duplicates(self.dst_ws)
+			# every migrated finding in one pass (unbounded): one never tagged at the source is untagged
+			tag_duplicates(self.dst_ws, max_items=-1)
 
 	# ---------- report ----------
 
