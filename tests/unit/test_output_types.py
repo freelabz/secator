@@ -166,7 +166,7 @@ class TestWarningRich(unittest.TestCase):
 class TestRichEscape(unittest.TestCase):
 
 	def test_escaped_text_renders_as_input(self):
-		for text in NOT_MARKUP + ['a [/] b', 'trailing \\']:
+		for text in NOT_MARKUP + ['a [/] b'] + ['trailing ' + '\\' * n for n in (1, 2, 3)]:
 			assert Text.from_markup(f'[dim]{rich_escape(text)}[/]').plain == text
 
 

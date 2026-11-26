@@ -541,7 +541,8 @@ def rich_escape(obj):
 	"""
 	if isinstance(obj, str):
 		from rich.markup import escape
-		return escape(obj)
+		text = obj.rstrip('\\')   # escape() leaves a run of 2+ trailing backslashes as is: double the whole run
+		return escape(text) + '\\' * 2 * (len(obj) - len(text))
 	return obj
 
 
