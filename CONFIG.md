@@ -886,6 +886,10 @@ export SECATOR_OFFLINE_MODE=true
 
 Environment variables take precedence over the config file.
 
+Values are validated against the config schema: boolean keys accept `true`/`false`, `1`/`0`, `yes`/`no`,
+`on`/`off` (case-insensitive), and an invalid value (e.g. a non-integer for an integer key, or a value that
+is not a JSON object for a dict key) is ignored with an `(override failed, ignored)` message.
+
 ---
 
 ## Configuration Management
