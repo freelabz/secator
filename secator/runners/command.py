@@ -19,7 +19,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED, PATH, URL
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED, PATH
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -1443,12 +1443,14 @@ class Command(Runner):
 		return opts_str.strip()
 
 	def _clone_git_inputs(self):
-		"""Replace each git URL input of a path task that can't fetch URLs itself by a shallow local clone.
+		"""Replace each git URL input of a path task by a shallow local clone, authenticated by ``git_token``.
+
+		A task that also accepts URLs gets the clone too, so it never fetches the repository host itself.
 
 		Skipped when the command won't run here: dry run, invalid inputs, or a run split into chunks
 		(each chunk clones its own input). A failed clone is an error that stops the task.
 		"""
-		if PATH not in (self.input_types or []) or URL in self.input_types or self.dry_run:
+		if PATH not in (self.input_types or []) or self.dry_run:
 			return
 		urls = [i for i in self.inputs if is_git_url(i)]
 		# Same chunking decision as celery.run_command, which builds this runner then chunks it.
@@ -1459,7 +1461,7 @@ class Command(Runner):
 		self.clone_folder = tempfile.mkdtemp(dir=inputs_folder)
 		for url in urls:
 			try:
-				path = clone_git_repo(url, tempfile.mkdtemp(dir=self.clone_folder))
+				path = clone_git_repo(url, tempfile.mkdtemp(dir=self.clone_folder), token=self.run_opts.get('git_token'))
 			except (OSError, subprocess.SubprocessError) as e:
 				self.add_result(Error(message=f'Could not clone {url}: {getattr(e, "stderr", None) or e}'))
 				return

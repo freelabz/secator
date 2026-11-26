@@ -16,7 +16,7 @@ from celery.result import allow_join_result
 
 from secator.definitions import ADDONS_ENABLED, PATH, STATE_COLORS
 from secator.celery_utils import CeleryData
-from secator.config import CONFIG
+from secator.config import CONFIG, is_secret_key
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
 )
@@ -361,9 +361,8 @@ class Runner:
 	def resolved_opts(self):
 		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_') and k != 'env'}  # noqa: E501
 		sensitive = self.sensitive_opt_names
-		if sensitive:
-			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
-		return opts
+		# Also redact undeclared credential opts by name (e.g. `git_token`, read by Command._clone_git_inputs).
+		return {k: (REDACTED_OPT_VALUE if v and (k in sensitive or is_secret_key(k)) else v) for k, v in opts.items()}
 
 	@property
 	def resolved_print_opts(self):
@@ -1594,7 +1593,7 @@ class Runner:
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
 				if PATH in self.config.input_types and is_git_url(_input):
-					continue  # Command._clone_git_inputs clones it (unless the task fetches URLs itself)
+					continue  # Command._clone_git_inputs clones it
 				runner_name = format_runner_name(self)
 				message = f'Target [bold blue]{_input}[/] skipped ([bold]{input_type}[/] not supported by {runner_name})'
 				info = Info(message=message)
