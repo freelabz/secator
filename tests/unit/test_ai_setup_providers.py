@@ -1,6 +1,7 @@
 """Tests for the custom-provider / OpenAI-compatible `ai setup` helpers."""
 
 import json
+import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -529,16 +530,42 @@ class TestOAuth2Setup:
 		assert llm.call_args.kwargs['api_key'] == 'sk-gw-key-0123456789'
 		assert saved == {'addons.ai.default_model': 'openai/c'}
 
-	def test_token_url_is_always_saved_explicitly(self, tmp_path, monkeypatch):
-		# An older OAuth2 setup without oauth2_endpoint: the next save writes the default it used.
+	@pytest.mark.parametrize('action,pick', [('', ('Model', 'openai/c')), ('4', ('Intent model', 'openai/c'))])
+	def test_missing_token_url_is_confirmed_before_any_secret_is_sent(self, tmp_path, monkeypatch, action, pick):
+		# An older OAuth2 setup without oauth2_endpoint: a quick re-run first shows the token-URL
+		# prompt (prefilled with the default); nothing is filled in silently.
 		config = {**OAUTH, 'oauth2_endpoint': ''}
-		answers = [('Choice', ''), ('Model', 'openai/c')]
+		answers = [('Choice', action), ('Choice', ''), ('Client ID', ''), ('Token URL', ''), ('Client secret', ''), pick]
+		asked = []
+		real = _asker(answers)
+
+		def spy(_answers):
+			def ask(prompt, *a, **k):
+				asked.append(prompt.replace('[bold cyan]', '').replace('[/]', ' ').split()[0])
+				return real(prompt, *a, **k)
+			return ask
+
+		monkeypatch.setattr(sys.modules[__name__], '_asker', spy)
 		with _token_endpoint() as post:
-			_, saved, _, _, _ = _run_wizard(
+			resp = post.return_value
+
+			def token(*a, **k):  # the secret only leaves once the token URL prompt was answered
+				assert 'Token' in asked, 'client secret sent before the token URL prompt'
+				return resp
+			post.side_effect = token
+			_, saved, _, _, text = _run_wizard(
 				monkeypatch, tmp_path, answers, config=config,
 				fetch_openai_compatible_models=MagicMock(return_value=['a', 'c']))
+		assert 'no token URL yet' in text
+		assert asked[:5] == ['Choice', 'Choice', 'Client', 'Token', 'Client']
 		assert post.call_args.args[0] == 'https://gw.example/oauth2/token'
+		assert post.call_args.kwargs['auth'] == ('cid', 'cs-saved-secret-0123456789')  # confirmed URL: saved secret kept
 		assert saved['addons.ai.oauth2_endpoint'] == 'https://gw.example/oauth2/token'
+
+	def test_saved_setup_never_fills_the_token_url(self, monkeypatch):
+		for name, value in {**OAUTH, 'oauth2_endpoint': '', 'api_key': ''}.items():
+			monkeypatch.setitem(CONFIG.addons.ai, name, value)
+		assert u._saved_setup()['cred']['endpoint'] == ''
 
 
 class TestReRun:

@@ -1712,7 +1712,13 @@ def _step_menu(state, saved):
 		('Done', []),
 	]
 	picked = _choose('What do you want to change?', [a[0] for a in actions])
-	return actions[picked][1]
+	steps = actions[picked][1]
+	# OAuth2 without a saved token URL: the secret is only sent once the user confirmed one.
+	cred = state['cred']
+	if cred['method'] == 'oauth2' and not cred['endpoint'] and steps and _step_auth not in steps:
+		console.print("  [yellow]Your OAuth2 setup has no token URL yet: confirm it first.[/]")
+		steps = [_step_auth] + steps
+	return steps
 
 
 def _step_provider(state, saved):
@@ -1793,8 +1799,9 @@ def _ask_oauth2(state, cred):
 		if not err:
 			break
 		console.print(f"  [red]{err}[/]")
-	# The saved secret is only ever sent to the token URL it was saved for.
-	saved_secret = cred['client_secret'] if endpoint == cred['endpoint'] else ''
+	# The saved secret is only ever sent to the token URL it was saved for (or, for an older setup
+	# without one, to the default the user just confirmed in this prompt).
+	saved_secret = cred['client_secret'] if endpoint == url else ''
 	keep = mask_secret(saved_secret) if saved_secret else None
 	secret = ''
 	while not secret:
@@ -1996,10 +2003,6 @@ def _saved_setup():
 	# Same precedence as the runtime: a saved API key wins over OAuth2 settings.
 	cred = _blank_cred('oauth2' if ai.oauth2_client_id and not ai.api_key else 'key')
 	cred.update({field: ai[key] or '' for field, key in _CRED_KEYS.items()})
-	# The setup always saves the token URL explicitly: an older setup that relied on the default
-	# gets it written (and checked) on its next save.
-	if cred['client_id'] and not cred['endpoint']:
-		cred['endpoint'] = default_oauth2_token_url(saved['base'])
 	entry = _saved_entry(_provider_entries(), saved)
 	provider = _entry_state(entry, saved['base']) if entry else _entry_state(('lite', route, pretty_provider(route)))
 	# The provider entry's route wins (e.g. a registry `openrouter` route over an older `openai/` id),
