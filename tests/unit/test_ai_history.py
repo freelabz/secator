@@ -186,7 +186,7 @@ class TestChatHistory(unittest.TestCase):
         captured = {}
 
         def fake_trim(messages, max_tokens):
-            captured["messages"] = messages
+            captured["messages"] = [dict(m) for m in messages]  # as the trimmer saw them
             # replicate litellm's crashing operation to prove it no longer crashes
             for m in messages:
                 if m.get("role") != "system":
@@ -197,6 +197,21 @@ class TestChatHistory(unittest.TestCase):
             history.trim(max_tokens=1000)  # must not raise
 
         self.assertTrue(all(m.get("content") is not None for m in captured["messages"]))
+
+    def test_trim_does_not_leave_empty_content_on_tool_call_turns(self):
+        """The "" coercion is for the trimmer only: the kept tool-call turn goes back to
+        having no content (some Chat-to-Responses converters read "" as a text message
+        and drop the calls, orphaning the tool results that follow)."""
+        history = ChatHistory()
+        history.add_user("u")
+        history.add_assistant_with_tool_calls(None, [
+            {"id": "1", "type": "function", "function": {"name": "stop", "arguments": "{}"}}
+        ])
+        history.add_tool_result("stop", "1", "ok")
+        trimmed = history.trim(max_tokens=100000)
+        self.assertNotIn("content", trimmed[1])
+        self.assertNotIn("content", history.messages[1])
+        self.assertEqual(trimmed[1]["tool_calls"][0]["id"], "1")
 
     def test_trim_survives_trimmer_exception(self):
         """A crash inside trim_messages must not propagate and kill the AI loop —

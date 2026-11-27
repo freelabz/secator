@@ -601,8 +601,15 @@ def _strip_orphan_tool_blocks(messages: List[Dict]) -> int:
 		prev = messages[i - 1] if i > 0 else None
 		rooted = bool(prev and prev.get("role") == "assistant" and prev.get("tool_calls"))
 		if rooted:
+			# Within the block, also drop a result whose id is not one of the parent's
+			# calls ("No tool call found for function call output with call_id ...").
+			ids = {tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None) for tc in prev["tool_calls"]}
 			while i < len(messages) and messages[i].get("role") == "tool":
-				i += 1
+				if messages[i].get("tool_call_id") in ids:
+					i += 1
+				else:
+					messages.pop(i)
+					removed += 1
 			continue
 		while i < len(messages) and messages[i].get("role") == "tool":
 			messages.pop(i)
@@ -1023,8 +1030,10 @@ def call_llm(
 
 	# Normalize assistant messages that have tool_calls but no 'content' key.
 	# litellm's trim_messages crashes with KeyError: 'content' on such messages.
+	# An empty content on a tool-call turn (older saved histories) becomes None too:
+	# some Chat-to-Responses converters treat "" as a text message and drop the calls.
 	for msg in kwargs["messages"]:
-		if msg.get("role") == "assistant" and "content" not in msg:
+		if msg.get("role") == "assistant" and ("content" not in msg or (msg.get("tool_calls") and msg["content"] == "")):
 			msg["content"] = None
 
 	# Sanitize orphan tool_use blocks (Anthropic requires every tool_use to have

@@ -308,6 +308,12 @@ class ChatHistory:
         # kept window can START with an orphan tool_result whose assistant(tool_calls)
         # parent was dropped — Anthropic/OpenAI reject that. Drop leading orphans.
         _strip_leading_orphan_tools(trimmed)
+        # Undo the "" coercion on tool-call turns: an assistant message with tool_calls
+        # and content "" is read as a text message by some Chat-to-Responses converters,
+        # which then drop its tool calls and reject the following tool results.
+        for m in trimmed:
+            if m.get("role") == "assistant" and m.get("tool_calls") and m.get("content") == "":
+                m.pop("content")
         dropped = original_count - len(trimmed)
 
         if dropped:
