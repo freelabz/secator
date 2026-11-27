@@ -718,7 +718,19 @@ class ai(PythonRunner):
 		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
 		self.system_prompt = self._system_prompt_for(self.mode)
 		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True), extra_tools=getattr(self, "extra_tools", None))  # noqa: E501
+		self._sync_ctx_mode()
 		return self.system_prompt, self.tool_schemas
+
+	def _sync_ctx_mode(self):
+		"""Keep the live action context on the mode the tool schemas were just built for.
+
+		``dispatch_action`` rejects an action outside ``ctx.mode``, so a mode change that rebuilds
+		the schemas (follow-up re-detection, explicit switch) must move ``ctx.mode`` with it, or
+		the new mode's tools would be refused."""
+		ctx = getattr(self, "_isolation_ctx", None)
+		if ctx is not None and isinstance(getattr(self, "mode", None), str):
+			ctx.mode = self.mode
+			ctx.mode_is_auto = getattr(self, "mode_is_auto", True)
 
 	def _resolve_prompt(self):
 		"""Resolve the ``prompt`` run option, reading it from a file if it names one.
@@ -1125,6 +1137,7 @@ class ai(PythonRunner):
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
 			dangerous=bool(getattr(self, "dangerous", False)),
+			extra_tools=list(getattr(self, "extra_tools", None) or []),
 			run_item_update_hooks=partial(self.run_hooks, 'on_item_update', sub='item'),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
@@ -1799,6 +1812,7 @@ class ai(PythonRunner):
 		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
 			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True), extra_tools=getattr(self, "extra_tools", None))  # noqa: E501
+		self._sync_ctx_mode()
 
 	# -------------------------------------------------------------------------
 	# Workspace helpers

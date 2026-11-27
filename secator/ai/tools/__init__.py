@@ -269,6 +269,23 @@ def _is_glob(pattern):
 	return any(c in pattern for c in "*?[")
 
 
+def _tool_in_mode(tool, patterns, extras):
+	"""A mode's effective tool set: a built-in tool its ``tools:`` globs match, or a tool enabled
+	for the run via ``extras`` that the mode does not ``!``-exclude."""
+	if tool_matches_mode(tool.name, patterns, external=tool.external):
+		return True
+	return tool.name in extras and not mode_excludes_tool(tool.name, patterns)
+
+
+def tool_exposed_in_mode(tool, mode: str, extra_tools=None) -> bool:
+	"""Whether ``tool`` belongs to ``mode``'s effective tool set — the same rule
+	``build_tool_schemas`` uses to expose it. ``extra_tools`` are already-resolved names (see
+	``resolve_extra_tools``). An unknown mode resolves like ``build_tool_schemas`` (``chat``)."""
+	norm = normalize_mode(mode)
+	lookup_mode = norm if norm in MODES else "chat"
+	return _tool_in_mode(tool, mode_tool_patterns(lookup_mode), set(extra_tools or ()))
+
+
 def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True,
                        extra_tools=None) -> list:
 	"""Return list of tool schemas exposed in a mode (derived from the registry).
@@ -329,9 +346,7 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	for t in TOOLS:
 		if t.injected or t.name in excluded:
 			continue
-		in_baseline = tool_matches_mode(t.name, patterns, external=t.external)
-		in_extras = t.name in extras and not mode_excludes_tool(t.name, patterns)
-		if in_baseline or in_extras:
+		if _tool_in_mode(t, patterns, extras):
 			schemas.append(t.schema)
 	if backend is not None:
 		schemas.extend(backend.get_extra_tools())

@@ -169,15 +169,16 @@ class TestBuildToolSchemas(unittest.TestCase):
 	def test_monitor_mode_tool_surface(self):
 		"""Monitor reads, re-probes with shell, records outcomes with add_note, retires a gone
 		finding (mark_vuln_false_positive) or closes a remediated exploited vuln (mark_vuln_fixed),
-		and fixes metadata (update_finding) — but never runs tasks/workflows, adds findings, marks
-		exploited, delegates or self-escalates."""
+		fixes metadata (update_finding), and may re-open a FIXED vuln by replaying its recorded PoC
+		(mark_vuln_exploited, restricted by the tool in monitor mode) — but never runs
+		tasks/workflows, adds findings, delegates or self-escalates."""
 		from secator.ai.tools import build_tool_schemas
 		from secator.ai.interactivity import CLIBackend
 		names = {s["function"]["name"] for s in build_tool_schemas("monitor", backend=CLIBackend())}
 		for present in ["query_workspace", "run_shell", "mark_vuln_false_positive",
-		                "mark_vuln_fixed", "update_finding", "add_note", "stop"]:
+		                "mark_vuln_fixed", "mark_vuln_exploited", "update_finding", "add_note", "stop"]:
 			self.assertIn(present, names)
-		for absent in ["run_task", "run_workflow", "add_finding", "mark_vuln_exploited",
+		for absent in ["run_task", "run_workflow", "add_finding",
 		               "mark_vuln_exploit_failed", "run_subagent", "change_mode"]:
 			self.assertNotIn(absent, names)
 
@@ -421,6 +422,18 @@ class TestToolRegistry(unittest.TestCase):
 			self.assertIs(run.call_args.args[0], t, f"{t.name}: dispatched to a different instance")
 			self.assertEqual(out, [sentinel], t.name)
 		self.assertFalse(hasattr(BaseTool, "handler"), "BaseTool still carries a `handler` attribute")
+
+	def test_dispatch_gate_matches_schema_exposure(self):
+		"""The dispatch-side mode gate and build_tool_schemas share one rule: for every mode, a
+		built-in tool passes the gate exactly when its schema is exposed in that mode."""
+		from secator.ai.tools import TOOLS, build_tool_schemas, tool_exposed_in_mode
+		from secator.ai.prompts import MODES
+		for mode in MODES:
+			exposed = {s["function"]["name"] for s in build_tool_schemas(mode)}
+			for t in TOOLS:
+				if t.injected or t.external:
+					continue
+				self.assertEqual(tool_exposed_in_mode(t, mode), t.name in exposed, f"{mode}/{t.name}")
 
 	def test_mode_exposure_matches_allowed_actions(self):
 		"""CONSISTENCY GUARD: a tool exposed in a mode (resolved from the mode's `tools:`

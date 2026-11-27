@@ -169,6 +169,20 @@ class TestDynamicAITools(unittest.TestCase):
 		# Not sticky: a later run without extra_tools does not expose it.
 		self.assertNotIn("ping_pong", [s["function"]["name"] for s in build_tool_schemas("chat")])
 
+	def test_dispatch_gate_allows_custom_tool_only_when_enabled_for_the_run(self):
+		"""A custom tool reaches its handler under a mode gate only when the run enabled it via
+		extra_tools; otherwise the dispatch-side gate rejects it like any hidden tool."""
+		self._write("ping_pong.py", _GOOD_TOOL)
+		from secator.loader import discover_ai_tools
+		from secator.ai.actions import ActionContext, dispatch_action
+		from secator.output_types import Error, Info
+		discover_ai_tools()
+		blocked = list(dispatch_action({"action": "ping_pong", "msg": "hi"}, ActionContext(targets=[], model="m", mode="chat")))
+		self.assertTrue(any(isinstance(o, Error) and "not allowed in chat mode" in o.message for o in blocked))
+		allowed = list(dispatch_action({"action": "ping_pong", "msg": "hi"},
+		                               ActionContext(targets=[], model="m", mode="chat", extra_tools=["ping_pong"])))
+		self.assertTrue(any(isinstance(o, Info) and "pong: hi" in o.message for o in allowed))
+
 	def test_extra_tools_from_config_default(self):
 		"""`CONFIG.addons.ai.extra_tools` adds a tool to every run, merged with the option."""
 		self._write("ping_pong.py", _GOOD_TOOL)
