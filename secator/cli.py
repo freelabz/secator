@@ -155,6 +155,7 @@ for config in SCANS:
 @click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
+@click.option('-qp', '--queue-prefix', type=str, default='', help='Subscribe to prefixed queue names (e.g. "fleet1" -> listen on "fleet1-small", ...). Defaults to CONFIG.celery.queue_prefix.')  # noqa: E501
 @click.option('-P', '--pool', type=str, default='gevent', help='Pool implementation.')
 @click.option('--quiet', is_flag=True, default=False, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
@@ -166,7 +167,7 @@ for config in SCANS:
 @click.option('--without-gossip', is_flag=True)
 @click.option('--without-mingle', is_flag=True)
 @click.option('--without-heartbeat', is_flag=True)
-def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
+def worker(hostname, concurrency, reload, queue, queue_prefix, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
 	"""Run a worker"""
 
 	# Check Celery addon is installed
@@ -191,8 +192,14 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		is_celery_worker_alive()
 		return
 
+	# When a prefix is set (--queue-prefix or CONFIG.celery.queue_prefix), subscribe to the
+	# prefixed names so this worker only consumes a run dispatched with the matching prefix.
+	prefix = queue_prefix or CONFIG.celery.queue_prefix
 	if not queue:
-		queue = 'small,medium,large,extra_large,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
+		# Build the default queue set from the classic queue names (size pools + the
+		# statically-routed celery/results/mongodb).
+		base_queues = ['small', 'medium', 'large', 'extra_large', 'poll', 'celery', 'results', 'mongodb']
+		queue = ','.join(f'{prefix}-{q}' if prefix else q for q in base_queues)
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
@@ -203,7 +210,8 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
 		pidfile = '%n.pid'
-		queues = '-Q:1 celery -Q:2 small -Q:3 medium -Q:4 large -Q:5 extra_large'
+		dev_queues = ['celery', 'small', 'medium', 'large', 'extra_large']
+		queues = ' '.join(f'-Q:{i} {prefix}-{q}' if prefix else f'-Q:{i} {q}' for i, q in enumerate(dev_queues, 1))
 		concur = '-c:1 10 -c:2 100 -c:3 50 -c:4 20 -c:5 4'
 		pool = 'gevent'
 		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
