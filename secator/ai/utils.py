@@ -826,7 +826,7 @@ def init_llm(api_key: Optional[str] = None):
 			))
 
 		def log_success_event(self, kwargs, response_obj, start_time, end_time):
-			if "litellm" not in CONFIG.debug:
+			if "litellm" not in CONFIG.debug or not response_obj.choices:
 				return
 			from secator.rich import CustomMarkdown as Markdown
 			from rich.panel import Panel
@@ -916,6 +916,9 @@ def call_llm(
 		model=model,
 		messages=llm_messages,
 		temperature=temperature,
+		# Let litellm drop params the model rejects instead of raising, e.g. a
+		# temperature other than 1 while reasoning / thinking is active.
+		drop_params=True,
 		api_base=api_base,
 	)
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
@@ -972,6 +975,14 @@ def call_llm(
 			))
 			raise
 
+	# An empty `choices` list comes back without an exception: raise one that carries
+	# the response fields saying why (stop reason, provider error, usage).
+	if not response.choices:
+		raw = response.model_dump()
+		raw['original_response'] = getattr(response, '_hidden_params', {}).get('original_response')
+		keys = ('id', 'model', 'finish_reason', 'stop_reason', 'error', 'usage', 'original_response')
+		details = {k: raw[k] for k in keys if raw.get(k)}
+		raise ValueError(f"LLM returned no choices for model {model}: {str(details)[:2000]}")
 	message = response.choices[0].message
 	content = message.content or ""
 	usage = None
