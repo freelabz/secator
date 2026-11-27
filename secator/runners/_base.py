@@ -14,7 +14,7 @@ from rich.errors import MarkupError as RichMarkupError
 import humanize
 from celery.result import allow_join_result
 
-from secator.definitions import ADDONS_ENABLED, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, PATH, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
@@ -24,6 +24,7 @@ from secator.report import Report
 from secator.rich import console, console_stdout, live_is_active
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.scope import as_scope_list, host_in_scope
+from secator.sources import is_git_url
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, get_workspace_folder_name
@@ -362,10 +363,9 @@ class Runner:
 	@property
 	def resolved_opts(self):
 		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_') and k != 'env'}  # noqa: E501
-		sensitive = self.sensitive_opt_names
-		if sensitive:
-			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
-		return opts
+		# git_token is read by Command._clone_git_inputs and declared on no task.
+		sensitive = self.sensitive_opt_names | {'git_token'}
+		return {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
 
 	@property
 	def resolved_print_opts(self):
@@ -1595,6 +1595,8 @@ class Runner:
 		for _input in list(inputs):
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
+				if PATH in self.config.input_types and is_git_url(_input):
+					continue  # Command._clone_git_inputs clones it
 				runner_name = format_runner_name(self)
 				message = f'Target [bold blue]{_input}[/] skipped ([bold]{input_type}[/] not supported by {runner_name})'
 				info = Info(message=message)

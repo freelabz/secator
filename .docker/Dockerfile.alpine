@@ -36,6 +36,8 @@ RUN chmod -R 500 /home/secator/.local/share/pipx/venvs/secator
 # Install sudo and nmap
 RUN apk add --no-cache \
     flock \
+    git \
+    openssh-client \
     pipx \
     sudo
 
