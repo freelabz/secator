@@ -108,6 +108,7 @@ def test_config_change_refetches(oauth2):
 	_token_resp('tok-1', status=400),
 	_token_resp(''),  # empty token would let litellm fall back to another key
 	_token_resp('tok-1', expires_in='soon'),
+	_token_resp('tok-1', expires_in=0),
 ])
 def test_bad_token_response_raises(oauth2, resp):
 	oauth2.post.return_value = resp
@@ -138,6 +139,22 @@ def test_http_token_endpoint_rejected(oauth2):
 	with pytest.raises(ValueError, match='https'):
 		_call()
 	oauth2.post.assert_not_called()
+
+
+def test_basic_auth_parts_form_encoded(oauth2):
+	CONFIG.addons.ai.oauth2_client_id = 'client+blue'
+	CONFIG.addons.ai.oauth2_client_secret = 'a:b/c'
+	oauth2.post.return_value = _token_resp('tok-1')
+	_call()
+	assert oauth2.post.call_args.kwargs['auth'] == ('client%2Bblue', 'a%3Ab%2Fc')
+
+
+def test_token_never_sent_over_plain_http(oauth2):
+	CONFIG.addons.ai.api_base = 'http://llm.example.com/v1'
+	with pytest.raises(ValueError, match='https'):
+		_call(api_base='http://llm.example.com/v1')
+	oauth2.post.assert_not_called()
+	oauth2.completion.assert_not_called()
 
 
 def test_secret_and_token_never_logged(oauth2, caplog):

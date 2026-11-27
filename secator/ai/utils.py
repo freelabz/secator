@@ -915,6 +915,7 @@ class OAuth2TokenCache:
 		"""POST a client_credentials grant (RFC 6749 4.4, HTTP Basic client auth)."""
 		import math
 		import requests
+		from urllib.parse import quote_plus
 		_, err = _normalize_api_base(endpoint)
 		if err:
 			raise ValueError('addons.ai.oauth2_endpoint must be https:// (http:// only for a bare localhost host).')
@@ -922,14 +923,15 @@ class OAuth2TokenCache:
 		if scope:
 			data['scope'] = scope
 		resp = requests.post(
-			endpoint, data=data, auth=(client_id, client_secret),
+			# RFC 6749 2.3.1: form-encode both parts before HTTP Basic.
+			endpoint, data=data, auth=(quote_plus(client_id, safe=''), quote_plus(client_secret, safe='')),
 			timeout=15, allow_redirects=False, verify=_ssl_verify())
 		if resp.status_code != 200:
 			raise RuntimeError(f'OAuth2 token request failed (HTTP {resp.status_code}).')
 		try:
 			body = resp.json()
 			token = body['access_token']
-			ttl = float(body.get('expires_in') or 300)
+			ttl = 300.0 if body.get('expires_in') is None else float(body['expires_in'])
 		except (ValueError, KeyError, TypeError):
 			token, ttl = None, 0
 		# An empty token would make litellm fall back to another configured key for this base.
@@ -990,6 +992,8 @@ def call_llm(
 	use_oauth2 = _uses_oauth2(api_base, api_key)
 	oauth2_retried = False
 	if use_oauth2:
+		if _normalize_api_base(api_base)[1]:
+			raise ValueError('addons.ai.api_base must be https:// (http:// only for a bare localhost host) with OAuth2.')
 		kwargs["api_key"] = _oauth2_tokens.get()
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
