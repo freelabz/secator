@@ -645,6 +645,7 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.ai.temperature` | `float` | `0.7` | Sampling temperature |
 | `addons.ai.max_tokens_total` | `int` | `100000` | Max tokens per session |
 | `addons.ai.user_response_timeout` | `int` | `600` | User interaction timeout (s) |
+| `addons.ai.background_max_jobs` | `int` | `3` | Max background jobs (background tool calls and subagents) running at once |
 | `addons.ai.encrypt_pii` | `bool` | `true` | Encrypt PII before sending |
 | `addons.ai.exec_wrappers` | `list[str]` | `[]` | Extra exec wrappers whose wrapped command the AI shell guardrails re-check |
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |

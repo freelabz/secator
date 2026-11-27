@@ -74,6 +74,7 @@ AI_TYPES = {
 	'stopped': {'label': '🛑', 'color': 'orange3'},
 	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},  # legacy: kept so old transcripts still render
 	'steer': {'label': '[STEER]', 'color': 'cyan'},
+	'background_job': {'label': '⏳', 'color': 'cyan'},
 }
 
 ACTION_TYPES = ('task', 'workflow', 'scan', 'shell', 'add_finding', 'mark_vuln_exploited',

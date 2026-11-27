@@ -150,3 +150,7 @@ class QueryEngine:
         runner_id: the backend runner id. runner_type: singular type (task/workflow/scan).
         """
         return self.backend.get_runner(runner_id, runner_type=runner_type)
+
+    def get_runner_status(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:
+        """Live status of a runner by id via the active backend (see QueryBackend.get_runner_status)."""
+        return self.backend.get_runner_status(runner_id, runner_type)

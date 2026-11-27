@@ -50,6 +50,7 @@ You are a vulnerability research specialist conducting authorized security resea
 ${common}
 ${scope_respect}
 ${runners}
+${background}
 ${queries}
 ${findings}
 ${arsenal}

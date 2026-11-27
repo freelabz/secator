@@ -576,19 +576,26 @@ class JsonBackend(QueryBackend):
 		keys = (f'{rtype}_chunk_id', f'{rtype}_id')
 		dirs = sorted(self._report_dirs(), key=lambda d: d.stat().st_mtime, reverse=True)
 		for d in dirs:
+			# Several reports of one dir can carry the same ids (e.g. a dispatcher's child report and
+			# the worker's own report for a Celery task): prefer a final one, else the newest.
+			matches = []
 			for path in d.glob('report*.json'):
 				try:
 					with open(path, 'r') as f:
 						info = json.load(f).get('info', {})
+					mtime = path.stat().st_mtime
 				except Exception as e:
 					debug(f'failed to load runner report {path}: {e}', sub='query.json')
 					continue
 				ctx = info.get('context') or {}
 				if (info.get('config') or {}).get('type', rtype) == rtype and runner_id in (ctx.get(keys[0]), ctx.get(keys[1])):
-					info['_id'] = runner_id
-					info['_type'] = f'{rtype}s'
-					info['_path'] = str(path)
-					return info
+					matches.append((bool(info.get('done')), mtime, str(path), info))
+			if matches:
+				_, _, path, info = max(matches, key=lambda m: (m[0], m[1]))
+				info['_id'] = runner_id
+				info['_type'] = f'{rtype}s'
+				info['_path'] = path
+				return info
 		return None
 
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,

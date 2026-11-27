@@ -320,7 +320,7 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(
 			set(actions),
 			{"query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed",
-			 "update_finding", "add_note", "stop"})
+			 "update_finding", "add_note", "check_background_jobs", "cancel_background_job", "stop"})
 		for a in ["task", "workflow", "add_finding", "mark_vuln_exploited",
 		          "mark_vuln_exploit_failed", "subagent", "change_mode"]:
 			self.assertNotIn(a, actions)
@@ -375,7 +375,7 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(
 			set(actions),
 			{"query", "fetch_url", "web_search", "list_runners", "get_runner", "update_plan",
-			 "subagent", "change_mode", "stop"},
+			 "subagent", "check_background_jobs", "cancel_background_job", "change_mode", "stop"},
 		)
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding", "stop_runner",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:

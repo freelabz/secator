@@ -18,10 +18,13 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, USAGE_COUNTERS
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, USAGE_COUNTERS, _get_result_context
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
+from secator.ai.background import (
+	BackgroundJobs, BackgroundLimitError, wants_background, lost_jobs, lost_jobs_note
+)
 from secator.ai.encryption import SensitiveDataEncryptor, find_placeholders, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -206,7 +209,8 @@ def _yield_tool_results(runner, collected):
 		# DATA, not obeyed. The <untrusted_data> constraint tells the model what the envelope
 		# means. Only data-returning tools are wrapped; our own guidance (scope_note/trunc_hint)
 		# is appended OUTSIDE the envelope below.
-		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell", "get_runner"):
+		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell", "get_runner",
+		               "check_background_jobs"):
 			tool_result_str = f"<workspace_data>\n{tool_result_str}\n</workspace_data>"
 		result_incomplete = len(serialized) > max_items
 		# Only nudge a scoped re-query when it ADDS something: the result is item-capped,
@@ -391,6 +395,11 @@ class ai(PythonRunner):
 			"default": 3,
 			"internal": True,
 			"help": "Max concurrent tasks for batch execution"
+		},
+		"background_max_jobs": {
+			"type": int,
+			"default": CONFIG.addons.ai.background_max_jobs,
+			"help": "Max background jobs (background tool calls and subagents) running at once"
 		},
 		"resume": {
 			"is_flag": True,
@@ -580,6 +589,7 @@ class ai(PythonRunner):
 					self.history = restore_history_from_db(
 						self.session_id, self._get_query_engine(),
 						model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				self._note_lost_background_jobs(self._get_query_engine())
 				# Placeholders minted by earlier turns must still decrypt in tool calls/display.
 				self._restore_pii_map()
 				# Show the prior conversation + findings on the console (the unified
@@ -629,6 +639,7 @@ class ai(PythonRunner):
 			try:
 				yield from self._run_loop()
 			finally:
+				self._teardown_background()  # cancel + record still-running background jobs
 				self._park_raised_prompts()  # the run is over: no poll waits on its prompts
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
@@ -667,6 +678,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._teardown_background()  # cancel + record still-running background jobs
 			self._park_raised_prompts()  # the run is over: no poll waits on its prompts
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
@@ -921,6 +933,7 @@ class ai(PythonRunner):
 			self.session_id, query_engine, model=self.model,
 			encryptor=self.encryptor, system_prompt=self.system_prompt)
 		self.history.model = self.model
+		self._note_lost_background_jobs(query_engine)
 
 		# Seed the encryptor's map so tokens minted by earlier turns still decrypt
 		# (else `[IPV4:...]`/`[HOST:...]` leak into shell commands + scope checks).
@@ -959,6 +972,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._teardown_background()  # cancel + record still-running background jobs
 			self._park_raised_prompts()  # the run is over: no poll waits on its prompts
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
@@ -1128,6 +1142,23 @@ class ai(PythonRunner):
 			run_item_update_hooks=partial(self.run_hooks, 'on_item_update', sub='item'),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
+		# Background jobs (background tool calls + subagents): owned by THIS run, cancelled
+		# and recorded at its end (_teardown_background). They have no timeout, and a remote
+		# backend's idle input timer is held at zero while any of them runs (no bound).
+		# Jobs are tracked in the run's store (by child runner id) whenever the run has drivers;
+		# a run that persists nothing falls back to the in-process job buffers only.
+		store = None
+		if (self.context or {}).get("drivers"):
+			try:
+				store = ctx.get_query_engine()
+			except Exception as e:  # noqa: BLE001 - background jobs still work without a store
+				self.debug(f'background store unavailable: {e}', sub='init')
+		self.background = BackgroundJobs(
+			max_jobs=getattr(self, "background_max_jobs", 3),
+			store=store)
+		ctx.background = self.background
+		if isinstance(self.backend, RemoteBackend):
+			self.backend.hold_while = self.background.should_hold_idle
 
 		# Wire query_engine to remote backend if needed
 		if isinstance(self.backend, RemoteBackend):
@@ -1158,7 +1189,16 @@ class ai(PythonRunner):
 				return
 			iteration += 1
 
+			# Cooperative stop (set when a parent cancels this run as a background subagent).
+			if getattr(self, "stop_requested", False) is True:
+				yield Warning(message="Run stopped: cancelled by its parent.")
+				self._save_history()
+				return
+
 			try:
+				# Persist + stream what background jobs produced since the last turn.
+				yield from self._drain_background()
+
 				# Mid-flight guardrail/mode toggles the user requested from the TUI meta bar
 				# (Shift+Tab / Alt+Shift+Tab). Applied before the next LLM turn.
 				yield from self._apply_tui_control()
@@ -1195,6 +1235,9 @@ class ai(PythonRunner):
 
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
+				with_status = self._with_background_status(messages)
+				if isinstance(with_status, list):  # (a MagicMock self in unit tests returns a mock)
+					messages = with_status
 				by_role = self.history.count_tokens_by_role(self.model)
 				token_count = by_role["total"]
 				ctx_window = get_context_window(self.model)
@@ -1396,6 +1439,19 @@ class ai(PythonRunner):
 							self.max_iterations = iteration + 1
 						continue
 
+					# Non-interactive run whose model ended its turn with a plain message while
+					# background jobs still run: there is no user to come back later, and ending
+					# would cancel them. Wait (no bound) for one to finish, then give the model a
+					# turn to report it. An explicit `stop` and the iteration cap end the run (the
+					# teardown cancels the jobs). An interactive run never waits here: the user
+					# starts the next turn. `is True` (not truthy): tolerates a MagicMock self.
+					turn_ended = stop_reason is None and not tool_calls
+					if turn_ended and self._should_wait_background() is True:
+						yield from self._wait_background_end_of_turn()
+						if iteration >= self.max_iterations:
+							self.max_iterations = iteration + 1
+						continue
+
 					# Only an explicit `stop` TOOL call pre-persisted a `stopped` doc in
 					# _dispatch_and_collect (stop_reason is set from the dispatch result). A
 					# content-only reply (stop_reason still None here) is the normal chat turn —
@@ -1570,6 +1626,7 @@ class ai(PythonRunner):
 		self.mode = "" if self.mode_is_auto else _mode_opt
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
 		self.max_workers = self.get_opt_value("max_workers")
+		self.background_max_jobs = self.get_opt_value("background_max_jobs")
 		self.max_iterations = self.get_opt_value("max_iterations")
 		self.temp = self.get_opt_value("temperature")
 		self.dry_run = self.run_opts.get("dry_run", False)
@@ -1975,7 +2032,8 @@ class ai(PythonRunner):
 					self.history.add_user(maybe_encrypt(content, self.encryptor))
 				return True
 			time.sleep(poll_interval)
-			elapsed += poll_interval
+			idle_tick = getattr(backend, "idle_tick", None)
+			elapsed = idle_tick(elapsed, poll_interval) if callable(idle_tick) else elapsed + poll_interval
 		return False
 
 	# -------------------------------------------------------------------------
@@ -2192,13 +2250,27 @@ class ai(PythonRunner):
 		self._progress_actions = getattr(self, "_progress_actions", 0) + sum(
 			1 for a in actions if a.get("action") not in ("stop", "steer"))
 
+		# Background calls (already approved by the guardrails in _process_tool_calls) are
+		# started as jobs and acknowledged right away; the turn only waits for the rest.
+		collected = []
+		if isinstance(getattr(ctx, "background", None), BackgroundJobs):
+			fg_actions = []
+			for action in actions:
+				if wants_background(action):
+					yield from self._submit_background(action, ctx, collected)
+				else:
+					fg_actions.append(action)
+			actions = fg_actions
+
 		is_batch = len(actions) > 1
 		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
 		# fed back to the LLM, instead of killing the main loop (_run_batch does the
 		# same internally for each of its actions).
-		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
+		if not actions:
+			action_iter = iter(())
+		else:
+			action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
-		collected = []
 		for result in action_iter:
 			# Skip execution-only types
 			if isinstance(result, (Stat, Progress, State, Info)):
@@ -2283,6 +2355,179 @@ class ai(PythonRunner):
 			"stop_prompt_uuid": stop_prompt_uuid,
 			"new_mode": new_mode,
 		}
+
+	# -------------------------------------------------------------------------
+	# Background jobs
+	# -------------------------------------------------------------------------
+
+	def _submit_background(self, action, ctx, collected):
+		"""Start one approved action as a background job and acknowledge it as its tool result."""
+		# The child-runner context (parent runner ids stripped) + this call's tool_call_id, so
+		# the ack never points the model at the ai task's own id.
+		context = _get_result_context(action, ctx)
+		try:
+			job = self.background.submit(action, ctx, safe_dispatch_action)
+		except BackgroundLimitError as e:
+			err = Error(message=str(e), _context=context)
+			self.add_result(err, print=False)
+			yield err
+			collected.append(err.toDict())
+			return
+		job.recorded_status = job.status
+		job.recorded_runner_ids = job.runner_ids()
+		ack = Ai(
+			content=(f"Started background job {job.id}: {job.label()}. It runs while you continue; read its "
+			         f"results with check_background_jobs(job_ids=['{job.id}'])."),
+			ai_type="background_job",
+			extra_data=job.to_dict(),
+			_context=context)
+		self.add_result(ack)
+		yield ack
+		collected.append(ack.toDict())
+
+	def _drain_background_items(self):
+		"""Persist (add_result) what background jobs produced since the last drain, and record
+		each job's final status once. Runs in the ai task's thread only. Returns the items."""
+		mgr = getattr(self, "background", None)
+		if mgr is None:
+			return []
+		ctx = getattr(self, "_isolation_ctx", None)
+		out = []
+		for job in list(mgr.jobs.values()):
+			for item in job.take_undrained():
+				if not isinstance(item, OutputType) or isinstance(item, (Stat, Progress, State, Info)):
+					continue
+				if isinstance(item, Ai) and item.ai_type == "token_usage":
+					continue
+				self.add_result(item, print=not bool(item._context.get("subagent")))
+				if ctx is not None and ctx.results is not None:
+					ctx.results.append(item.toDict())
+				out.append(item)
+			# Record each status change, and the runner ids once known (so a restore after a
+			# crash can point the model at what a lost job already produced).
+			# One snapshot, so the record and what was recorded agree if the job ends meanwhile.
+			extra = job.to_dict()
+			status, runner_ids = extra["status"], extra["runner_ids"]
+			changed = job.recorded_status != status or job.recorded_runner_ids != runner_ids
+			if changed and (status != "running" or runner_ids):
+				job.recorded_status = status
+				job.recorded_runner_ids = runner_ids
+				record = Ai(
+					content=f"Background job {job.summary()}",
+					ai_type="background_job",
+					extra_data=extra,
+					_context={**dict(self.context or {}), "tool_call_id": job.action.get("tool_call_id"),
+					          "tool_call_name": job.action.get("tool_call_name")})
+				self.add_result(record)
+				out.append(record)
+		return out
+
+	def _drain_background(self):
+		"""Generator form of :meth:`_drain_background_items` (streams the items)."""
+		yield from self._drain_background_items()
+
+	def _note_lost_background_jobs(self, query_engine):
+		"""After a restore: find the background jobs the previous run never saw end (it crashed
+		or was killed), queue ONE note about them for the next turn, and record them as ``lost``
+		so a later restore does not report them again. Best-effort."""
+		try:
+			docs = query_engine.search({
+				"_type": "ai", "ai_type": "background_job", "_context.session_id": self.session_id})
+			jobs = lost_jobs(docs or [])
+		except Exception as e:  # noqa: BLE001 - a restore must never fail on this
+			self.debug(f'lost background jobs lookup failed: {e}', sub='init')
+			return
+		if not jobs:
+			return
+		for job in jobs:
+			# A detached child was sent to Celery: it may outlive the crashed run.
+			if job.get("detached"):
+				job["still_running"] = self._runner_still_running(query_engine, job)
+		self._lost_background_note = lost_jobs_note(jobs)
+		for job in jobs:
+			self.add_result(Ai(
+				content=f"Background job {job.get('job_id')} lost: the run stopped before it ended",
+				ai_type="background_job",
+				extra_data={**{k: v for k, v in job.items() if k != "still_running"}, "status": "lost"},
+				_context={**dict(self.context or {}), "tool_call_id": job.get("tool_call_id")}), print=False)
+
+	@staticmethod
+	def _runner_still_running(query_engine, job):
+		"""Whether a lost detached job's runner is still running per the store. Best-effort."""
+		for rid in job.get("runner_ids") or []:
+			try:
+				st = query_engine.get_runner_status(rid, job.get("runner_type") or "task")
+			except Exception:  # noqa: BLE001 - best-effort
+				st = None
+			if st:
+				return not st.get("done") and str(st.get("status", "")).upper() not in (
+					"SUCCESS", "FAILURE", "REVOKED", "SKIPPED")
+		return False
+
+	def _with_background_status(self, messages):
+		"""Append the short background-jobs status block to the outgoing messages (not to
+		history: it is rebuilt fresh every turn), plus, once, the lost-jobs note of a restore."""
+		mgr = getattr(self, "background", None)
+		block = mgr.status_block() if mgr is not None else ""
+		lost = getattr(self, "_lost_background_note", "")
+		if isinstance(lost, str) and lost:
+			self._lost_background_note = ""
+			block = f"{lost}\n\n{block}" if block else lost
+		if not block:
+			return messages
+		block = maybe_encrypt(block, self.encryptor)
+		messages = list(messages)
+		last = messages[-1] if messages else None
+		if isinstance(last, dict) and last.get("role") == "user" and isinstance(last.get("content"), str):
+			messages[-1] = {**last, "content": f"{last['content']}\n\n{block}"}
+		else:
+			messages.append({"role": "user", "content": block})
+		return messages
+
+	def _should_wait_background(self):
+		"""Wait at end of turn only for a NON-interactive run (no user to resume it later): while
+		a job runs, or once for a job that finished during the turn and was never read."""
+		mgr = getattr(self, "background", None)
+		if mgr is None or getattr(self.backend, "interactive", True) is not False:
+			return False
+		return bool(mgr.running()) or bool(self._unannounced_jobs())
+
+	def _unannounced_jobs(self):
+		mgr = self.background
+		return [j for j in mgr.jobs.values() if j.finished and not j.final_read and not j.announced]
+
+	def _wait_background_end_of_turn(self):
+		"""Block (no bound) until a running job finishes, then hand the model a turn with the
+		status so it reports the finished job(s) and continues, cancels or stops."""
+		mgr = self.background
+		# Watch the running jobs captured BEFORE the unannounced check: one finishing in between
+		# is then either seen by the check or in the watched set (the wait returns at once).
+		watched = [j.id for j in mgr.running()]
+		if watched and not self._unannounced_jobs():
+			console.print(Info(message=f"Waiting for {len(watched)} background job(s) to finish"))
+			# No bound, but a cancel by the parent (subagent) ends the wait: the loop then stops.
+			mgr.wait(watched, timeout=None, stop=lambda: getattr(self, "stop_requested", False) is True)
+		for job in self._unannounced_jobs():
+			job.announced = True  # one turn per finished job, even if the model does not read it
+		yield from self._drain_background()
+		msg = (f"You ended your turn while background jobs were running. A background job finished.\n"
+		       f"{mgr.status_block()}\n"
+		       "Read the finished jobs with check_background_jobs and report what they found, cancel jobs "
+		       "you no longer need (e.g. servers), then continue or stop.")
+		self.history.add_user(maybe_encrypt(msg, self.encryptor))
+
+	def _teardown_background(self):
+		"""Run end (stop, error, max iterations, revoke, input timeout): cancel still-running
+		background jobs and record every job's final status + runner ids. Best-effort."""
+		mgr = getattr(self, "background", None)
+		if mgr is None or not mgr.jobs:
+			return
+		try:
+			if mgr.running():
+				mgr.cancel_all()
+			self._drain_background_items()
+		except Exception as e:  # noqa: BLE001 - teardown must never mask the run's own outcome
+			self.debug(f'background teardown failed: {e}', sub='end')
 
 	# -------------------------------------------------------------------------
 	# History helpers

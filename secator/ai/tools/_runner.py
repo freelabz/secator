@@ -257,6 +257,22 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 	return opts
 
 
+def _task_may_chunk(name: str, opts: Dict, targets: list) -> bool:
+	"""Whether a dispatched child task may split into chunks on its worker (conservative)."""
+	opts = opts or {}
+	# Inputs pulled from earlier results at build time are unknown here (see _is_heavy_runner).
+	if opts.get("parent_scope") or any(str(k).endswith("_") and str(k).rstrip("_") == "targets" for k in opts):
+		return True
+	try:
+		would_chunk = getattr(Task.get_task_class(name), "would_chunk", None)
+	except Exception:  # noqa: BLE001 - unknown task: assume it may chunk
+		return True
+	if would_chunk is None:
+		return False
+	targets = list(dict.fromkeys(targets or []))
+	return bool(would_chunk(targets, True, opts) or would_chunk(targets, False, opts))
+
+
 def _child_preamble(
 	ctx: ActionContext, context: Dict, runner_type: str = "task"
 ) -> Tuple[Dict, Optional["Warning"]]:
@@ -285,7 +301,13 @@ def _child_preamble(
 	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
-	return _build_child_hooks_or_denial(context)
+	hooks, denial = _build_child_hooks_or_denial(context)
+	# In a background job thread, let the child runners register on their job so
+	# cancel_background_job (and the end-of-run teardown) can stop them.
+	from secator.ai.background import current_job, add_background_hooks
+	if denial is None and current_job() is not None:
+		hooks = add_background_hooks(hooks)
+	return hooks, denial
 
 
 def _record_spawn(ctx, runner, *ids, subagent_session=None) -> None:
@@ -496,10 +518,32 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 			run_opts["tty"] = False
 			dispatched = True
 
+	# Background job + Celery dispatch: fire-and-forget (no thread blocks polling the Celery
+	# result). The child persists itself through its driver hooks on its worker; the job is
+	# then tracked by its runner id in the store (status + findings), and cancelled by revoke.
+	# A subagent keeps its thread: its handback is built from its live output stream. So does
+	# a task that may chunk on its worker: its chunks' Celery ids are only learned by polling
+	# it, and a cancel must be able to revoke them.
+	# Only a job of THIS context's registry: a subagent running in its parent's job thread
+	# sees the parent's job there, and its own foreground calls must stay foreground.
+	from secator.ai.background import current_job
+	job = current_job()
+	owned = job is not None and ctx.background is not None and ctx.background.get(job.id) is job
+	if (owned and job.can_detach and not is_ai_subagent and not run_opts.get("sync")
+			and not (runner_type == "task" and _task_may_chunk(name, opts, targets))):
+		run_opts["no_poll"] = True
+		detach = True
+	else:
+		detach = False
+
 	hooks, denial = _child_preamble(ctx, context, runner_type)
 	if denial is not None:
 		yield denial
 		return
+	# Only once a child will actually start: a refused call must end its job, not wait on a
+	# runner that never existed.
+	if detach:
+		job.detached = True
 	# If a display (TUI) is active, let it tap child command output + findings. No-op
 	# otherwise; hooks are picklable so async/Celery children don't break (see secator.rich).
 	if runner_type in ("task", "workflow", "scan"):
