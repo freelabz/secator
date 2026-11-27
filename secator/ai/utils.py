@@ -882,6 +882,74 @@ def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) 
 	}
 
 
+class OAuth2TokenCache:
+	"""In-memory OAuth2 client-credentials access token for the configured LLM endpoint.
+
+	The token is fetched from ``addons.ai.oauth2_endpoint`` and reused until shortly before
+	its ``expires_in``; ``get(force=True)`` refetches it (e.g. after a 401). It is never
+	logged or persisted.
+	"""
+
+	REFRESH_MARGIN = 30  # seconds before expiry to refetch
+
+	def __init__(self):
+		import threading
+		self._lock = threading.Lock()
+		self._key = None
+		self._token = None
+		self._expires_at = 0.0
+
+	def get(self, force=False):
+		import time
+		cfg = CONFIG.addons.ai
+		key = (cfg.oauth2_endpoint, cfg.oauth2_client_id, cfg.oauth2_client_secret, cfg.oauth2_scope)
+		with self._lock:
+			if force or key != self._key or time.monotonic() >= self._expires_at:
+				self._token, ttl = self._fetch(*key)
+				self._key = key
+				self._expires_at = time.monotonic() + max(ttl - self.REFRESH_MARGIN, ttl / 2)
+			return self._token
+
+	@staticmethod
+	def _fetch(endpoint, client_id, client_secret, scope):
+		"""POST a client_credentials grant (RFC 6749 4.4, HTTP Basic client auth)."""
+		import math
+		import requests
+		_, err = _normalize_api_base(endpoint)
+		if err:
+			raise ValueError('addons.ai.oauth2_endpoint must be https:// (http:// only for a bare localhost host).')
+		data = {'grant_type': 'client_credentials'}
+		if scope:
+			data['scope'] = scope
+		resp = requests.post(
+			endpoint, data=data, auth=(client_id, client_secret),
+			timeout=15, allow_redirects=False, verify=_ssl_verify())
+		if resp.status_code != 200:
+			raise RuntimeError(f'OAuth2 token request failed (HTTP {resp.status_code}).')
+		try:
+			body = resp.json()
+			token = body['access_token']
+			ttl = float(body.get('expires_in') or 300)
+		except (ValueError, KeyError, TypeError):
+			token, ttl = None, 0
+		# An empty token would make litellm fall back to another configured key for this base.
+		if not token or not isinstance(token, str) or not math.isfinite(ttl) or ttl <= 0:
+			raise RuntimeError('OAuth2 token response has no valid access_token.')
+		return token, ttl
+
+
+# Process-wide so every call (agent loop, subagents, compaction) shares one token; keeping it on the
+# runner would put the token into runner state and subagent opts.
+_oauth2_tokens = OAuth2TokenCache()
+
+
+def _uses_oauth2(api_base, api_key):
+	"""Whether this call gets the OAuth2 token: only with no explicit key, on the configured base."""
+	cfg = CONFIG.addons.ai
+	base = (cfg.api_base or '').rstrip('/')
+	return bool(cfg.oauth2_endpoint and base and not api_key and (api_base or '').rstrip('/') == base)
+
+
 def call_llm(
 	messages: List[Dict],
 	model: str,
@@ -918,6 +986,11 @@ def call_llm(
 		temperature=temperature,
 		api_base=api_base,
 	)
+	# OAuth2: (re)checked on every call so a long run never sends an expired token.
+	use_oauth2 = _uses_oauth2(api_base, api_key)
+	oauth2_retried = False
+	if use_oauth2:
+		kwargs["api_key"] = _oauth2_tokens.get()
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
 	if tools is not None:
@@ -966,10 +1039,15 @@ def call_llm(
 			else:
 				raise
 		except litellm.AuthenticationError as e:
+			if use_oauth2 and not oauth2_retried and attempt < max_retries:
+				# Token revoked or expired early: refetch once and retry.
+				oauth2_retried = True
+				kwargs["api_key"] = _oauth2_tokens.get(force=True)
+				continue
 			console.print(Error(message=e))
-			console.print(Error(
-				message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`'
-			))
+			hint = ('Check addons.ai.oauth2_client_id / oauth2_client_secret / oauth2_scope' if use_oauth2
+				else 'Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
+			console.print(Error(message=hint))
 			raise
 
 	message = response.choices[0].message

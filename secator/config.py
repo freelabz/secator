@@ -457,6 +457,13 @@ class WebSearchConfig(StrictModel):
 class AiAddon(StrictModel):
 	api_key: Secret = ''
 	api_base: str = ''
+	# OAuth2 client-credentials token URL (https). When set, an access token is fetched from it
+	# and used as the API key for `api_base` (leave `api_key` empty); it is refreshed before it
+	# expires. Env: SECATOR_ADDONS_AI_OAUTH2_ENDPOINT.
+	oauth2_endpoint: str = ''
+	oauth2_client_id: str = ''  # Env: SECATOR_ADDONS_AI_OAUTH2_CLIENT_ID
+	oauth2_client_secret: Secret = ''  # Env: SECATOR_ADDONS_AI_OAUTH2_CLIENT_SECRET
+	oauth2_scope: str = ''  # optional. Env: SECATOR_ADDONS_AI_OAUTH2_SCOPE
 	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key"
 	# rule; off = configured key is reused for any base.
 	# Env: SECATOR_ADDONS_AI_CUSTOM_DISALLOW_CONFIG_TOKEN.
