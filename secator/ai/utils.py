@@ -1210,14 +1210,6 @@ def parse_text_tool_calls(content: Optional[str]) -> Tuple[List, Optional[str]]:
 	return tool_calls, cleaned
 
 
-MODEL_COLORS = [
-	'cyan', 'green', 'yellow', 'magenta', 'red', 'blue',
-	'bright_cyan', 'bright_green', 'bright_yellow', 'bright_magenta',
-	'bright_red', 'bright_blue', 'orange3', 'deep_pink2', 'dark_olive_green3',
-	'medium_purple3', 'dodger_blue2', 'gold3', 'spring_green3', 'hot_pink',
-]
-
-
 def _format_token_breakdown(token_count, ctx_window, by_role):
 	"""Format the token/context-window/per-role strings shared by the LLM status
 	spinner and the prompt_user title recap."""
@@ -1368,311 +1360,416 @@ def pretty_provider(provider_id):
 	) or str(provider_id)
 
 
-# Model modes (litellm metadata) that are NOT text chat — providers whose every known
-# model is one of these (pure TTS/STT/embedding/image) are hidden from `ai setup`.
+# Model modes (litellm metadata) that are NOT text chat: such models are hidden from
+# `ai setup`, and so are providers whose every known model is one of these.
 _NON_CHAT_MODES = {
 	'audio_transcription', 'audio_speech', 'image_generation', 'embedding',
 	'rerank', 'moderation',
 }
 
+# Rows the model table prints at once; the others stay reachable by filtering.
+_MODEL_ROWS = 40
+
+
+class _Back(Exception):
+	"""A setup prompt got ``b``: go back one step."""
+
+
+class _Quit(Exception):
+	"""A setup prompt got ``q``: leave without saving."""
+
+
+def _ask(label, default=None, password=False):
+	"""Prompt once. ``b`` and ``q`` raise :class:`_Back` / :class:`_Quit`, at every step."""
+	from rich.prompt import Prompt
+	raw = Prompt.ask(f"  [bold cyan]{label}[/]", default=default, show_default=bool(default), password=password)
+	value = (raw or '').strip()
+	if value.lower() in ('b', 'back'):
+		raise _Back
+	if value.lower() in ('q', 'quit', 'exit'):
+		raise _Quit
+	return value
+
+
+def _yes(label, default):
+	return _ask(f"{label} [dim](y/n)[/]", default='y' if default else 'n').lower().startswith('y')
+
+
+def _short_error(e, secret=None, limit=300):
+	"""The provider's error as one capped line, without a traceback or the key."""
+	detail = None
+	try:
+		err = e.response.json().get('error')
+		detail = err.get('message') if isinstance(err, dict) else err
+	except Exception:  # noqa: BLE001 - not an HTTP error with a JSON body
+		pass
+	msg = ' '.join(f'{e} ({detail})'.split() if detail else str(e).split()) or type(e).__name__
+	if secret:
+		msg = msg.replace(secret, mask_secret(secret))
+	return msg if len(msg) <= limit else msg[:limit] + '…'
+
+
+def _model_info(model):
+	"""LiteLLM's metadata for ``model`` (price, context, flags), or ``{}`` when it has none."""
+	import litellm
+	info = litellm.model_cost.get(model)
+	if info is None and '/' in model:
+		info = litellm.model_cost.get(model.split('/', 1)[1])
+	return info or {}
+
+
+def _is_chat_model(model):
+	return _model_info(model).get('mode') not in _NON_CHAT_MODES
+
+
+def _chat_capable(provider):
+	"""Keep a provider unless EVERY model with known metadata is non-chat.
+
+	Lenient on purpose: providers whose models carry no mode metadata (gateways, newer
+	vendors) are kept; only pure audio/image/embedding vendors (polly, deepgram, voyage...)
+	are dropped from the list."""
+	import litellm
+	modes = [m for m in (_model_info(n).get('mode') for n in litellm.models_by_provider.get(provider, [])) if m]
+	return not modes or any(m not in _NON_CHAT_MODES for m in modes)
+
+
+def _with_route(route, model_id):
+	return model_id if model_id.startswith(f'{route}/') else f'{route}/{model_id}'
+
+
+def _provider_catalog(provider):
+	"""The models bundled with LiteLLM for ONE provider (its price table)."""
+	import litellm
+	return sorted({_with_route(provider, m) for m in litellm.models_by_provider.get(provider, [])})
+
+
+def _list_provider_models(provider, api_key):
+	"""Live model ids of a LiteLLM provider, or ``None`` when LiteLLM cannot list them.
+
+	Uses the provider lister behind ``litellm.get_valid_models(check_provider_endpoint=True)``
+	directly: ``get_valid_models`` turns every failure, a rejected key included, into an empty
+	list, while the wizard must tell the user why. Raises on failure.
+	"""
+	from litellm.types.utils import LlmProviders
+	from litellm.utils import ProviderConfigManager
+	try:
+		lister = ProviderConfigManager.get_provider_model_info(model=None, provider=LlmProviders(provider))
+	except ValueError:
+		return None
+	if lister is None:
+		return None
+	return sorted({_with_route(provider, m) for m in lister.get_models(api_key=api_key or None)})
+
+
+def _newest_first(models):
+	"""Alphabetical by family, highest version first within it (``gpt-5`` before ``gpt-4o``)."""
+	return sorted(models, key=lambda m: [-int(t) if t.isdigit() else t for t in re.split(r'(\d+)', m.lower())])
+
+
+def _fmt_price(per_token):
+	return f'${per_token * 1e6:,.2f}' if isinstance(per_token, (int, float)) else '—'
+
+
+def _fmt_ctx(tokens):
+	if not isinstance(tokens, int) or tokens <= 0:
+		return '—'
+	return f'{tokens / 1e6:g}M' if tokens >= 1e6 else f'{tokens // 1000}k' if tokens >= 1000 else str(tokens)
+
+
+def _fmt_flag(value):
+	return {True: '✓', False: '✗'}.get(value, '—')
+
+
+def _print_models(models, default=None, title=''):
+	"""Print ``models`` as a numbered table: context, price per 1M tokens, tool / reasoning support."""
+	from rich.table import Table
+	table = Table(box=None, padding=(0, 1), header_style='bold dim')
+	table.add_column('#', justify='right', style='dim')
+	table.add_column('Model')
+	for col in ('Context', 'In $/1M', 'Out $/1M'):
+		table.add_column(col, justify='right')
+	table.add_column('Tools', justify='center')
+	table.add_column('Reasoning', justify='center')
+	for i, m in enumerate(models[:_MODEL_ROWS], 1):
+		info = _model_info(m)
+		route, _, rest = m.rpartition('/')
+		name = f'[dim]{route}/[/]{rest}' if route else m
+		if m == default:
+			name = f'[bold green]{m}[/] [green](default)[/]'
+		table.add_row(
+			str(i), name, _fmt_ctx(info.get('max_input_tokens')),
+			_fmt_price(info.get('input_cost_per_token')), _fmt_price(info.get('output_cost_per_token')),
+			_fmt_flag(info.get('supports_function_calling')), _fmt_flag(info.get('supports_reasoning')),
+		)
+	console.print(f"\n[bold]  {len(models)} models{title}[/]")
+	console.print(table, highlight=False)
+	if len(models) > _MODEL_ROWS:
+		console.print(f"  [dim]… {len(models) - _MODEL_ROWS} more: type text to filter.[/]")
+
+
+def _pick_model(models, route, default=None, label='Model', show=True):
+	"""Choose a model by number, id or filter text; Enter takes ``default``.
+
+	With no ``models`` (nothing could be listed), any typed id is accepted. With ``show=False``
+	the table is printed only once the user filters, so a number is read as filter text.
+	"""
+	hint = f"Enter = {default.split('/', 1)[-1]}, " if default else ''
+	if not models:
+		while True:
+			raw = _ask(f"{label} id [dim](e.g. my-model)[/]", default=default)
+			if raw:
+				return raw if raw == default else _with_route(route, raw)
+	shown = models if show else None
+	if show:
+		_print_models(models, default)
+	while True:
+		raw = _ask(f"{label} [dim]({hint}number, id or text to filter)[/]")
+		if not raw:
+			if default:
+				return default
+			shown = models
+			_print_models(models)
+			continue
+		if raw.isdigit() and shown is not None:
+			idx = int(raw)
+			if 1 <= idx <= min(len(shown), _MODEL_ROWS):
+				return shown[idx - 1]
+			console.print(f"[bold red]  Invalid number: {idx} (valid: 1-{min(len(shown), _MODEL_ROWS)})[/]")
+			continue
+		low = raw.lower()
+		exact = [m for m in models if low in (m.lower(), m.split('/', 1)[-1].lower())]
+		if exact:
+			return exact[0]
+		matches = [m for m in models if low in m.lower()]
+		if len(matches) == 1:
+			return matches[0]
+		if not matches:
+			console.print(f'[bold yellow]  No models matching "{raw}".[/]')
+			continue
+		shown = matches
+		_print_models(matches, default, f' matching "{raw}"')
+
+
+def _print_config(title, rows):
+	from rich.table import Table
+	grid = Table.grid(padding=(0, 2))
+	for key, value in rows:
+		grid.add_row(f'    {key}', f'[bold white]{value}[/]')
+	console.print(f"\n[bold]  {title}[/]")
+	console.print(grid, highlight=False)
+
+
+def _step_header(num, title):
+	console.print(f"\n[bold]  Step {num}/4 · {title}[/]  [dim](b = back, q = quit)[/]")
+
+
+def _step_provider(state, current):
+	"""Step 1: a LiteLLM provider (default base), a gateway from the registry, or a custom base."""
+	import litellm
+	from rich.columns import Columns
+	_step_header(1, 'Provider')
+	gateways = load_ai_providers()
+	# A registry gateway named like a LiteLLM provider (e.g. openrouter) is listed once, as the gateway.
+	names = {g['name'] for g in gateways}
+	lite = sorted(p for p in litellm.models_by_provider if p not in names and _chat_capable(p))
+	entries = [('lite', p, pretty_provider(p)) for p in lite]
+	entries += [('gateway', g, g.get('label') or g['name']) for g in gateways]
+	entries += [('custom', None, 'Custom')]
+
+	def show(subset):
+		cells = [f"[dim]{i:>3}[/] {label}" for i, (kind, _, label) in subset if kind == 'lite']
+		if cells:
+			console.print(Columns(cells, column_first=True, padding=(0, 2)))
+		for i, (kind, val, label) in subset:
+			if kind == 'gateway':
+				console.print(f"  [dim]{i:>3}[/] {label} [dim](OpenAI-compatible gateway) {val['api_base']}[/]")
+			elif kind == 'custom':
+				console.print(f"  [dim]{i:>3}[/] {label} [dim](enter your own OpenAI-compatible URL)[/]")
+
+	numbered = list(enumerate(entries, 1))
+	show(numbered)
+	while True:
+		raw = _ask("Provider [dim](number or text to filter)[/]")
+		if raw.isdigit() and 1 <= int(raw) <= len(entries):
+			kind, val, label = entries[int(raw) - 1]
+			break
+		matches = [(i, e) for i, e in numbered if raw and raw.lower() in e[2].lower()]
+		exact = [e for _, e in matches if e[2].lower() == raw.lower()]
+		if len(matches) == 1 or exact:
+			kind, val, label = exact[0] if exact else matches[0][1]
+			break
+		if matches:
+			show(matches)
+		else:
+			console.print(f'[bold yellow]  No provider matching "{raw}".[/]')
+
+	state.update(kind=kind, label=label, gateway=val if kind == 'gateway' else {})
+	if kind == 'lite':
+		state.update(route=val, base='', catalog=val)
+		return
+	if kind == 'gateway':
+		route = val.get('litellm_provider') or 'openai'
+		state.update(route=route, base=val['api_base'], catalog=route if route in litellm.models_by_provider else None)
+		return
+	while True:
+		base, err = _normalize_api_base(_ask("API base URL [dim](https://…)[/]", default=current['base'] or None))
+		if not err:
+			break
+		console.print(f"[bold red]  {err}[/]")
+	state.update(route='openai', base=base, catalog=None)
+
+
+def _list_models(state, key):
+	"""List the chosen provider's models live, which also checks the key.
+
+	Returns ``(models, error)``: ``models`` is ``None`` when nothing was listed, and ``error``
+	is the provider's message when the live call failed.
+	"""
+	live, err = None, None
+	try:
+		with maybe_status(f"[bold orange3]Listing models from {state['label']}…[/]", spinner="dots"):
+			if state['kind'] == 'lite':
+				live = _list_provider_models(state['route'], key)
+			else:
+				live = [f"{state['route']}/{i}" for i in fetch_openai_compatible_models(state['base'], key)]
+	except Exception as e:  # noqa: BLE001 - shown to the user, then fall back
+		err = _short_error(e, key)
+	if live:
+		console.print(f"[bold green]  Key accepted: {len(live)} models available from {state['label']}.[/]")
+		return live, None
+	if err:
+		console.print(f"[bold red]  Could not list models from {state['label']}: {err}[/]")
+	elif live is None and key:
+		console.print(f"[dim]  {state['label']} has no model listing: the key is checked at the end.[/]")
+	return None, err
+
+
+def _step_key(state, current):
+	"""Step 2: the API key, checked right away by listing the provider's models."""
+	import sys
+	_step_header(2, 'API key')
+	gateway = state['gateway']
+	if gateway.get('docs') or gateway.get('key_hint'):
+		hint = f"key usually starts with {gateway['key_hint']}" if gateway.get('key_hint') else ''
+		docs = f"docs: {gateway['docs']}" if gateway.get('docs') else ''
+		console.print(f"  [dim]{' • '.join(x for x in (hint, docs) if x)}[/]")
+	# Offer the saved key only for the SAME provider and base: never send one provider's key to another.
+	keep = current['key'] if (current['route'], current['base']) == (state['route'], state['base']) else ''
+	masked = mask_secret(keep) if keep else None
+	optional = state['kind'] == 'lite'
+	label = 'API key'
+	if masked:
+		label += ' [dim](Enter keeps the saved key)[/]'
+	elif optional:
+		label += " [dim](Enter to use the provider's environment variables)[/]"
+	while True:
+		raw = _ask(label, default=masked, password=sys.stdin.isatty())
+		key = keep if masked and raw == masked else raw
+		if not key and not optional:
+			console.print("[bold red]  An API key is required for this endpoint.[/]")
+			continue
+		models, err = _list_models(state, key)
+		if err and key and _yes('Try another key?', default=True):
+			continue
+		if models is None:
+			models = _provider_catalog(state['catalog']) if state['catalog'] else []
+			if models:
+				console.print(f"[dim]  Showing LiteLLM's bundled list ({len(models)} models).[/]")
+		state.update(api_key=key, models=_newest_first(m for m in models if _is_chat_model(m)))
+		return
+
+
+def _step_model(state, current):
+	_step_header(3, 'Model')
+	if not state['models']:
+		console.print(f"[bold yellow]  No model list for {state['label']}: enter a model id.[/]")
+	# The saved model may lack its provider prefix (``claude-x`` for ``anthropic/claude-x``).
+	default = next((m for m in state['models'] if current['model'] in (m, m.split('/', 1)[-1])), None)
+	state['model'] = _pick_model(state['models'], state['route'], default)
+
+
+def _step_intent(state, current):
+	_step_header(4, 'Intent model')
+	console.print("  [dim]A cheaper model can classify each request before the main model answers.[/]")
+	state['intent'] = _pick_model(state['models'], state['route'], state['model'], 'Intent model', show=False)
+
+
+def _step_save(state, current):
+	"""Verify every chosen model, then save only on success (or an explicit "Save anyway")."""
+	console.print("\n[bold]  Verify[/]")
+	key, base = state['api_key'], state['base']
+	verified = True
+	for model in dict.fromkeys((state['model'], state['intent'])):
+		try:
+			with maybe_status(f"[bold orange3]Calling {model}…[/]", spinner="dots"):
+				call_llm([{"role": "user", "content": "Reply with only: OK"}], model, temperature=0, api_base=base, api_key=key)
+			console.print(f"[bold green]  ✓ {model} replied.[/]")
+		except Exception as e:  # noqa: BLE001 - reported, the user decides
+			verified = False
+			console.print(f"[bold red]  ✗ {model}: {_short_error(e, key)}[/]")
+	if not verified and not _yes('Save anyway?', default=False):
+		console.print("[bold yellow]  Nothing saved: the previous config is unchanged.[/]")
+		return None
+	values = {'default_model': state['model'], 'intent_model': state['intent'], 'api_base': base, 'api_key': key}
+	for name, value in values.items():
+		if value != (CONFIG.addons.ai[name] or ''):
+			CONFIG.set(f'addons.ai.{name}', value)
+	if not CONFIG.validate():
+		console.print("[bold red]  Config validation failed: nothing saved.[/]")
+		return None
+	CONFIG.save()
+	_print_config('Saved:', [
+		('Model', state['model']),
+		('Intent model', state['intent']),
+		('API base', mask_url(base) or 'provider default'),
+		('API key', mask_secret(key) if key else 'none (provider environment variables)'),
+		('Connection', '[green]verified[/]' if verified else '[red]not verified[/]'),
+		('Config file', CONFIG._path if '_path' in CONFIG else 'n/a'),
+	])
+	return state['model']
+
 
 def setup_ai():
-	"""Entry point for ``ai setup``.
-
-	Wraps the interactive flow so Ctrl+C / EOF aborts cleanly with a message instead
-	of a traceback (SystemExit).
-	"""
+	"""Entry point for ``ai setup``: ``q``, Ctrl+C and EOF leave cleanly, saving nothing."""
 	try:
 		return _setup_ai_interactive()
-	except (KeyboardInterrupt, EOFError):
-		console.print("\n[bold yellow]  Setup aborted.[/]")
+	except (_Quit, KeyboardInterrupt, EOFError):
+		console.print("\n[bold yellow]  Setup aborted: nothing saved.[/]")
 		return None
 
 
 def _setup_ai_interactive():
-	"""Interactive flow to configure the AI provider / model / API key.
+	"""Walk the setup steps (provider, API key, model, intent model, verify + save).
 
-	Step 1 picks a PROVIDER: any (chat-capable) LiteLLM provider on its default base, an
-	OpenAI-compatible gateway from the registry (providers.json), or a custom base.
-	A known provider filters the bundled catalog to its models; a gateway/custom base
-	lists live from ``<base>/models`` (key collected first — it's authenticated) and the
-	chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base (or as
-	``<litellm_provider>/<id>`` when the registry entry names a native LiteLLM route).
+	A known provider lists its models live from its own API when LiteLLM can, else from
+	LiteLLM's bundled list; a gateway or custom base lists ``<base>/models``. ``b`` at any
+	prompt goes back one step. Returns the saved model, or ``None`` when nothing was saved.
 	"""
 	import litellm
-	from rich.prompt import Confirm, Prompt
-
-	def _provider_catalog(provider):
-		"""The models LiteLLM knows for ONE provider (ids stay canonical for routing)."""
-		models, parts = [], set()
-		for name in sorted(litellm.models_by_provider.get(provider, [])):
-			p = name.split('/')
-			if p[0] != provider:
-				p = [provider] + p
-			models.append('/'.join(p))
-			for seg in p[:-1]:
-				parts.add(seg)
-		return models, parts
-
-	def _chat_capable(provider):
-		"""Keep a provider unless EVERY model with known metadata is non-chat.
-
-		Lenient on purpose: providers whose models carry no mode metadata (gateways,
-		newer vendors) are kept; only pure audio/image/embedding vendors (polly,
-		deepgram, voyage, …) are dropped from the list."""
-		names = litellm.models_by_provider.get(provider, [])
-		if not names:
-			return True
-		known = []
-		for name in names:
-			info = litellm.model_cost.get(name) or litellm.model_cost.get(name.split('/')[-1]) or {}
-			if info.get('mode') is not None:
-				known.append(info['mode'])
-		if not known:
-			return True
-		return any(m not in _NON_CHAT_MODES for m in known)
-
-	def _entry_label(entry):
-		kind, val = entry
-		if kind == 'lite':
-			return pretty_provider(val)
-		if kind == 'gateway':
-			return val.get('label') or val['name']
-		return 'Custom'
-
-	# Current config (so the user sees what they're changing).
-	current_key = CONFIG.addons.ai.api_key
-	current_base = CONFIG.addons.ai.api_base
-	masked_key = mask_secret(current_key) if current_key else ""
-	console.print()
-	console.print("[bold]  Current config:[/]")
-	console.print(f"    Model:        [bold white]{CONFIG.addons.ai.default_model or 'not set'}[/]")
-	console.print(f"    Intent model: [bold white]{CONFIG.addons.ai.intent_model or 'not set'}[/]")
-	console.print(f"    API base:     [bold white]{mask_url(current_base) or 'default (per-provider)'}[/]")
-	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
-
-	# Step 1 — pick a PROVIDER. The full LiteLLM provider list (on their default bases),
-	# then any OpenAI-compatible gateways from the registry (providers.json), then a
-	# one-off custom base. A known provider filters the bundled catalog to its models;
-	# a gateway/custom base lists live from `<base>/models` (key collected first — auth'd).
-	# A registry gateway named like a LiteLLM provider (e.g. openrouter) is listed once, as the gateway.
-	gateways = load_ai_providers()
-	gateway_names = {g['name'] for g in gateways}
-	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p) and p not in gateway_names)
-	entries = ([('lite', p) for p in lite_providers]
-	           + [('gateway', g) for g in gateways]
-	           + [('custom', None)])
-
-	def _show_providers(subset):
-		console.print("[bold]  Select a provider:[/]")
-		for i, e in subset:
-			kind, val = e
-			if kind == 'gateway':
-				base_hint = f" [dim]{val.get('api_base', '')}[/]" if val.get('api_base') else ''
-				suffix = f" [dim](OpenAI-compatible gateway)[/]{base_hint}"
-			elif kind == 'custom':
-				suffix = " [dim](enter your own OpenAI-compatible URL)[/]"
-			else:
-				suffix = ""
-			console.print(f"    [dim]{i:>3}[/] {_entry_label(e)}{suffix}")
-
-	numbered = list(enumerate(entries, start=1))
-	console.print()
-	_show_providers(numbered)
+	ai = CONFIG.addons.ai
+	model = ai.default_model or ''
+	try:
+		route = litellm.get_llm_provider(model)[1] if model else ''
+	except Exception:  # noqa: BLE001 - unknown model: no saved provider to match
+		route = model.split('/')[0] if '/' in model else ''
+	current = {'model': model, 'route': route, 'base': (ai.api_base or '').rstrip('/'), 'key': ai.api_key or ''}
+	_print_config('Current AI config:', [
+		('Model', model or 'not set'),
+		('Intent model', ai.intent_model or 'not set'),
+		('API base', mask_url(current['base']) or 'provider default'),
+		('API key', mask_secret(current['key']) or 'not set'),
+	])
+	steps = (_step_provider, _step_key, _step_model, _step_intent, _step_save)
+	state, i = {}, 0
 	while True:
-		raw = Prompt.ask("  [bold cyan]Select (number, text to filter, q to quit)[/]").strip()
-		if raw.lower() in ('q', 'quit', 'exit'):
-			return None
-		if raw.isdigit() and 1 <= int(raw) <= len(entries):
-			kind, val = entries[int(raw) - 1]
-			break
-		ql = raw.lower()
-		matches = [(i, e) for i, e in numbered if ql and ql in _entry_label(e).lower()]
-		if len(matches) == 1:
-			kind, val = matches[0][1]
-			break
-		if matches:
-			console.print()
-			_show_providers(matches)
-		else:
-			console.print(f'[bold yellow]  No provider matching "{raw}".[/]')
-
-	custom_base, custom_key = '', None
-	if kind == 'lite':
-		all_models, all_parts = _provider_catalog(val)
-		if not all_models:
-			console.print(f"[bold yellow]  LiteLLM lists no models for {pretty_provider(val)} — enter one manually.[/]")
-			manual = Prompt.ask("  [bold cyan]Model id[/]").strip()
-			if not manual:
-				return None
-			all_models = [manual if '/' in manual else f"{val}/{manual}"]
-			all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
-	else:
-		# A gateway pre-fills the base; "custom" prompts for it. Either way the base's
-		# `/models` list is authenticated, so collect the key before listing.
-		if kind == 'custom':
-			while True:
-				base, err = _normalize_api_base(
-					Prompt.ask("  [bold cyan]API base URL[/] [dim](https://…)[/]", default=current_base or None)
-				)
-				if err:
-					console.print(f"[bold red]  {err}[/]")
-					continue
-				custom_base = base
-				break
-		else:
-			custom_base = (val.get('api_base') or '').rstrip('/')
-			docs = f" • docs: {val['docs']}" if val.get('docs') else ''
-			console.print(f"  [dim]Base: {custom_base}{docs}[/]")
-			if val.get('key_hint'):
-				console.print(f"  [dim](key usually starts with {val['key_hint']})[/]")
-		# Only offer to reuse the saved key when the selected base is the SAME as the
-		# configured one — otherwise reusing it would send the old provider's key to a
-		# DIFFERENT endpoint. On a new base, require a fresh key.
-		same_base = bool(current_base) and custom_base == current_base.rstrip('/')
-		custom_key = Prompt.ask(
-			"  [bold cyan]API key[/]",
-			default=masked_key if same_base else None,
-			show_default=same_base and bool(masked_key),
-		)
-		if same_base and custom_key == masked_key:
-			custom_key = current_key
-		if not custom_key:
-			console.print("[bold red]  An API key is required for this endpoint — aborting.[/]")
-			return None
-		# A registry entry may name a native LiteLLM route (e.g. openrouter) so the model is
-		# priced and gets its provider params; otherwise route as a generic OpenAI-compatible base.
-		route = (val.get('litellm_provider') if kind == 'gateway' else None) or 'openai'
 		try:
-			with maybe_status("[bold orange3]Listing models from the endpoint…[/]", spinner="dots"):
-				ids = fetch_openai_compatible_models(custom_base, custom_key)
-			all_models = [f"{route}/{i}" for i in ids]
-			console.print(f"[bold green]  Found {len(all_models)} models at {custom_base}[/]")
-		except Exception as e:  # noqa: BLE001 - fall back to manual id entry
-			console.print(f"[bold yellow]  Could not list models ({e}).[/]")
-			manual = Prompt.ask("  [bold cyan]Enter a model id manually[/] [dim](e.g. my-model)[/]").strip()
-			if not manual:
-				return None
-			# A native route's ids carry a vendor segment (`anthropic/claude-…`), so always prefix them.
-			keep = manual.startswith(f'{route}/') or (route == 'openai' and '/' in manual)
-			all_models = [manual if keep else f"{route}/{manual}"]
-		all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
-
-	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
-
-	def _format_model(m, idx):
-		parts = m.split('/')
-		if len(parts) > 1:
-			segments = [f"[bold {part_colors[p]}]{p}[/]" for p in parts[:-1]]
-			colored = '/'.join(segments) + f"/[bold white]{parts[-1]}[/]"
-		else:
-			colored = f"[bold white]{m}[/]"
-		return f"[dim]{idx:>4}[/] " + colored
-
-	def _show_models(displayed, suffix, leading_newline=False):
-		prefix = "\n" if leading_newline else ""
-		console.print(f"{prefix}[bold]  Found {len(displayed)} models{suffix}:[/]")
-		for i, m in enumerate(displayed, 1):
-			console.print(_format_model(m, idx=i), highlight=False)
-
-	# Display the chosen source's models numbered.
-	console.print()
-	displayed = all_models
-	suffix = ''
-	_show_models(displayed, suffix)
-
-	# Enter prompt loop
-	while True:
-		console.print()
-		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, b to go back, q to quit)[/]")
-
-		if not choice:
-			# Empty input: re-show current list
-			_show_models(displayed, suffix, leading_newline=True)
+			result = steps[i](state, current)
+		except _Back:
+			i = max(i - 1, 0)
 			continue
-
-		if choice.lower() in ('q', 'quit', 'exit'):
-			return None
-
-		# Go back to provider selection (restart the flow from step 1).
-		if choice.lower() in ('b', 'back'):
-			return _setup_ai_interactive()
-
-		# Number → select from current display
-		if choice.isdigit():
-			idx = int(choice)
-			if 1 <= idx <= len(displayed):
-				selected = displayed[idx - 1]
-			else:
-				console.print(f"[bold red]  Invalid number: {idx} (valid: 1-{len(displayed)})[/]")
-				continue
-		else:
-			# Check exact match first
-			exact = [m for m in all_models if m.lower() == choice.lower()]
-			if exact:
-				selected = exact[0]
-			else:
-				# Text → filter models, re-display
-				query_lower = choice.lower()
-				filtered = [m for m in all_models if query_lower in m.lower()]
-				if not filtered:
-					console.print(f'[bold yellow]  No models matching "{choice}".[/]')
-					continue
-				if len(filtered) == 1:
-					selected = filtered[0]
-				else:
-					displayed = filtered
-					suffix = f' matching "{choice}"'
-					_show_models(displayed, suffix, leading_newline=True)
-					continue
-
-		console.print(f"\n[bold green]  Selected: [white]{selected}[/][/]")
-
-		# Resolve base + key: a custom/gateway base already collected its key; the
-		# built-in catalog uses the provider's default base and keeps the current key
-		# unless a new one is entered.
-		if custom_base:
-			api_base, api_key = custom_base, custom_key
-		else:
-			api_base = ''
-			api_key = Prompt.ask(
-				"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
-				default=masked_key,
-				show_default=bool(masked_key),
-			)
-			if not api_key or api_key == masked_key:
-				api_key = current_key
-
-		# Verify BEFORE touching the config, so a failed check keeps the saved one.
-		console.print()
-		try:
-			with maybe_status("[bold orange3]Verifying model connection...[/]", spinner="dots"):
-				result = call_llm(
-					[{"role": "user", "content": "Reply with only: OK"}],
-					selected, temperature=0, api_base=api_base, api_key=api_key,
-				)
-			console.print(f"[bold green]  Connection verified! Response: {result['content'].strip()}[/]")
-		except Exception as e:
-			console.print(f"[bold red]  Connection failed: {e}[/]")
-			console.print("[dim]  Check your API key and model name.[/]")
-			if not Confirm.ask("  [bold cyan]Save this configuration anyway?[/]", default=False):
-				console.print("[bold yellow]  Nothing saved: the previous config is unchanged.[/]")
-				return None
-
-		CONFIG.set('addons.ai.default_model', selected)
-		CONFIG.set('addons.ai.intent_model', selected)
-		if custom_base or current_base:
-			CONFIG.set('addons.ai.api_base', api_base)
-		if api_key and api_key != current_key:
-			CONFIG.set('addons.ai.api_key', api_key)
-		if CONFIG.validate():
-			CONFIG.save()
-			console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
-			console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
-		else:
-			console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
-
-		return selected
+		if i == len(steps) - 1:
+			return result
+		i += 1
 
 
 def prompt_user(history, max_iterations=10, choices=None,

@@ -132,18 +132,48 @@ class TestLoadProviders:
 		assert by_name['ok']['api_base'] == 'https://ok.example/v1'  # kept + normalized
 
 
+def _asker(answers):
+	"""Prompt.ask stub: answers is a list of (label prefix, reply), consumed in order."""
+	pending = list(answers)
+
+	def ask(prompt, *args, **kwargs):
+		label = prompt.replace('[bold cyan]', '').strip()
+		for i, (prefix, reply) in enumerate(pending):
+			if label.startswith(prefix):
+				del pending[i]
+				return reply
+		raise AssertionError(f'unexpected prompt: {label}')
+	return ask
+
+
+def _run_wizard(monkeypatch, tmp_path, answers, **patches):
+	"""Run `ai setup` with scripted answers; Config is patched on the CLASS so nothing is written."""
+	monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))  # bundled registry only
+	printed = MagicMock()
+	cfg = 'secator.config.Config'
+	with patch.object(u, 'console', printed), \
+		patch('rich.prompt.Prompt.ask', side_effect=_asker(answers)), \
+		patch.object(u, 'call_llm', patches.pop('call_llm', MagicMock(return_value={'content': 'OK'}))) as llm, \
+		patch(f'{cfg}.set') as cfg_set, patch(f'{cfg}.validate', return_value=True), \
+		patch(f'{cfg}.save') as cfg_save:
+		for name, value in patches.items():
+			monkeypatch.setattr(u, name, value)
+		result = u.setup_ai()
+	text = '\n'.join(str(c.args[0]) for c in printed.print.call_args_list if c.args and isinstance(c.args[0], str))
+	saved = {c.args[0]: c.args[1] for c in cfg_set.call_args_list}
+	return result, saved, cfg_save, llm, text
+
+
 class TestProviderPicker:
 
 	def test_gateway_named_like_litellm_provider_listed_once(self, tmp_path, monkeypatch):
 		# openrouter is both a LiteLLM provider and a registry gateway: list it once, as the gateway.
 		import litellm
 		assert 'openrouter' in litellm.models_by_provider  # else this test proves nothing
-		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))  # bundled registry only
-		printed = MagicMock()
-		with patch.object(u, 'console', printed), patch('rich.prompt.Prompt.ask', return_value='q'):
-			assert u._setup_ai_interactive() is None
-		lines = [str(c.args[0]) for c in printed.print.call_args_list if c.args]
-		openrouter = [line for line in lines if 'OpenRouter' in line or 'Openrouter' in line]
+		result, saved, save, _, text = _run_wizard(monkeypatch, tmp_path, [('Provider', 'q')])
+		assert result is None and not saved
+		save.assert_not_called()
+		openrouter = [line for line in text.splitlines() if 'OpenRouter' in line or 'Openrouter' in line]
 		assert len(openrouter) == 1
 		assert 'OpenAI-compatible gateway' in openrouter[0]
 
@@ -154,23 +184,115 @@ class TestProviderPicker:
 		('OrcaRouter', 'openai/anthropic/claude-x', 'https://api.orcarouter.ai/v1'),
 	])
 	def test_gateway_model_prefix(self, tmp_path, monkeypatch, pick, expected, base):
-		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))
-		answers = iter([pick, 'sk-test', '1'])
-		# Config is a DotMap: patch its methods on the class, never on the instance, so the
-		# user's config file is never written.
-		cfg = 'secator.config.Config'
-		with patch.object(u, 'console', MagicMock()), \
-			patch('rich.prompt.Prompt.ask', side_effect=lambda *a, **k: next(answers)), \
-			patch.object(u, 'fetch_openai_compatible_models', return_value=['anthropic/claude-x']), \
-			patch(f'{cfg}.set') as cfg_set, patch(f'{cfg}.validate', return_value=False), \
-			patch(f'{cfg}.save') as cfg_save, \
-			patch.object(u, 'call_llm', return_value={'content': 'OK'}) as llm:
-			assert u._setup_ai_interactive() == expected
-		cfg_save.assert_not_called()
-		saved = {c.args[0]: c.args[1] for c in cfg_set.call_args_list}
-		assert saved['addons.ai.default_model'] == expected
-		assert saved['addons.ai.api_base'] == base  # the gateway base is still saved
+		answers = [('Provider', pick), ('API key', 'sk-test'), ('Model', '1'), ('Intent model', '')]
+		result, saved, save, llm, _ = _run_wizard(
+			monkeypatch, tmp_path, answers,
+			fetch_openai_compatible_models=MagicMock(return_value=['anthropic/claude-x']))
+		assert result == expected
+		save.assert_called_once()
+		assert saved['addons.ai.default_model'] == saved['addons.ai.intent_model'] == expected
+		assert saved['addons.ai.api_base'] == base  # the gateway base is saved
 		assert llm.call_args.args[1] == expected
+
+
+class TestSetupWizard:
+
+	def test_unpriced_live_models_are_listed_and_selectable(self, tmp_path, monkeypatch):
+		# A live model LiteLLM has no price for is still shown (with dashes) and can be picked.
+		live = MagicMock(return_value=['anthropic/claude-opus-5-5', 'anthropic/claude-zz-unpriced-9'])
+		answers = [('Provider', 'Anthropic'), ('API key', 'sk-ant-test'), ('Model', 'unpriced'), ('Intent model', '')]
+		result, saved, _, _, text = _run_wizard(monkeypatch, tmp_path, answers, _list_provider_models=live)
+		assert result == 'anthropic/claude-zz-unpriced-9'
+		assert saved['addons.ai.api_key'] == 'sk-ant-test'
+		assert '2 models' in text
+		live.assert_called_once_with('anthropic', 'sk-ant-test')
+
+	def test_model_table_shows_dash_for_unknown_price(self):
+		printed = MagicMock()
+		with patch.object(u, 'console', printed):
+			u._print_models(['anthropic/claude-zz-unpriced-9'])
+		from rich.console import Console
+		rec = Console(record=True, width=120)
+		rec.print(printed.print.call_args_list[1].args[0])
+		row = rec.export_text().splitlines()[-1]
+		assert 'claude-zz-unpriced-9' in row and row.count('—') == 5
+
+	def test_live_listing_falls_back_to_bundled_list(self, tmp_path, monkeypatch):
+		# Provider without live listing (None): the bundled LiteLLM catalog is offered.
+		answers = [('Provider', 'Anthropic'), ('API key', 'sk-ant-test'), ('Model', '1'), ('Intent model', '')]
+		result, _, _, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=None))
+		assert result in u._provider_catalog('anthropic')
+		assert "bundled list" in text
+
+	def test_bad_key_gives_clear_message_and_saves_nothing(self, tmp_path, monkeypatch):
+		err = RuntimeError('Failed to get models: {"error": "invalid x-api-key sk-ant-bad"}')
+		answers = [('Provider', 'Anthropic'), ('API key', 'sk-ant-bad'), ('Try another key?', 'y'),
+		           ('API key', 'q')]
+		result, saved, save, llm, text = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(side_effect=err))
+		assert result is None and not saved
+		save.assert_not_called()
+		llm.assert_not_called()
+		assert 'Could not list models from Anthropic' in text and 'invalid x-api-key' in text
+		assert 'sk-ant-bad' not in text  # the key itself is masked out of the provider message
+		assert 'Traceback' not in text
+
+	def test_failed_verify_saves_nothing(self, tmp_path, monkeypatch):
+		answers = [('Provider', 'Anthropic'), ('API key', 'sk-ant-test'), ('Model', '1'), ('Intent model', ''),
+		           ('Save anyway?', '')]
+		result, saved, save, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/m']),
+			call_llm=MagicMock(side_effect=RuntimeError('AuthenticationError: bad key')))
+		assert result is None and not saved
+		save.assert_not_called()
+		assert 'Nothing saved' in text
+
+	def test_back_returns_to_previous_step(self, tmp_path, monkeypatch):
+		# b at the model step goes back to the key step, b again to the provider step.
+		answers = [('Provider', 'Anthropic'), ('API key', 'k1'), ('Model', 'b'), ('API key', 'b'),
+		           ('Provider', 'OrcaRouter'), ('API key', 'k2'), ('Model', '1'), ('Intent model', '')]
+		result, saved, _, _, _ = _run_wizard(
+			monkeypatch, tmp_path, answers,
+			_list_provider_models=MagicMock(return_value=['anthropic/m']),
+			fetch_openai_compatible_models=MagicMock(return_value=['g-model']))
+		assert result == 'openai/g-model'
+		assert saved['addons.ai.api_key'] == 'k2'
+
+	@pytest.mark.parametrize('answers', [
+		[('Provider', 'q')],
+		[('Provider', 'Anthropic'), ('API key', 'q')],
+		[('Provider', 'Anthropic'), ('API key', 'k'), ('Model', 'quit')],
+		[('Provider', 'Anthropic'), ('API key', 'k'), ('Model', '1'), ('Intent model', 'q')],
+		[('Provider', 'Anthropic'), ('API key', 'k'), ('Model', '1'), ('Intent model', ''), ('Save anyway?', 'q')],
+	])
+	def test_quit_at_every_step_saves_nothing(self, tmp_path, monkeypatch, answers):
+		result, saved, save, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/m']),
+			call_llm=MagicMock(side_effect=RuntimeError('down')))
+		assert result is None and not saved
+		save.assert_not_called()
+		assert 'nothing saved' in text
+
+	def test_separate_intent_model(self, tmp_path, monkeypatch):
+		answers = [('Provider', 'Anthropic'), ('API key', 'k'), ('Model', 'big'), ('Intent model', 'small')]
+		_, saved, _, llm, _ = _run_wizard(
+			monkeypatch, tmp_path, answers,
+			_list_provider_models=MagicMock(return_value=['anthropic/big-1', 'anthropic/small-1']))
+		assert saved['addons.ai.default_model'] == 'anthropic/big-1'
+		assert saved['addons.ai.intent_model'] == 'anthropic/small-1'
+		assert [c.args[1] for c in llm.call_args_list] == ['anthropic/big-1', 'anthropic/small-1']
+
+	def test_saved_key_never_offered_to_another_provider(self, tmp_path, monkeypatch):
+		# The saved key belongs to another provider: Enter must clear it, not resend it.
+		monkeypatch.setattr(CONFIG.addons.ai, 'api_key', 'sk-old-gateway-key-123456')
+		monkeypatch.setattr(CONFIG.addons.ai, 'api_base', 'https://old.example/v1')
+		monkeypatch.setattr(CONFIG.addons.ai, 'default_model', 'openai/x')
+		answers = [('Provider', 'Anthropic'), ('API key', ''), ('Model', '1'), ('Intent model', '')]
+		_, saved, _, llm, _ = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/m']))
+		assert llm.call_args.kwargs['api_key'] == ''
+		assert saved['addons.ai.api_key'] == '' and saved['addons.ai.api_base'] == ''
 
 
 class TestPrettyProvider:

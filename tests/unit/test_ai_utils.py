@@ -1050,33 +1050,36 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
 class TestSetupAiVerifyBeforeSave(unittest.TestCase):
     """`ai setup` verifies the model connection before writing the config."""
 
-    def _run_setup(self, verify_error=None, save_anyway=False, provider="2"):
+    def _run_setup(self, verify_error=None, save_anyway=False, provider="2", key="new-key"):
         import secator.ai.utils as utils_mod
         from secator.config import Config
         answers = {
-            "Select (number": provider,  # entries: [anthropic, custom]
+            "Provider": provider,  # entries: [anthropic, custom]
             "API base URL": "https://new.example.com/v1",
-            "leave empty to keep current": "",
-            "API key": "new-key",
-            "Filter or select": "1",
+            "API key": key,
+            "Intent model": "",
+            "Model": "1",
+            "Save anyway?": "y" if save_anyway else "n",
         }
 
         def ask(prompt, *args, **kwargs):
-            return next(v for k, v in answers.items() if k in prompt)
+            label = prompt.replace('[bold cyan]', '').strip()
+            return next(v for k, v in answers.items() if label.startswith(k))
 
         call_llm = MagicMock(side_effect=verify_error, return_value={"content": "OK"})
         with patch('litellm.models_by_provider', {'anthropic': ['claude-x']}), \
                 patch.object(utils_mod, 'load_ai_providers', return_value=[]), \
                 patch.object(utils_mod, 'fetch_openai_compatible_models', return_value=['m1']), \
+                patch.object(utils_mod, '_list_provider_models', return_value=None), \
                 patch.object(utils_mod, 'call_llm', call_llm), \
                 patch.object(utils_mod.CONFIG.addons.ai, 'api_base', 'https://old.example.com/v1'), \
                 patch.object(utils_mod.CONFIG.addons.ai, 'api_key', 'old-key'), \
                 patch.object(Config, 'set') as mock_set, \
+                patch.object(Config, 'validate', return_value=True), \
                 patch.object(Config, 'save') as mock_save, \
                 patch('rich.prompt.Prompt.ask', side_effect=ask), \
-                patch('rich.prompt.Confirm.ask', return_value=save_anyway), \
                 patch.object(utils_mod.console, 'print'):
-            selected = utils_mod._setup_ai_interactive()
+            selected = utils_mod.setup_ai()
         return selected, call_llm, mock_set, mock_save
 
     def test_failed_verify_keeps_previous_config(self):
@@ -1100,11 +1103,12 @@ class TestSetupAiVerifyBeforeSave(unittest.TestCase):
         mock_set.assert_any_call('addons.ai.api_key', 'new-key')
         mock_save.assert_called_once()
 
-    def test_builtin_route_keeps_key_and_clears_custom_base(self):
-        selected, call_llm, mock_set, mock_save = self._run_setup(provider="1")
+    def test_builtin_route_drops_other_providers_key_and_custom_base(self):
+        # The saved key belongs to the old custom base: it is not sent to the new provider.
+        selected, call_llm, mock_set, mock_save = self._run_setup(provider="1", key="")
         self.assertEqual(selected, "anthropic/claude-x")
         self.assertEqual(call_llm.call_args.kwargs["api_base"], "")
-        self.assertEqual(call_llm.call_args.kwargs["api_key"], "old-key")
+        self.assertEqual(call_llm.call_args.kwargs["api_key"], "")
         mock_set.assert_any_call('addons.ai.api_base', '')
-        self.assertNotIn('addons.ai.api_key', [c.args[0] for c in mock_set.call_args_list])
+        mock_set.assert_any_call('addons.ai.api_key', '')
         mock_save.assert_called_once()
