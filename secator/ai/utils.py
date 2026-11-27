@@ -1552,13 +1552,6 @@ def _fmt_flag(value):
 	return {True: '✓', False: '✗'}.get(value, '—')
 
 
-def _default_token_url(api_base):
-	"""The usual OAuth2 token URL of a base: its origin + ``/oauth2/token``."""
-	from urllib.parse import urlsplit
-	parts = urlsplit(api_base)
-	return f'{parts.scheme}://{parts.netloc}/oauth2/token' if parts.netloc else ''
-
-
 def _print_models(models, default=None, title=''):
 	"""Print ``models`` as a numbered table: context, price per 1M tokens, tool / reasoning support."""
 	from rich.table import Table
@@ -1795,7 +1788,7 @@ def _ask_oauth2(state, cred):
 		secret = cred['client_secret'] if keep and raw == keep else raw
 	while True:
 		endpoint, err = _normalize_api_base(_ask(
-			'Token URL', default=cred['endpoint'] or _default_token_url(state['base']),
+			'Token URL', default=cred['endpoint'] or default_oauth2_token_url(state['base']),
 			help='Where the client ID and secret are exchanged for an access token.'))
 		if not err:
 			break
@@ -1984,7 +1977,11 @@ def _saved_setup():
 		route = model.split('/')[0] if '/' in model else ''
 	saved = {'model': model, 'intent': ai.intent_model or '', 'route': route, 'base': (ai.api_base or '').rstrip('/')}
 	cred = _blank_cred('oauth2' if ai.oauth2_client_id else 'key')
-	cred.update({field: ai[key] or '' for field, key in _CRED_KEYS.items()}, scope=ai.oauth2_scope or '')
+	cred.update({field: ai[key] or '' for field, key in _CRED_KEYS.items()})
+	# The setup always saves the token URL explicitly: an older setup that relied on the default
+	# gets it written (and checked) on its next save.
+	if cred['client_id'] and not cred['endpoint']:
+		cred['endpoint'] = default_oauth2_token_url(saved['base'])
 	entry = _saved_entry(_provider_entries(), saved)
 	provider = _entry_state(entry, saved['base']) if entry else _entry_state(('lite', route, pretty_provider(route)))
 	return {**saved, **provider, 'route': route or provider['route'], 'cred': cred}

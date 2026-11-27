@@ -491,9 +491,16 @@ class TestOAuth2Setup:
 		assert result is None and not saved
 		save.assert_not_called()
 
-	def test_default_token_url_is_the_origin(self):
-		assert u._default_token_url('https://company.com/v1') == 'https://company.com/oauth2/token'
-		assert u._default_token_url('http://localhost:8080/api/v1') == 'http://localhost:8080/oauth2/token'
+	def test_token_url_is_always_saved_explicitly(self, tmp_path, monkeypatch):
+		# An older OAuth2 setup without oauth2_endpoint: the next save writes the default it used.
+		config = {**OAUTH, 'oauth2_endpoint': ''}
+		answers = [('Choice', ''), ('Model', 'openai/c')]
+		with _token_endpoint() as post:
+			_, saved, _, _, _ = _run_wizard(
+				monkeypatch, tmp_path, answers, config=config,
+				fetch_openai_compatible_models=MagicMock(return_value=['a', 'c']))
+		assert post.call_args.args[0] == 'https://gw.example/oauth2/token'
+		assert saved['addons.ai.oauth2_endpoint'] == 'https://gw.example/oauth2/token'
 
 
 class TestReRun:
