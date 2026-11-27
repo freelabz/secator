@@ -1232,6 +1232,21 @@ class TestYieldToolResultsRunnerScoping(unittest.TestCase):
 		self.assertEqual(outs[0].extra_data["runner_id"], "task-abc")
 		self.assertEqual(outs[0].extra_data["runner_type"], "task")
 
+	def test_ansi_codes_are_stripped_from_tool_results(self):
+		# A failed command's output ends with its console error line, in terminal colours.
+		collected = [{
+			"_type": "ai", "ai_type": "shell_output",
+			"content": "boom[\x1b[1;31mERR\x1b[0m] \x1b[2mcommand\x1b[0m failed",
+			"extra_data": {"lines": ["\x1b[2mtrace\x1b[0m"]},
+			"_context": {"tool_call_id": "tc1", "tool_call_name": "run_shell"},
+		}]
+		_, stored = self._run(collected)
+		content = stored[0][2]
+		self.assertNotIn("\\u001b", content)
+		self.assertNotIn("\x1b", content)
+		self.assertIn("boom[ERR] command failed", content)
+		self.assertIn('"trace"', content)
+
 	def test_complete_run_task_result_omits_scope_note(self):
 		# A small, fully-in-context result must NOT nudge a re-query (would waste a turn),
 		# but still carries the runner id/type in extra_data.
@@ -1512,6 +1527,36 @@ class TestEveryDispatchedCallGetsAResult(unittest.TestCase):
 		persisted = [i.message.get("tool_call_id") for i in items
 		             if isinstance(i, Ai) and i.ai_type == "tool_result"]
 		self.assertEqual(sorted(persisted), ["tc_a", "tc_b", "tc_plan"])
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestQueryWithNoMatchGetsAnEmptyResult(unittest.TestCase):
+	"""A query that matches nothing yields no result item: its tool result says count 0 (not
+	the bare acknowledgement other result-less tools get)."""
+
+	def test_query_no_match(self):
+		from secator.tasks.ai import _ack_resultless_calls
+		from secator.ai.utils import TOOL_ACK_RESULT
+		runner = MagicMock()
+		runner.encryptor = None
+		runner.context = {}
+		stored = {}
+		runner.history.add_tool_result = lambda name, tc_id, content: stored.__setitem__(tc_id, content)
+		actions = [
+			{"tool_call_id": "q1", "tool_call_name": "query_workspace"},
+			{"tool_call_id": "p1", "tool_call_name": "update_plan"},
+		]
+		items = list(_ack_resultless_calls(runner, actions, []))
+		self.assertEqual(len(items), 2)
+		data = json.loads(stored["q1"])
+		self.assertEqual((data["task"], data["status"], data["count"], data["results"]),
+		                 ("query_workspace", "success", 0, []))
+		self.assertIn("No findings match", data["message"])
+		self.assertEqual(stored["p1"], TOOL_ACK_RESULT)
+		# a page past the end says so
+		list(_ack_resultless_calls(runner, [{"tool_call_id": "q2", "tool_call_name": "query_workspace",
+		                                     "offset": 100}], []))
+		self.assertIn("at offset 100", json.loads(stored["q2"])["message"])
 
 
 # =============================================================================

@@ -23,7 +23,7 @@ from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
 from secator.runners._helpers import apply_task_overrides, chunking_needed, get_task_overrides
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_escape as _s, signal_to_name
+from secator.utils import debug, rich_escape as _s, signal_to_name, strip_ansi
 
 
 logger = logging.getLogger(__name__)
@@ -672,8 +672,7 @@ class Command(Runner):
 
 		# Some commands output ANSI text, so we need to remove those ANSI chars
 		if self.encoding == 'ansi':
-			ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-			line = ansi_escape.sub('', line)
+			line = strip_ansi(line)
 			line = line.replace('\\x0d\\x0a', '\n')
 
 		# Run on_line hooks
@@ -865,7 +864,11 @@ class Command(Runner):
 		"""
 		if not self.process or not self.process.pid:
 			return
-		infos = list(Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs))
+		try:
+			root = psutil.Process(self.process.pid)
+		except psutil.Error:  # a short command can exit before the monitor's first tick
+			return
+		infos = list(Command.get_process_info(root, children=True, procs=procs))
 		if not infos:
 			return
 		# One Stat PER process in the task's tree (the command + everything it spawns, e.g. a

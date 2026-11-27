@@ -216,6 +216,34 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertEqual([r['url'] for r in scoped.search({'_type': 'url'})], ['http://mine/a'])
 
 
+class TestJsonDriverTaskWrapperPath(JsonDriverTestBase):
+	"""A Task wrapper hands its run to the command it runs, a top-level runner in the same
+	reports_folder (report.json): the wrapper must write that same file, not a report_<task>.json
+	the command never finalizes (left at RUNNING)."""
+
+	def _wrapper(self, has_parent):
+		from secator.runners import Task
+		runner = Task.__new__(Task)
+		runner.config = type('C', (), {'node_id': None})()
+		runner.name = 'httpx'
+		runner.chunk = None
+		runner.has_parent = has_parent
+		runner._reports_folder = self.temp_dir
+		return runner
+
+	def test_child_task_wrapper_writes_its_command_report(self):
+		from secator.hooks import json as mod
+		self.assertEqual(mod._report_path(self._wrapper(has_parent=True)), Path(self.temp_dir) / 'report.json')
+		self.assertEqual(mod._report_path(self._wrapper(has_parent=False)), Path(self.temp_dir) / 'report.json')
+
+	def test_other_child_runners_keep_their_own_report(self):
+		from secator.hooks import json as mod
+		runner = self._runner()
+		runner.has_parent = True
+		runner.fqn = 'httpx'
+		self.assertEqual(mod._report_path(runner), Path(self.temp_dir) / 'report_httpx.json')
+
+
 class TestJsonDriverConcurrency(JsonDriverTestBase):
 	N_WORKERS = 4
 	PER_WORKER = 25

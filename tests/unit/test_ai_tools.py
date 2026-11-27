@@ -332,6 +332,23 @@ class TestToolCallToAction(unittest.TestCase):
 		self.assertIsNone(tool_call_to_action("run_task", {}))
 		self.assertIsNone(tool_call_to_action("query_workspace", None))
 
+	def test_tool_with_only_optional_args_accepts_empty_args(self):
+		"""A tool whose parameters are all optional (list_runners) is valid with no arguments."""
+		from secator.ai.tools import tool_call_to_action
+		for empty in ({}, None):
+			action = tool_call_to_action("list_runners", empty)
+			self.assertIsNotNone(action, empty)
+			self.assertEqual(action["action"], "list_runners")
+
+	def test_rejection_reason_names_the_real_problem(self):
+		from secator.ai.tools import tool_call_rejection_reason as reason
+		self.assertEqual(reason("frobnicate", {}), "unknown tool 'frobnicate'")
+		self.assertEqual(reason("frobnicate", {"x": 1}), "unknown tool 'frobnicate'")
+		self.assertEqual(reason("run_shell", ["echo", "hi"]), "arguments must be a JSON object, got a JSON array")
+		self.assertEqual(reason("run_task", 12), "arguments must be a JSON object, got a JSON number")
+		self.assertEqual(reason("run_task", {}), "empty arguments")
+		self.assertEqual(reason("run_task", None), "empty arguments")
+
 	def test_change_mode_conversion(self):
 		from secator.ai.tools import tool_call_to_action
 		result = tool_call_to_action("change_mode", {"mode": "scan", "reason": "need to scan"})
