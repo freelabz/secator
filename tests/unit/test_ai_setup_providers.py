@@ -132,6 +132,19 @@ class TestLoadProviders:
 		assert by_name['ok']['api_base'] == 'https://ok.example/v1'  # kept + normalized
 
 
+class TestProviderPicker:
+
+	def test_gateway_named_like_litellm_provider_listed_once(self):
+		# openrouter is both a LiteLLM provider and a registry gateway: list it once, as the gateway.
+		printed = MagicMock()
+		with patch.object(u, 'console', printed), patch('rich.prompt.Prompt.ask', return_value='q'):
+			assert u._setup_ai_interactive() is None
+		lines = [str(c.args[0]) for c in printed.print.call_args_list if c.args]
+		openrouter = [line for line in lines if 'OpenRouter' in line or 'Openrouter' in line]
+		assert len(openrouter) == 1
+		assert 'OpenAI-compatible gateway' in openrouter[0]
+
+
 class TestPrettyProvider:
 
 	@pytest.mark.parametrize('pid,expected', [

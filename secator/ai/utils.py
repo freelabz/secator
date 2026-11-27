@@ -1331,8 +1331,10 @@ def _setup_ai_interactive():
 	# then any OpenAI-compatible gateways from the registry (providers.json), then a
 	# one-off custom base. A known provider filters the bundled catalog to its models;
 	# a gateway/custom base lists live from `<base>/models` (key collected first — auth'd).
-	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p))
+	# A registry gateway named like a LiteLLM provider (e.g. openrouter) is listed once, as the gateway.
 	gateways = load_ai_providers()
+	gateway_names = {g['name'] for g in gateways}
+	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p) and p not in gateway_names)
 	entries = ([('lite', p) for p in lite_providers]
 	           + [('gateway', g) for g in gateways]
 	           + [('custom', None)])
