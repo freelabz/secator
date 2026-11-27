@@ -985,8 +985,9 @@ def resolve_ai_profile(name=None):
 	"""The model settings of AI profile ``name`` (``None`` = the active ``addons.ai.profile``).
 
 	``default`` (or ``''``) is the addons.ai fields. A profile field left unset falls back to the
-	addons.ai one, except on another ``api_base``: there the credentials stay empty and the intent
-	model is the profile's model, so nothing set for one endpoint is ever sent to another.
+	addons.ai one, except with another ``api_base`` or ``oauth2_endpoint``: there the credentials
+	stay empty and the intent model is the profile's model, so they never go to that other endpoint.
+	(Like ``--model``, a profile that only changes the model reuses the addons.ai key.)
 
 	Returns:
 		dict: ``name`` plus the ``_PROFILE_FIELDS`` keys. Holds secrets: never log or persist it.
@@ -1003,7 +1004,7 @@ def resolve_ai_profile(name=None):
 	if name not in profiles:
 		raise ValueError(f'Unknown AI profile "{name}". Known: {", ".join([DEFAULT_PROFILE, *profiles])}.')
 	own = {k: v for k, v in (profiles[name] or {}).items() if k in _PROFILE_FIELDS and v is not None}
-	if 'api_base' in own and own['api_base'].rstrip('/') != merged['api_base'].rstrip('/'):
+	if any(k in own and own[k].rstrip('/') != merged[k].rstrip('/') for k in ('api_base', 'oauth2_endpoint')):
 		merged.update({field: '' for field in _ENDPOINT_FIELDS}, intent_model=own.get('model', merged['model']))
 	return {'name': name, **merged, **own}
 
@@ -1128,7 +1129,8 @@ def call_llm(
 				kwargs["api_key"] = _oauth2_tokens.get(oauth2_cfg, force=True)
 				continue
 			console.print(Error(message=e))
-			hint = ('Check addons.ai.oauth2_client_id / oauth2_client_secret / oauth2_scope' if use_oauth2
+			hint = (f'Check the oauth2_client_id / oauth2_client_secret / oauth2_scope of AI profile "{oauth2_cfg["name"]}"'
+				if use_oauth2
 				else 'Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
 			console.print(Error(message=hint))
 			raise
@@ -1970,7 +1972,7 @@ def _step_intent(state, saved):
 def _step_switch_profile(state, saved):
 	"""Make another AI profile the active one (``addons.ai.profile``)."""
 	_step_header(state, 'Switch profile')
-	names = [DEFAULT_PROFILE, *CONFIG.addons.ai.profiles]
+	names = list(dict.fromkeys([DEFAULT_PROFILE, *CONFIG.addons.ai.profiles]))
 	labels = [f"{n} · {resolve_ai_profile(n)['model'] or 'no model'}" for n in names]
 	name = names[_choose('Use which profile?', labels, default=names.index(saved['profile']))]
 	if name == saved['profile']:
@@ -2012,10 +2014,10 @@ def _step_save(state, saved):
 	same_profile = target == saved['profile']
 	cred = state['cred']
 	oauth2 = cred['method'] == 'oauth2'
-	# OAuth2 keeps the saved API key until the user confirms its removal below (a new profile gets none).
+	# OAuth2 keeps the target's saved API key until the user confirms its removal below.
 	values = {key: cred[field] for field, key in _CRED_KEYS.items()}
-	values.update(api_base=state['base'], api_key=(
-		saved['cred']['api_key'] if same_profile else '') if oauth2 else cred['api_key'])
+	saved_key = saved['cred']['api_key'] if same_profile else (_profile_key(target, 'api_key')[1] or '')
+	values.update(api_base=state['base'], api_key=saved_key if oauth2 else cred['api_key'])
 	current = resolve_ai_profile(saved['profile'])
 	auth_changed = not same_profile or cred['method'] != saved['cred']['method'] or any(
 		values[k] != current[k] for k in ('api_base', *_CRED_KEYS.values()))

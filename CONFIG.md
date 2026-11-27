@@ -699,13 +699,16 @@ addons:
 ```
 
 - A profile sets only the fields it lists (`model` stands for `default_model`); the others fall
-  back to the `addons.ai` fields, except on another `api_base`: there the credentials stay empty
-  and the intent model defaults to the profile's `model`, so a key is never sent to another endpoint.
+  back to the `addons.ai` fields, except with another `api_base` or `oauth2_endpoint`: there the
+  credentials stay empty and the intent model defaults to the profile's `model`, so they are never
+  sent to that endpoint. Like `--model`, a profile that only changes the model (e.g. to another
+  provider's) reuses the `addons.ai` key: give it its own `api_key` then.
 - Secrets in profiles (`api_key`, `oauth2_client_secret`) are masked like the top-level ones.
 - Which profile a run uses: `secator x ai --profile <name>` for one run, else the mode's entry in
   `mode_profiles` (applied once the run's mode is known, at run start), else `addons.ai.profile`.
   `--model` / `--intent-model` / `--api-base` / `--api-key` still win over the profile's values, and
-  `--profile` or `--model` turns `mode_profiles` off for that run.
+  `--profile`, `--model`, `--api-key` or `--api-base` turns `mode_profiles` off for that run. A run
+  resumed from the store re-applies them at each resumed turn.
 - The model stays fixed for the run: a later mode change (auto re-detection, `switch_mode`, the
   TUI toggle) keeps it. In the TUI, `/model` lists the profiles and `/model <name>` switches the
   chat to one from its next model call, keeping the conversation.

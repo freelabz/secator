@@ -761,6 +761,21 @@ class TestProfiles:
 			monkeypatch, tmp_path, answers, config={'api_key': self.KEY, 'default_model': 'anthropic/claude-x'})
 		assert 'Switch profile' not in text and 'Add profile' in text
 
+	def test_oauth2_saved_to_default_from_a_profile_asks_before_removing_the_key(self, tmp_path, monkeypatch):
+		# Started from profile "gw"; saving OAuth2 into "default" must not drop the top-level key unasked.
+		config = {'api_key': self.KEY, 'default_model': 'openai/a', 'profile': 'gw',
+		          'profiles': {'gw': {'model': 'openai/a', 'api_base': GW, 'api_key': 'sk-gw-key-0123456789'}}}
+		answers = [('Choice', '3'), ('Choice', '2'), ('Client ID', 'cid'), ('Token URL', ''),
+		           ('Client secret', 'cs-new-secret-0123456789'), ('Save as profile', 'default'),
+		           ('Remove the saved API key?', 'n')]
+		with _token_endpoint():
+			result, saved, save, _, text = _run_wizard(
+				monkeypatch, tmp_path, answers, config=config,
+				fetch_openai_compatible_models=MagicMock(return_value=['a']))
+		assert result is None and not saved
+		save.assert_not_called()
+		assert 'Nothing saved' in text
+
 	def test_add_profile_needs_a_name(self, tmp_path, monkeypatch):
 		live = MagicMock(return_value=['anthropic/claude-z'])
 		answers = [('Choice', 'Add profile'), ('Provider', 'Anthropic'), ('API key', 'sk-ant-other-0123456789'),

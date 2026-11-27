@@ -208,7 +208,7 @@ class AITUI(TUIApp):
 		from secator.ai.utils import DEFAULT_PROFILE, resolve_ai_profile
 		from secator.config import CONFIG
 		name = text[len("/model"):].strip()
-		names = [name] if name else [DEFAULT_PROFILE, *CONFIG.addons.ai.profiles]
+		names = [name] if name else list(dict.fromkeys([DEFAULT_PROFILE, *CONFIG.addons.ai.profiles]))
 		try:
 			models = {n: resolve_ai_profile(n)["model"] for n in names}
 		except ValueError as e:

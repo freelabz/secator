@@ -1715,6 +1715,8 @@ class ai(PythonRunner):
 		)
 		if error:
 			return error
+		if name is not None and not (opt("model") or prof["model"]):
+			return f'AI profile "{prof["name"]}" has no model.'
 		self.ai_profile, self.api_base, self.api_key = prof["name"], api_base, api_key
 		self.model = opt("model") or prof["model"]
 		self.intent_model = opt("intent_model") or prof["intent_model"]
@@ -1730,10 +1732,12 @@ class ai(PythonRunner):
 		"""Switch to the profile of the run's mode (addons.ai.mode_profiles) once that mode is resolved.
 
 		Run start only: the model then stays fixed for the run, a later mode change (auto
-		re-detection, switch_mode, the TUI toggle) keeps it. An explicit --profile / --model wins.
+		re-detection, switch_mode, the TUI toggle) keeps it. An explicit --profile / --model wins, and
+		so does an explicit --api-key / --api-base (it belongs to the run's own endpoint).
 		"""
 		name = (CONFIG.addons.ai.mode_profiles or {}).get(self.mode)
-		if not name or name == self.ai_profile or self.get_opt_value("profile") or self.get_opt_value("model"):
+		explicit = any(self.get_opt_value(k) for k in ("profile", "model", "api_key", "api_base"))
+		if not name or name == self.ai_profile or explicit:
 			return
 		error = self._use_profile(name)
 		if error:

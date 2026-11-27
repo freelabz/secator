@@ -79,6 +79,32 @@ def test_profile_falls_back_to_top_level_fields(cfg):
 	assert fast['api_key'] == TOP['api_key']
 
 
+def test_profile_from_a_loaded_config(cfg, monkeypatch):
+	# Loaded profiles are config objects whose unset fields are None.
+	from secator.config import AiProfile, Config
+	from secator.ai.utils import resolve_ai_profile
+	monkeypatch.setitem(CONFIG.addons.ai, 'profiles', Config({'fast': AiProfile(model='fast-model').model_dump()}))
+	fast = resolve_ai_profile('fast')
+	assert (fast['model'], fast['api_key'], fast['intent_model']) == ('fast-model', TOP['api_key'], 'top-intent')
+
+
+def test_profile_with_its_own_token_url_inherits_no_client_secret(cfg, monkeypatch):
+	from secator.ai.utils import resolve_ai_profile
+	monkeypatch.setitem(CONFIG.addons.ai, 'oauth2_client_secret', 'top-secret-0123456789')
+	monkeypatch.setitem(CONFIG.addons.ai, 'profiles', {'sso': {'oauth2_endpoint': 'https://other.example/token'}})
+	sso = resolve_ai_profile('sso')
+	assert sso['oauth2_client_secret'] == '' and sso['api_key'] == ''
+
+
+def test_switch_to_a_profile_without_model_is_refused(cfg, monkeypatch):
+	monkeypatch.setitem(CONFIG.addons.ai, 'profiles', {'empty': {'model': ''}})
+	task = _loop_task()
+	tui = types.SimpleNamespace(tui_poll_control=lambda: {'profile': 'empty'})
+	with patch('secator.rich.get_tui', return_value=tui):
+		items = list(task._apply_tui_control())
+	assert 'has no model' in items[0].message and task.model == 'top-model'
+
+
 def test_profile_on_another_base_inherits_no_credentials(cfg, monkeypatch):
 	from secator.ai.utils import resolve_ai_profile
 	monkeypatch.setitem(CONFIG.addons.ai, 'oauth2_client_secret', 'top-secret-0123456789')
@@ -129,7 +155,7 @@ def test_mode_profile_applies_at_run_start(cfg, monkeypatch):
 	assert task.context['ai_model'] == 'big-model'
 	assert 'using AI profile "big"' in items[0].message
 	# Explicit --profile or --model: the mode profile is skipped.
-	for opts in ({'profile': 'fast'}, {'model': 'explicit'}):
+	for opts in ({'profile': 'fast'}, {'model': 'explicit'}, {'api_key': 'sk-caller'}, {'api_base': GW}):
 		task = _task(mode='exploit', **opts)
 		assert list(task._apply_mode_profile()) == []
 		assert task.ai_profile != 'big'
@@ -166,12 +192,6 @@ def test_auto_mode_profile_and_intent_usage(cfg, monkeypatch):
 	assert runner.context['ai_usage_by_model'] == usage
 	# Persisted like any context field: every driver stores the runner's toDict().
 	assert runner.toDict()['context']['ai_usage_by_model'] == usage
-
-
-def test_subagent_inherits_the_profile():
-	from secator.ai.actions import ActionContext
-	ctx = ActionContext(targets=[], model='m', profile='gw')
-	assert ctx.profile == 'gw'
 
 
 # ---- /model switch + usage per model ----
@@ -239,6 +259,9 @@ def test_model_switch_keeps_history_and_splits_usage(cfg):
 	# Only provider-neutral keys reach it (plus secator's own `_` bookkeeping, stripped by call_llm).
 	assert all(set(k for k in m if not k.startswith('_')) <= {'role', 'content', 'tool_calls'} for m in msgs2)
 	assert (task.api_base, task.api_key, task.context['ai_model']) == (GW, PROFILES['gw']['api_key'], 'openai/gw-model')
+	# Subagents spawned after the switch inherit the new profile from the live action context.
+	ictx = task._isolation_ctx
+	assert (ictx.model, ictx.api_base, ictx.profile) == ('openai/gw-model', GW, 'gw')
 	assert any(getattr(i, 'ai_type', '') == 'note' and 'gw' in i.content for i in items)
 	row = {'prompt_tokens': 10, 'completion_tokens': 5, 'cached_tokens': 4}
 	assert task.context['ai_usage_by_model'] == {'top-model': row, 'openai/gw-model': row}

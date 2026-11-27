@@ -41,7 +41,7 @@ def oauth2(monkeypatch):
 	monkeypatch.setattr('time.monotonic', lambda: clock[0])
 	monkeypatch.setattr('time.sleep', lambda s: None)
 	cfg = {
-		'api_base': BASE, 'api_key': '', 'oauth2_endpoint': TOKEN_URL,
+		'api_base': BASE, 'api_key': '', 'oauth2_endpoint': TOKEN_URL, 'profile': '',
 		'oauth2_client_id': 'client-1', 'oauth2_client_secret': SECRET, 'oauth2_scope': '',
 	}
 	# patch.dict restores every key on exit, including ones a test reassigns.
