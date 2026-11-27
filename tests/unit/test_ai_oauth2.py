@@ -17,7 +17,10 @@ SECRET = 's3cr3t-client-value'
 
 def _token_resp(token, expires_in=300, status=200):
 	r = MagicMock(status_code=status)
-	r.json.return_value = {'access_token': token, 'expires_in': expires_in, 'token_type': 'Bearer'}
+	body = {'access_token': token, 'token_type': 'Bearer'}
+	if expires_in is not None:
+		body['expires_in'] = expires_in
+	r.json.return_value = body
 	return r
 
 
@@ -155,6 +158,26 @@ def test_token_never_sent_over_plain_http(oauth2):
 		_call(api_base='http://llm.example.com/v1')
 	oauth2.post.assert_not_called()
 	oauth2.completion.assert_not_called()
+
+
+def test_missing_expires_in_defaults_to_300s(oauth2):
+	oauth2.post.side_effect = [_token_resp('tok-1', expires_in=None), _token_resp('tok-2')]
+	_call()
+	oauth2.clock[0] += 269
+	_call()
+	assert oauth2.post.call_count == 1
+	oauth2.clock[0] += 2  # past 300 - 30
+	_call()
+	assert oauth2.post.call_count == 2
+
+
+def test_localhost_http_api_base_allowed(oauth2):
+	CONFIG.addons.ai.api_base = 'http://localhost:4000/v1'
+	CONFIG.addons.ai.oauth2_endpoint = ''
+	oauth2.post.return_value = _token_resp('tok-1')
+	_call(api_base='http://localhost:4000/v1')
+	assert oauth2.post.call_args.args[0] == 'http://localhost:4000/oauth2/token'
+	assert oauth2.completion.call_args.kwargs['api_key'] == 'tok-1'
 
 
 @pytest.mark.parametrize('api_base,expected', [
