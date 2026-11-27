@@ -990,6 +990,57 @@ def workspace_summary(workspace_opt, driver, template_path):
 	console.print(rendered)
 
 
+@workspace.command('migrate')
+@click.argument('name')
+@click.option('--from', 'src', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), required=True, help='Driver to read the workspace from')  # noqa: E501
+@click.option('--to', 'dst', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), required=True, help='Driver to write the workspace to')  # noqa: E501
+@click.option('--as', 'new_name', type=str, default=None, help='Workspace name at the destination (default: NAME)')
+@click.option('--keep-status', is_flag=True, default=False, help='Keep the status of unfinished runners (default: mark them FAILURE)')  # noqa: E501
+@click.option('--apply', is_flag=True, default=False, help='Write to the destination (default: dry run)')
+def workspace_migrate(name, src, dst, new_name, keep_status, apply):
+	"""Copy a workspace to another driver: runners, findings (incl. ai chats) and notes.
+
+	NAME is the workspace as runs stored it in context.workspace_id: its name for runs launched from
+	the CLI (or its id, e.g. an ObjectId); on the api driver, a name is resolved to its remote id.
+
+	Dry run by default. Re-running updates the docs a previous run wrote instead of duplicating them;
+	it is refused on a driver that does not return them (the api driver keeps no runner marker).
+	"""
+	from secator.workspace_migrate import WorkspaceMigration
+	try:
+		migration = WorkspaceMigration(name, src, dst, new_name=new_name, keep_status=keep_status)
+	except ValueError as e:
+		raise click.UsageError(str(e))
+	table = Table(title=f'{src}:{name} -> {dst}:{migration.new_name}')
+	for col in ('Collection', 'Source', 'New', 'Update'):
+		table.add_column(col)
+	rows = migration.plan()
+	for row in rows:
+		table.add_row(*map(str, row))
+	console.print(table)
+	if migration.rebuilt:
+		console.print(Info(message=f'Rebuilt {len(migration.rebuilt)} ai chat runner(s) from their findings.'))
+	if migration.notes is None:
+		console.print(Warning(message=f'The {src} driver cannot list workspace notes: notes are not migrated.'))
+	if not apply:
+		console.print(Info(message='Dry run: nothing written. Re-run with [bold green4]--apply[/] to migrate.'))
+		return
+	try:
+		migration.apply()
+	except RuntimeError as e:
+		raise click.ClickException(str(e))
+	if migration.failed:
+		console.print(Warning(message=f'{migration.failed} doc(s) could not be migrated (see warnings above).'))
+	counts = migration.destination_counts()
+	table = Table(title='Migrated')
+	for col in ('Collection', 'Source', 'Destination'):
+		table.add_column(col)
+	for kind, n, _, _ in rows:
+		style = '' if counts[kind] == n else 'bold red'
+		table.add_row(kind, str(n), f'[{style}]{counts[kind]}[/]' if style else str(counts[kind]))
+	console.print(table)
+
+
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
 @click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501

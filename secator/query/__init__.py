@@ -119,6 +119,10 @@ class QueryEngine:
         the api driver POSTs to the notes endpoint). Returns 1 on success, 0 otherwise."""
         return self.backend.create_note(note)
 
+    def list_notes(self) -> Optional[List[Dict[str, Any]]]:
+        """List the workspace notes via the active backend (None when it cannot list them)."""
+        return self.backend.list_notes()
+
     def list_workspaces(self) -> List[Dict[str, Any]]:
         """List all workspaces via the active backend."""
         return self.backend.list_workspaces()

@@ -355,6 +355,11 @@ class QueryBackend(ABC):
 		debug(f'create_note not supported by {self.name} backend', sub='query')
 		return 0
 
+	def list_notes(self) -> Optional[List[Dict[str, Any]]]:
+		"""Every note of the workspace, as ``create_note`` stored it. None when this backend
+		cannot list a workspace's notes."""
+		return None
+
 
 # list_runners sort orders: 'asc' = oldest first, most recent last (the default, used by
 # the CLI so the most recent runs are the last lines printed); 'desc' = most recent first

@@ -556,6 +556,14 @@ class JsonBackend(QueryBackend):
 					})
 		return workspaces
 
+	def list_notes(self):
+		"""Notes of the workspace from its ``notes.ndjson``."""
+		path = self._get_workspace_path() / 'notes.ndjson'
+		if not path.exists():
+			return []
+		with open(path, 'rb') as f:
+			return [orjson.loads(line) for line in f if line.strip()]
+
 	def get_workspace(self, workspace_id: str):
 		"""Get workspace info from local filesystem."""
 		workspace_path = self.reports_dir / get_workspace_folder_name(workspace_id, self.reports_dir)
@@ -601,7 +609,10 @@ class JsonBackend(QueryBackend):
 		"""
 		validate_runner_order(order)
 		from secator.utils import list_reports, get_info_from_report_path
-		paths = list_reports(workspace=workspace_id, type=runner_type)
+		# Child runners are stored as report_<name>.json in their root runner's dir, so their
+		# runner type is read from their own info, not from the dir.
+		children = has_parent is not False
+		paths = list_reports(workspace=workspace_id, type=None if children else runner_type, children=children)
 		runners = []
 		for path in paths:
 			try:
@@ -609,10 +620,17 @@ class JsonBackend(QueryBackend):
 				with open(path, 'r') as f:
 					data = json.load(f)
 				info = data.get('info', {})
+				if path.name != 'report.json' and 'context' not in info:
+					continue  # a report_*.json that holds no runner
 				if has_parent is not None and info.get('has_parent', False) != has_parent:
 					continue
-				info['_type'] = path_info.get('type', '')
+				rtype = (info.get('config') or {}).get('type') or path_info.get('type', '').removesuffix('s')
+				if runner_type and rtype != runner_type.removesuffix('s'):
+					continue
+				info['_type'] = f'{rtype}s' if rtype else ''
 				info['_id'] = path_info.get('type', '') + '/' + path_info.get('id', '')
+				if path.name != 'report.json':  # a child runner: <root type>/<root id>/<child name>
+					info['_id'] += '/' + path.stem.removeprefix('report_')
 				info['_workspace'] = path_info.get('workspace', '')
 				info['_path'] = str(path)
 				runners.append(info)

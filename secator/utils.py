@@ -906,7 +906,7 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 	return True
 
 
-def list_reports(workspace=None, type=None, timedelta=None):
+def list_reports(workspace=None, type=None, timedelta=None, children=False):
 	"""Yield report.json paths in the secator reports dir.
 
 	A generator (lazy) — nothing is accumulated in memory.
@@ -915,6 +915,8 @@ def list_reports(workspace=None, type=None, timedelta=None):
 		workspace (str): Filter by workspace name.
 		type (str): Filter by runner type.
 		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
+		children (bool): Also yield the ``report_<name>.json`` of the child runners stored in
+			a runner's dir (``type`` then filters on that dir's runner type).
 
 	Yields:
 		pathlib.Path: Each matching report.json path.
@@ -927,9 +929,9 @@ def list_reports(workspace=None, type=None, timedelta=None):
 	# Glob that exact depth instead of os.walk — the latter descends into every run's
 	# artifact subdirectories (potentially thousands of files on a large reports dir)
 	# just to find the handful of report.json files, which is the dominant cost of
-	# `secator r list`. Local reports don't store nested sub-runner reports, so a
-	# fixed-depth glob is complete.
-	for path in Path(CONFIG.dirs.reports).glob('*/*/*/report.json'):
+	# `secator r list`. Child runners are stored next to their root runner's report
+	# (report_<name>.json, same depth), so a fixed-depth glob is complete.
+	for path in Path(CONFIG.dirs.reports).glob('*/*/*/report*.json' if children else '*/*/*/report.json'):
 		if workspace and path.parts[-4] != workspace:
 			continue
 		if type and path.parts[-3] != type:

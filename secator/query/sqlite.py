@@ -291,6 +291,19 @@ class SqliteBackend(QueryBackend):
 			console.print(Warning(message=f'SQLite create_note failed: {e}'))
 			return 0
 
+	def list_notes(self):
+		"""Notes of the workspace from the ``notes`` table (none until a note was created; None if
+		the read fails: an empty list would claim the workspace has none)."""
+		conn = self._get_conn()
+		if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notes'").fetchone():
+			return []
+		try:
+			rows = conn.execute("SELECT data FROM notes WHERE workspace_id = ?", (self.workspace_id,))
+			return [json.loads(data) for (data,) in rows.fetchall()]
+		except Exception as e:
+			console.print(Warning(message=f'SQLite list_notes failed: {e}'))
+			return None
+
 	def get_runner(self, runner_id: str, runner_type: str):
 		"""Get a single runner by id from its runner table (live: written by update_runner).
 
