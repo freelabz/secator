@@ -54,6 +54,7 @@ SCHEMA = [
 	"CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",
 	"CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",
 	"CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",
+	"CREATE TABLE IF NOT EXISTS suggestions (uuid TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",
 ]
 
 
@@ -157,6 +158,23 @@ def update_finding(self, item):
 	ctx = data.get('_context') or {}
 	workspace_id = ctx.get('workspace_id')
 	payload = json.dumps(data, default=str)
+	if item._type == 'suggestion':  # not a finding: its own table, one row per runner and target set
+		data['targets'] = sorted({str(t) for t in item.targets})
+		same = conn.execute(
+			"SELECT uuid FROM suggestions WHERE workspace_id IS ? AND json_extract(data, '$.type') = ? "
+			"AND json_extract(data, '$.name') = ? AND json_extract(data, '$.targets') = json(?)",
+			(workspace_id, str(item.type), str(item.name), json.dumps(data['targets'])),
+		).fetchone()
+		if same:
+			item._uuid = data['_uuid'] = same[0]
+		payload = json.dumps(data, default=str)
+		conn.execute(
+			"INSERT INTO suggestions (uuid, workspace_id, data) VALUES (?, ?, ?) "
+			"ON CONFLICT(uuid) DO UPDATE SET workspace_id=excluded.workspace_id, data=excluded.data",
+			(item._uuid, workspace_id, payload),
+		)
+		conn.commit()
+		return item
 	conn.execute(
 		"INSERT INTO findings (uuid, type, workspace_id, is_false_positive, _tagged, data) "
 		"VALUES (?, ?, ?, ?, ?, ?) "

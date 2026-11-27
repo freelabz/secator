@@ -3,8 +3,9 @@
 Each tool is one self-contained :class:`~secator.ai.tools.base.BaseTool` subclass. The
 built-in tools are grouped by the resource they act on: ``runners.py`` (run_task,
 run_workflow, run_shell, run_subagent, list_runners, get_runner, stop_runner), ``findings.py`` (query_workspace,
-add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search)
-and ``session.py`` (update_plan, change_mode, stop). The class
+add_finding, update_finding, mark_vuln_*, add_note), ``web.py`` (fetch_url, web_search),
+``session.py`` (update_plan, change_mode, stop) and ``suggestions.py`` (add_suggestion,
+list_suggestions; chat mode only). The class
 carries everything that used to be hand-synced across 5 places (schema, dispatch
 action, mode exposure, permission auto-allow, handler), and every drift-prone view
 derives from the ``TOOLS`` registry:
@@ -40,6 +41,7 @@ from secator.ai.tools.findings import (
 )
 from secator.ai.tools.web import FetchUrl, WebSearch
 from secator.ai.tools.session import UpdatePlan, ChangeMode, Stop
+from secator.ai.tools.suggestions import AddSuggestion, ListSuggestions
 
 
 # Order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas emits tools
@@ -65,6 +67,8 @@ _TOOL_CLASSES = [
 	StopRunner,
 	ChangeMode,
 	Stop,
+	ListSuggestions,
+	AddSuggestion,
 ]
 
 # The live registry. Built-ins are instantiated once; external tools are appended by
@@ -291,7 +295,7 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 			so `change_mode` is withheld there (the model can only suggest the user
 			switches). An auto session that happens to resolve to chat KEEPS change_mode.
 		extra_tools: Names or fnmatch globs of EXTRA (typically external) tools to add on top
-			of the mode's baseline for this run (e.g. ``["add_suggestion"]`` or
+			of the mode's baseline for this run (e.g. ``["export_report"]`` or
 			``["sysreptor_*"]``). Merged with ``CONFIG.addons.ai.extra_tools``; every exact name
 			must resolve to a loaded tool, a glob expands to the matching EXTERNAL tools only
 			(see :func:`resolve_extra_tools`).
@@ -415,10 +419,14 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		# `stop` ends the turn and carries no required data (its `reason` is optional),
 		# so a bare stop() with empty/no args is VALID and must succeed — otherwise the
 		# empty-args reject below bounces every clean stop as "empty arguments" and the
-		# model falls back into a follow-up nag loop instead of ending. Every other tool
-		# needs arguments, so keep rejecting those. Covers native + text-parsed stop.
+		# model falls back into a follow-up nag loop instead of ending. Covers native +
+		# text-parsed stop. A tool with no required parameter (e.g. list_suggestions) is
+		# also valid with no args; any other tool needs arguments, so keep rejecting those.
 		if tool_name == "stop":
 			return {"action": action_type, "description": "stopped"}
+		tool = TOOLS_BY_NAME.get(tool_name)
+		if tool and not tool.schema["function"]["parameters"].get("required"):
+			return {"action": action_type}
 		return None
 	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
 	# below would raise and abort the loop, so reject cleanly and let the caller retry.

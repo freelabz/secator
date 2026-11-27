@@ -371,11 +371,11 @@ class TestPrompts(unittest.TestCase):
 		# (subagent), stop. `change_mode` lets an AUTO-resolved chat turn self-escalate — it
 		# is withheld from a user-PINNED chat in build_tool_schemas (see
 		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
-		# else here acts on the world or the data.
+		# else here acts on the world or the data, except recording runner suggestions (which run nothing).
 		self.assertEqual(
 			set(actions),
 			{"query", "fetch_url", "web_search", "list_runners", "get_runner", "update_plan",
-			 "subagent", "change_mode", "stop"},
+			 "subagent", "list_suggestions", "add_suggestion", "change_mode", "stop"},
 		)
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding", "stop_runner",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:

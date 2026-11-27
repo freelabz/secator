@@ -13,7 +13,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import ADDONS_ENABLED
 from secator.output_types import (
-	Ai, Stat, Progress, Error, Info, Warning, State, Target, FINDING_TYPES, OutputType, INTERNAL_FIELDS
+	Ai, Stat, Progress, Error, Info, Warning, State, Suggestion, Target, FINDING_TYPES, OutputType, INTERNAL_FIELDS
 )
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
@@ -320,7 +320,7 @@ def resolve_llm_credentials(
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (scan or chat mode)."""
-	output_types = FINDING_TYPES + [Target]
+	output_types = FINDING_TYPES + [Target, Suggestion]  # Suggestion: from add_suggestion
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
 	install_cmd = 'pipx install shfmt-py'
@@ -347,12 +347,12 @@ class ai(PythonRunner):
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
 		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name or
-		# fnmatch glob (e.g. add_suggestion, sysreptor_*). Merged with CONFIG.addons.ai.extra_tools;
+		# fnmatch glob (e.g. export_report, sysreptor_*). Merged with CONFIG.addons.ai.extra_tools;
 		# every exact name must resolve to a loaded tool; a glob expands to the matching external
 		# tools (templates dir / SECATOR_AI_TOOLS_DIRS / bundle) and warns if none match. Generic
 		# and driver-agnostic — the same option lets any caller (CLI, a template, a library call)
 		# grant external tools to a run without a core edit.
-		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor_*,add_suggestion'); globs match external tools only"},  # noqa: E501
+		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor_*,export_report'); globs match external tools only"},  # noqa: E501
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",

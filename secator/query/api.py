@@ -180,6 +180,16 @@ class ApiBackend(QueryBackend):
             seen.update(d.get("_id") for d in new)
             docs.extend(new)
 
+    def list_suggestions(self, limit: int) -> List[Dict[str, Any]]:
+        """GET the workspace's suggestions from the suggestions list endpoint (which orders them
+        last saved first). A workspace name is resolved to its id first, like the api driver
+        does; an empty, ``default`` or unknown workspace raises."""
+        from secator.hooks.api import resolve_workspace
+        workspace_id, _ = resolve_workspace(self.workspace_id)
+        endpoint = CONFIG.addons.api.suggestion_list_endpoint.format(workspace_id=workspace_id)
+        result = self._make_request("GET", f"{endpoint}?skip=0&limit={limit}")
+        return result.get("items", []) if isinstance(result, dict) else (result or [])
+
     def _execute_create_note(self, note: dict) -> int:
         """POST the note to the remote notes endpoint.
 

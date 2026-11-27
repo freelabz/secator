@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timezone
 
 import pymongo
 from bson.objectid import ObjectId
@@ -161,9 +162,46 @@ def on_build(self, task_spec):
 	return task_spec
 
 
+def save_suggestion(item):
+	"""Upsert a runner suggestion in the ``suggestions`` collection, one doc per workspace, runner and
+	target set (a repeat refreshes ``message``, ``priority``, ``data.run_opts`` and ``updated_at``).
+
+	Doc shape: ``{type: 'runner', name, message, priority, source, data: {type, name, config_query,
+	run_opts, targets}, context: {workspace_id, done}, _context, created_at, updated_at}``.
+	A repeat refreshes the existing doc even when it is done, leaving ``context.done`` untouched.
+	Without a unique index on the filter, two concurrent saves may rarely insert twice.
+	"""
+	db = get_mongodb_client().main
+	now = datetime.now(timezone.utc)
+	runner_type, name = str(item.type), str(item.name)
+	query = {
+		'type': 'runner',
+		'context.workspace_id': item._context.get('workspace_id'),
+		'data.type': runner_type,
+		'data.name': name,
+		'data.targets': sorted({str(t) for t in item.targets}),
+	}
+	result = db.suggestions.update_one(query, {
+		'$set': {'message': item.reason, 'priority': item.priority, 'data.run_opts': item.opts, 'updated_at': now},
+		'$setOnInsert': {
+			'name': f'Run {runner_type} {name}',
+			'source': item.source,
+			'data.config_query': {'config.name': name, 'config.type': runner_type},
+			'context.done': False,
+			'_context': item._context,
+			'created_at': now,
+		},
+	}, upsert=True)
+	_id = result.upserted_id or db.suggestions.find_one(query, {'_id': 1})['_id']
+	item._uuid = str(_id)
+	return item
+
+
 def update_finding(self, item):
 	if not is_output_type(item):
 		return item
+	if item._type == 'suggestion':
+		return save_suggestion(item)
 	ensure_mongo_run_id(self.context)
 	for key in (f'{self.config.type}_id', f'{self.config.type}_chunk_id'):
 		cur = item._context.get(key)

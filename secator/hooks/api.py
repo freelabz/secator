@@ -33,6 +33,7 @@ API_RUNNER_CREATE_ENDPOINT = CONFIG.addons.api.runner_create_endpoint
 API_RUNNER_UPDATE_ENDPOINT = CONFIG.addons.api.runner_update_endpoint
 API_FINDING_CREATE_ENDPOINT = CONFIG.addons.api.finding_create_endpoint
 API_FINDING_UPDATE_ENDPOINT = CONFIG.addons.api.finding_update_endpoint
+API_SUGGESTION_CREATE_ENDPOINT = CONFIG.addons.api.suggestion_create_endpoint
 API_WORKSPACE_GET_ENDPOINT = CONFIG.addons.api.workspace_get_endpoint
 API_WORKSPACE_LIST_ENDPOINT = CONFIG.addons.api.workspace_list_endpoint
 API_WORKSPACE_CREATE_ENDPOINT = CONFIG.addons.api.workspace_create_endpoint
@@ -137,10 +138,27 @@ def update_runner(self):
 			self.last_updated_db = start_time
 
 
+def create_suggestion(self, item):
+	"""POST a runner suggestion to the suggestions endpoint (never the findings one), once."""
+	if item._context.get('api'):  # already created (re-emitted by a parent runner)
+		return item
+	workspace_id, workspace_name = resolve_workspace(self.context.get('workspace_id'))
+	data = item.toDict()
+	data['_context'].update(workspace_id=workspace_id, workspace_name=workspace_name)
+	result = _make_request('POST', API_SUGGESTION_CREATE_ENDPOINT, data)
+	if result and result.get('id'):
+		item._uuid = result.get('id')
+		item._context['api'] = True
+	debug(f'suggestion {"CREATED" if result and result.get("id") else "FAILED"}', sub='hooks.api', id=str(item._uuid))
+	return item
+
+
 def update_finding(self, item):
 	"""Update finding state via API."""
 	if 'api' not in self.context.get('drivers', []):
 		self.context.setdefault('drivers', []).append('api')
+	if item._type == 'suggestion':
+		return create_suggestion(self, item)
 	if type(item) not in FINDING_TYPES:
 		return item
 

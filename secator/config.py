@@ -611,6 +611,8 @@ class ApiAddon(StrictModel):
 	finding_create_endpoint: str = 'findings'
 	finding_update_endpoint: str = 'finding/{finding_id}'
 	finding_search_endpoint: str = 'findings/_search'
+	suggestion_create_endpoint: str = 'suggestions'
+	suggestion_list_endpoint: str = 'workspace/{workspace_id}/suggestions'
 	workspace_list_endpoint: str = 'workspaces'
 	workspace_create_endpoint: str = 'workspaces'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
