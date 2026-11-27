@@ -145,7 +145,25 @@ class BaseTool:
 		"""
 		call = {k: action.get(k) for k in ("tool_call_id", "tool_call_name") if action.get(k)}
 		results = self.run(action, ctx)
+		if self.external and call:
+			results = self._with_display_item(action, ctx, call, results)
 		return _stamp_tool_call(results, call) if call else results
+
+	def _with_display_item(self, action, ctx, call, results):
+		"""Yield the call's display item (``ai_type`` = the tool name, like ``web_search``), then ``results``.
+
+		Built-in tools render through their own items; an external tool only yields its results,
+		so without this its call left no trace in a live chat. An external tool therefore must not
+		yield its own ``Ai`` item of that type.
+		"""
+		from secator.ai.actions import _get_result_context
+		from secator.output_types import Ai
+		args = {k: v for k, v in action.items() if k not in ("action", "tool_call_id", "tool_call_name")}
+		if args.get("description") == "unknown":  # tool_call_to_action's placeholder
+			args.pop("description")
+		content = ", ".join(f"{k}={v}" for k, v in args.items() if k != "description")
+		yield Ai(content=content, ai_type=self.name, extra_data=args, _context={**_get_result_context(action, ctx), **call})
+		yield from results
 
 	def run(self, action, ctx):
 		"""Generator handler: yields OutputTypes. Every tool overrides this in its file."""
