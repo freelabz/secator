@@ -143,7 +143,7 @@ def _validate_tool_spec(tool):
 	if name in TOOLS_BY_NAME:
 		return f"name {name!r} clashes with an existing tool"
 	from secator.output_types.ai import AI_TYPES
-	if name in AI_TYPES or name in ("tool_result", "token_usage", "mode_changed", "turn_completed"):
+	if name in AI_TYPES or name in ("tool_result", "token_usage", "mode_changed", "turn_completed", "error"):
 		return f"name {name!r} clashes with a reserved ai item type"
 	if not isinstance(tool.schema, dict) or not tool.schema:
 		return f"{name!r}: `schema` must be a non-empty dict"
