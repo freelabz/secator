@@ -1421,7 +1421,9 @@ def _choose(title, options, default=0):
 	"""Pick one of ``options`` (labels): arrow keys on a terminal, a numbered prompt otherwise."""
 	if _tty():
 		from secator.rich import InteractiveMenu
-		menu = InteractiveMenu(f"  [bold]{title}[/]", [{'label': o} for o in options], selected=default)
+		menu = InteractiveMenu(
+			f"  [bold]{title}[/]", [{'label': o} for o in options], selected=default,
+			description='Esc = back · Ctrl+C = quit')
 		picked = menu.show()
 		if picked is None:
 			raise _Quit if menu.interrupted else _Back  # Ctrl+C quits, Esc goes back
@@ -1631,7 +1633,7 @@ def _settings_rows(state):
 	if cred['method'] == 'oauth2':
 		rows += [
 			('Auth', 'OAuth2 client credentials'), ('Client ID', escape(cred['client_id'])),
-			('Client secret', escape(mask_secret(cred['client_secret']))), ('Token URL', escape(cred['endpoint'])),
+			('Client secret', escape(mask_secret(cred['client_secret']))), ('Token URL', escape(mask_url(cred['endpoint']))),
 		]
 	else:
 		rows.append(('API key', escape(mask_secret(cred['api_key'])) if cred['api_key'] else "[dim]provider's env vars[/]"))
@@ -1773,7 +1775,9 @@ def _ask_key(state, cred):
 		raw = _ask('API key', default=keep, password=_tty(), help=help)
 		key = cred['api_key'] if keep and raw == keep else raw
 		if key or optional:
-			return {**cred, 'method': 'key', 'api_key': key}
+			# Switching from OAuth2 to a key drops the OAuth2 settings (they would show as the method).
+			dropped = {f: '' for f in _CRED_KEYS if f != 'api_key'} if cred['method'] == 'oauth2' else {}
+			return {**cred, **dropped, 'method': 'key', 'api_key': key}
 		console.print("  [red]This endpoint needs an API key.[/]")
 
 
@@ -1781,18 +1785,21 @@ def _ask_oauth2(state, cred):
 	client_id = ''
 	while not client_id:
 		client_id = _ask('Client ID', default=cred['client_id'] or None, help='OAuth2 client credentials for this endpoint.')
-	keep = mask_secret(cred['client_secret']) if cred['client_secret'] else None
-	secret = ''
-	while not secret:
-		raw = _ask('Client secret', default=keep, password=_tty())
-		secret = cred['client_secret'] if keep and raw == keep else raw
+	url = cred['endpoint'] or default_oauth2_token_url(state['base'])
 	while True:
 		endpoint, err = _normalize_api_base(_ask(
-			'Token URL', default=cred['endpoint'] or default_oauth2_token_url(state['base']),
+			'Token URL', default=url, enter=f'keep {mask_url(url)}',
 			help='Where the client ID and secret are exchanged for an access token.'))
 		if not err:
 			break
 		console.print(f"  [red]{err}[/]")
+	# The saved secret is only ever sent to the token URL it was saved for.
+	saved_secret = cred['client_secret'] if endpoint == cred['endpoint'] else ''
+	keep = mask_secret(saved_secret) if saved_secret else None
+	secret = ''
+	while not secret:
+		raw = _ask('Client secret', default=keep, password=_tty())
+		secret = saved_secret if keep and raw == keep else raw
 	return {**cred, 'method': 'oauth2', 'client_id': client_id, 'client_secret': secret, 'endpoint': endpoint}
 
 
@@ -1857,8 +1864,8 @@ def _step_auth(state, saved):
 		return
 
 
-def _step_model(state, saved):
-	_step_header(state, 'Model')
+def _ensure_models(state):
+	"""List the models with the saved credentials when no earlier step did (a quick re-run)."""
 	if 'models' not in state:
 		try:
 			live = _fetch_models(state)
@@ -1867,6 +1874,11 @@ def _step_model(state, saved):
 			console.print(f"  [yellow]{_explain_error(e, state, cred['api_key'], cred['client_secret'], state.get('token'))}[/]")
 			live = None
 		_set_models(state, live)
+
+
+def _step_model(state, saved):
+	_step_header(state, 'Model')
+	_ensure_models(state)
 	# Enter keeps the saved model when the provider did not change, listed or not.
 	default = None
 	if _same_target(state, saved) and saved['model']:
@@ -1876,13 +1888,13 @@ def _step_model(state, saved):
 
 def _step_intent(state, saved):
 	_step_header(state, 'Intent model')
+	_ensure_models(state)
 	# Enter keeps the saved intent model on the same provider, else follows the main model.
 	default = state['model']
 	if _same_target(state, saved) and saved['intent'] and not _same_model(state['model'], saved['intent']):
-		default = next((m for m in state.get('models', []) if _same_model(m, saved['intent'])), saved['intent'])
+		default = next((m for m in state['models'] if _same_model(m, saved['intent'])), saved['intent'])
 	# Right after the model step its table is still on screen: its numbers stay valid.
-	state['intent'], _ = _pick_model(
-		state.get('models', []), state['route'], default, 'Intent model', shown=state.get('shown'))
+	state['intent'], _ = _pick_model(state['models'], state['route'], default, 'Intent model', shown=state.get('shown'))
 
 
 def _step_save(state, saved):
@@ -1890,21 +1902,21 @@ def _step_save(state, saved):
 	import litellm
 	cred = state['cred']
 	oauth2 = cred['method'] == 'oauth2'
-	# Every credential is written: an API-key setup clears stale OAuth2 settings, and OAuth2 keeps
-	# the saved key until the user confirms its removal below.
-	values = {key: cred[field] if oauth2 else '' for field, key in _CRED_KEYS.items()}
+	# OAuth2 keeps the saved API key until the user confirms its removal below.
+	values = {key: cred[field] for field, key in _CRED_KEYS.items()}
 	values.update(api_base=state['base'], api_key=saved['cred']['api_key'] if oauth2 else cred['api_key'])
 	auth_changed = any(values[k] != (CONFIG.addons.ai[k] or '') for k in ('api_base', *_CRED_KEYS.values()))
 	same = _same_target(state, saved)
 	model = saved['model'] if same and _same_model(state['model'], saved['model']) else state['model']
 	intent = saved['intent'] if same and _same_model(state['intent'], saved['intent']) else state['intent']
-	changed = [m for m in (model, intent) if m and (auth_changed or m not in (saved['model'], saved['intent']))]
-	checks = list(dict.fromkeys(changed))
+	roles = ((model, saved['model']), (intent, saved['intent']))
+	checks = list(dict.fromkeys(new for new, old in roles if new and (auth_changed or new != old)))
 	if not checks:
 		console.print("\n  [green]✓ Nothing changed.[/]")
 		return None
 	console.print()
 	failed, back_to = [], None
+	state['token'] = None  # a fresh OAuth2 token: the one from listing may have expired meanwhile
 	try:
 		token = _bearer(state)
 	except Exception as e:  # noqa: BLE001 - explained to the user, who decides
@@ -1931,9 +1943,14 @@ def _step_save(state, saved):
 		if (oauth2 and auth_changed) or not _yes('Save anyway?', default=False):
 			return None
 	values.update(default_model=model, intent_model=intent)
+	if oauth2 and os.environ.get('SECATOR_ADDONS_AI_API_KEY'):
+		console.print("  [yellow]SECATOR_ADDONS_AI_API_KEY is set and overrides the config: unset it to use OAuth2.[/]")
 	if oauth2 and auth_changed and values['api_key']:
 		if _yes('Remove the saved API key? OAuth2 is only used without one.', default=True):
 			values['api_key'] = ''
+		elif not same:  # the old endpoint's key must never be saved with the new base
+			console.print("  [yellow]Nothing saved: the saved API key belongs to another endpoint.[/]")
+			return None
 		else:
 			console.print("  [yellow]The saved API key stays in use: OAuth2 settings not saved.[/]")
 			values.update({k: CONFIG.addons.ai[k] or '' for k in _CRED_KEYS.values()})
@@ -1976,7 +1993,8 @@ def _saved_setup():
 	except Exception:  # noqa: BLE001 - unknown model: no saved provider to match
 		route = model.split('/')[0] if '/' in model else ''
 	saved = {'model': model, 'intent': ai.intent_model or '', 'route': route, 'base': (ai.api_base or '').rstrip('/')}
-	cred = _blank_cred('oauth2' if ai.oauth2_client_id else 'key')
+	# Same precedence as the runtime: a saved API key wins over OAuth2 settings.
+	cred = _blank_cred('oauth2' if ai.oauth2_client_id and not ai.api_key else 'key')
 	cred.update({field: ai[key] or '' for field, key in _CRED_KEYS.items()})
 	# The setup always saves the token URL explicitly: an older setup that relied on the default
 	# gets it written (and checked) on its next save.
@@ -1984,7 +2002,10 @@ def _saved_setup():
 		cred['endpoint'] = default_oauth2_token_url(saved['base'])
 	entry = _saved_entry(_provider_entries(), saved)
 	provider = _entry_state(entry, saved['base']) if entry else _entry_state(('lite', route, pretty_provider(route)))
-	return {**saved, **provider, 'route': route or provider['route'], 'cred': cred}
+	# The provider entry's route wins (e.g. a registry `openrouter` route over an older `openai/` id),
+	# so new picks get it; the saved model id itself is kept until the user picks another one.
+	saved['route'] = provider['route']
+	return {**saved, **provider, 'cred': cred}
 
 
 def _setup_ai_interactive():

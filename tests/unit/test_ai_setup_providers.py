@@ -175,6 +175,8 @@ def _run_wizard(monkeypatch, tmp_path, answers, config=None, **patches):
 	}
 	for name, value in saved_config.items():
 		monkeypatch.setitem(CONFIG.addons.ai, name, value)
+	monkeypatch.setattr(u, '_tty', lambda: False)  # scripted prompts, never the real arrow menu
+	monkeypatch.delenv('SECATOR_ADDONS_AI_API_KEY', raising=False)
 	rec = Console(record=True, width=200)
 	cfg = 'secator.config.Config'
 	with patch.object(u, 'console', rec), \
@@ -424,7 +426,7 @@ class TestOAuth2Setup:
 	def test_first_run_with_oauth2(self, tmp_path, monkeypatch):
 		fetch = MagicMock(return_value=['m'])
 		answers = [('Provider', 'Custom'), ('API base URL', GW), ('Choice', '2'), ('Client ID', 'cid'),
-		           ('Client secret', 'cs-new-secret-0123456789'), ('Token URL', ''), ('Model', '1'), ('Intent model', '')]
+		           ('Token URL', ''), ('Client secret', 'cs-new-secret-0123456789'), ('Model', '1'), ('Intent model', '')]
 		with _token_endpoint() as post:
 			result, saved, save, llm, text = _run_wizard(
 				monkeypatch, tmp_path, answers, fetch_openai_compatible_models=fetch)
@@ -442,7 +444,7 @@ class TestOAuth2Setup:
 
 	def test_bad_client_secret_saves_nothing(self, tmp_path, monkeypatch):
 		answers = [('Provider', 'Custom'), ('API base URL', GW), ('Choice', '2'), ('Client ID', 'cid'),
-		           ('Client secret', 'cs-wrong-secret-0123456789'), ('Token URL', ''), ('Try again?', 'n'),
+		           ('Token URL', ''), ('Client secret', 'cs-wrong-secret-0123456789'), ('Try again?', 'n'),
 		           ('Model id', 'q')]
 		with _token_endpoint(status=401):
 			result, saved, save, llm, text = _run_wizard(
@@ -455,8 +457,8 @@ class TestOAuth2Setup:
 	@pytest.mark.parametrize('answer,cleared', [('y', True), ('n', False)])
 	def test_switch_to_oauth2_removes_key_only_on_confirmation(self, tmp_path, monkeypatch, answer, cleared):
 		config = {'api_base': GW, 'api_key': 'sk-gw-saved-0123456789', 'default_model': 'openai/m'}
-		answers = [('Choice', '3'), ('Choice', '2'), ('Client ID', 'cid'), ('Client secret', 'cs-0123456789abcdefgh'),
-		           ('Token URL', ''), ('Remove the saved API key?', answer)]
+		answers = [('Choice', '3'), ('Choice', '2'), ('Client ID', 'cid'), ('Token URL', ''),
+		           ('Client secret', 'cs-0123456789abcdefgh'), ('Remove the saved API key?', answer)]
 		with _token_endpoint():
 			_, saved, save, llm, text = _run_wizard(
 				monkeypatch, tmp_path, answers, config=config,
@@ -482,7 +484,7 @@ class TestOAuth2Setup:
 	def test_failed_oauth2_check_cannot_be_saved_anyway(self, tmp_path, monkeypatch):
 		# No "Save anyway?" prompt: the stub would fail on it.
 		answers = [('Provider', 'Custom'), ('API base URL', GW), ('Choice', '2'), ('Client ID', 'cid'),
-		           ('Client secret', 'cs-new-secret-0123456789'), ('Token URL', ''), ('Model', '1'), ('Intent model', ''),
+		           ('Token URL', ''), ('Client secret', 'cs-new-secret-0123456789'), ('Model', '1'), ('Intent model', ''),
 		           ('Pick something else?', 'n')]
 		with _token_endpoint():
 			result, saved, save, _, _ = _run_wizard(
@@ -490,6 +492,42 @@ class TestOAuth2Setup:
 				call_llm=MagicMock(side_effect=RuntimeError('model not found')))
 		assert result is None and not saved
 		save.assert_not_called()
+
+	def test_new_token_url_needs_the_secret_again(self, tmp_path, monkeypatch):
+		# Enter at "Client secret" must not send the saved secret to a different token URL.
+		answers = [('Choice', '3'), ('Choice', ''), ('Client ID', ''), ('Token URL', 'https://other.example/token'),
+		           ('Client secret', ''), ('Client secret', 'cs-other-0123456789abc')]
+		with _token_endpoint() as post:
+			_, saved, _, _, _ = _run_wizard(
+				monkeypatch, tmp_path, answers, config=OAUTH,
+				fetch_openai_compatible_models=MagicMock(return_value=['a']))
+		assert all(c.kwargs['auth'] == ('cid', 'cs-other-0123456789abc') for c in post.call_args_list)
+		assert saved['addons.ai.oauth2_endpoint'] == 'https://other.example/token'
+
+	def test_declining_key_removal_on_a_new_endpoint_saves_nothing(self, tmp_path, monkeypatch):
+		# Gateway A's API key must never be saved together with gateway B's base.
+		config = {'api_base': 'https://a.example/v1', 'api_key': 'sk-a-saved-0123456789', 'default_model': 'openai/m'}
+		answers = [('Choice', '2'), ('Provider', 'Custom'), ('API base URL', GW), ('Choice', '2'), ('Client ID', 'cid'),
+		           ('Token URL', ''), ('Client secret', 'cs-0123456789abcdefgh'), ('Model', '1'), ('Intent model', ''),
+		           ('Remove the saved API key?', 'n')]
+		with _token_endpoint():
+			result, saved, save, _, text = _run_wizard(
+				monkeypatch, tmp_path, answers, config=config,
+				fetch_openai_compatible_models=MagicMock(return_value=['m']))
+		assert result is None and not saved
+		save.assert_not_called()
+		assert 'belongs to another endpoint' in text
+
+	def test_saved_api_key_wins_over_oauth2_like_the_runtime(self, tmp_path, monkeypatch):
+		# Both saved: the runtime uses the key, so a model switch checks with the key (no token fetch).
+		answers = [('Choice', ''), ('Model', 'openai/c')]
+		with _token_endpoint() as post:
+			_, saved, _, llm, _ = _run_wizard(
+				monkeypatch, tmp_path, answers, config={**OAUTH, 'api_key': 'sk-gw-key-0123456789'},
+				fetch_openai_compatible_models=MagicMock(return_value=['a', 'c']))
+		post.assert_not_called()
+		assert llm.call_args.kwargs['api_key'] == 'sk-gw-key-0123456789'
+		assert saved == {'addons.ai.default_model': 'openai/c'}
 
 	def test_token_url_is_always_saved_explicitly(self, tmp_path, monkeypatch):
 		# An older OAuth2 setup without oauth2_endpoint: the next save writes the default it used.
@@ -530,9 +568,9 @@ class TestReRun:
 
 	@pytest.mark.parametrize('answers', [
 		[('Choice', ''), ('Model', '')],
-		[('Choice', '2'), ('Provider', ''), ('API base URL', ''), ('Choice', ''), ('Client ID', ''), ('Client secret', ''),
-		 ('Token URL', ''), ('Model', ''), ('Intent model', '')],
-		[('Choice', '3'), ('Choice', ''), ('Client ID', ''), ('Client secret', ''), ('Token URL', '')],
+		[('Choice', '2'), ('Provider', ''), ('API base URL', ''), ('Choice', ''), ('Client ID', ''), ('Token URL', ''),
+		 ('Client secret', ''), ('Model', ''), ('Intent model', '')],
+		[('Choice', '3'), ('Choice', ''), ('Client ID', ''), ('Token URL', ''), ('Client secret', '')],
 		[('Choice', '4'), ('Intent model', '')],
 		[('Choice', 'Done')],
 	])
@@ -545,6 +583,27 @@ class TestReRun:
 		save.assert_not_called()
 		llm.assert_not_called()
 		assert 'Nothing changed' in text
+
+	def test_change_intent_lists_models_and_compares_by_role(self, tmp_path, monkeypatch):
+		# Saved main a, intent b: making the intent `a` too is a change (not "Nothing changed").
+		fetch = MagicMock(return_value=['a', 'b'])
+		answers = [('Choice', '4'), ('Intent model', '1')]
+		with _token_endpoint():
+			_, saved, save, llm, text = _run_wizard(
+				monkeypatch, tmp_path, answers, config=OAUTH, fetch_openai_compatible_models=fetch)
+		assert '2 models' in text  # the table is shown for a quick intent change
+		assert saved == {'addons.ai.intent_model': 'openai/a'}
+		save.assert_called_once()
+
+	def test_registry_route_wins_for_new_picks(self, tmp_path, monkeypatch):
+		# An older openai/ id on the OpenRouter base: Enter keeps it, a new pick gets the openrouter route.
+		config = {'api_base': 'https://openrouter.ai/api/v1', 'api_key': 'sk-or-saved-0123456789',
+		          'default_model': 'openai/anthropic/old'}
+		fetch = MagicMock(return_value=['anthropic/old', 'anthropic/new'])
+		_, saved, _, _, _ = _run_wizard(
+			monkeypatch, tmp_path, [('Choice', ''), ('Model', 'anthropic/new')], config=config,
+			fetch_openai_compatible_models=fetch)
+		assert saved == {'addons.ai.default_model': 'openrouter/anthropic/new'}
 
 	def test_failed_model_switch_keeps_the_old_model(self, tmp_path, monkeypatch):
 		answers = [('Choice', ''), ('Model', 'openai/c'), ('Pick something else?', 'y'), ('Model', 'q')]
