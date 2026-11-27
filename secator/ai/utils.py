@@ -885,7 +885,7 @@ def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) 
 class OAuth2TokenCache:
 	"""In-memory OAuth2 client-credentials access token for the configured LLM endpoint.
 
-	The token is fetched from ``addons.ai.oauth2_endpoint`` and reused until shortly before
+	The token is fetched from ``_oauth2_endpoint()`` and reused until shortly before
 	its ``expires_in``; ``get(force=True)`` refetches it (e.g. after a 401). It is never
 	logged or persisted.
 	"""
@@ -902,7 +902,7 @@ class OAuth2TokenCache:
 	def get(self, force=False):
 		import time
 		cfg = CONFIG.addons.ai
-		key = (cfg.oauth2_endpoint, cfg.oauth2_client_id, cfg.oauth2_client_secret, cfg.oauth2_scope)
+		key = (_oauth2_endpoint(), cfg.oauth2_client_id, cfg.oauth2_client_secret, cfg.oauth2_scope)
 		with self._lock:
 			if force or key != self._key or time.monotonic() >= self._expires_at:
 				self._token, ttl = self._fetch(*key)
@@ -915,6 +915,7 @@ class OAuth2TokenCache:
 		"""POST a client_credentials grant (RFC 6749 4.4, HTTP Basic client auth)."""
 		import math
 		import requests
+		from urllib.parse import quote_plus
 		_, err = _normalize_api_base(endpoint)
 		if err:
 			raise ValueError('addons.ai.oauth2_endpoint must be https:// (http:// only for a bare localhost host).')
@@ -922,14 +923,15 @@ class OAuth2TokenCache:
 		if scope:
 			data['scope'] = scope
 		resp = requests.post(
-			endpoint, data=data, auth=(client_id, client_secret),
+			# RFC 6749 2.3.1: form-encode both parts before HTTP Basic.
+			endpoint, data=data, auth=(quote_plus(client_id, safe=''), quote_plus(client_secret, safe='')),
 			timeout=15, allow_redirects=False, verify=_ssl_verify())
 		if resp.status_code != 200:
 			raise RuntimeError(f'OAuth2 token request failed (HTTP {resp.status_code}).')
 		try:
 			body = resp.json()
 			token = body['access_token']
-			ttl = float(body.get('expires_in') or 300)
+			ttl = 300.0 if body.get('expires_in') is None else float(body['expires_in'])
 		except (ValueError, KeyError, TypeError):
 			token, ttl = None, 0
 		# An empty token would make litellm fall back to another configured key for this base.
@@ -943,11 +945,34 @@ class OAuth2TokenCache:
 _oauth2_tokens = OAuth2TokenCache()
 
 
+def default_oauth2_token_url(api_base):
+	"""Default OAuth2 token URL for an API base: its origin + ``/oauth2/token`` ('' without a base).
+
+	``https://company.com/v1`` -> ``https://company.com/oauth2/token``.
+	"""
+	from urllib.parse import urlsplit
+	parts = urlsplit((api_base or '').strip())
+	if not parts.scheme or not parts.netloc:
+		return ''
+	host = parts.netloc.rpartition('@')[2]  # never carry userinfo into the token URL
+	return f'{parts.scheme}://{host}/oauth2/token'
+
+
+def _oauth2_endpoint():
+	"""The token URL in use: ``oauth2_endpoint``, else the api_base default once client credentials are set."""
+	cfg = CONFIG.addons.ai
+	if cfg.oauth2_endpoint:
+		return cfg.oauth2_endpoint
+	if cfg.oauth2_client_id and cfg.oauth2_client_secret:
+		return default_oauth2_token_url(cfg.api_base)
+	return ''
+
+
 def _uses_oauth2(api_base, api_key):
 	"""Whether this call gets the OAuth2 token: only with no explicit key, on the configured base."""
 	cfg = CONFIG.addons.ai
 	base = (cfg.api_base or '').rstrip('/')
-	return bool(cfg.oauth2_endpoint and base and not api_key and (api_base or '').rstrip('/') == base)
+	return bool(_oauth2_endpoint() and base and not api_key and (api_base or '').rstrip('/') == base)
 
 
 def call_llm(
@@ -993,6 +1018,8 @@ def call_llm(
 	use_oauth2 = _uses_oauth2(api_base, api_key)
 	oauth2_retried = False
 	if use_oauth2:
+		if _normalize_api_base(api_base)[1]:
+			raise ValueError('addons.ai.api_base must be https:// (http:// only for a bare localhost host) with OAuth2.')
 		kwargs["api_key"] = _oauth2_tokens.get()
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
