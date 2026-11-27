@@ -1324,7 +1324,8 @@ def load_ai_providers():
 	file (``<SECATOR_DIRS_DATA>/ai_providers.json``); the user file overrides bundled
 	entries by ``name``. This lets any gateway/router be added by a small JSON entry —
 	no code. Per-entry schema: ``name``, ``label``, ``api_base`` (https, OpenAI-compatible),
-	optional ``docs`` and ``key_hint``. A malformed/missing file is skipped, never fatal.
+	optional ``docs``, ``key_hint`` and ``litellm_provider`` (native LiteLLM route used as the
+	model prefix instead of ``openai/``). A malformed/missing file is skipped, never fatal.
 	"""
 	from pathlib import Path
 	providers = {}
@@ -1395,7 +1396,8 @@ def _setup_ai_interactive():
 	OpenAI-compatible gateway from the registry (providers.json), or a custom base.
 	A known provider filters the bundled catalog to its models; a gateway/custom base
 	lists live from ``<base>/models`` (key collected first — it's authenticated) and the
-	chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base.
+	chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base (or as
+	``<litellm_provider>/<id>`` when the registry entry names a native LiteLLM route).
 	"""
 	import litellm
 	from rich.prompt import Confirm, Prompt
@@ -1453,8 +1455,10 @@ def _setup_ai_interactive():
 	# then any OpenAI-compatible gateways from the registry (providers.json), then a
 	# one-off custom base. A known provider filters the bundled catalog to its models;
 	# a gateway/custom base lists live from `<base>/models` (key collected first — auth'd).
-	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p))
+	# A registry gateway named like a LiteLLM provider (e.g. openrouter) is listed once, as the gateway.
 	gateways = load_ai_providers()
+	gateway_names = {g['name'] for g in gateways}
+	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p) and p not in gateway_names)
 	entries = ([('lite', p) for p in lite_providers]
 	           + [('gateway', g) for g in gateways]
 	           + [('custom', None)])
@@ -1536,17 +1540,22 @@ def _setup_ai_interactive():
 		if not custom_key:
 			console.print("[bold red]  An API key is required for this endpoint — aborting.[/]")
 			return None
+		# A registry entry may name a native LiteLLM route (e.g. openrouter) so the model is
+		# priced and gets its provider params; otherwise route as a generic OpenAI-compatible base.
+		route = (val.get('litellm_provider') if kind == 'gateway' else None) or 'openai'
 		try:
 			with maybe_status("[bold orange3]Listing models from the endpoint…[/]", spinner="dots"):
 				ids = fetch_openai_compatible_models(custom_base, custom_key)
-			all_models = [f"openai/{i}" for i in ids]
+			all_models = [f"{route}/{i}" for i in ids]
 			console.print(f"[bold green]  Found {len(all_models)} models at {custom_base}[/]")
 		except Exception as e:  # noqa: BLE001 - fall back to manual id entry
 			console.print(f"[bold yellow]  Could not list models ({e}).[/]")
 			manual = Prompt.ask("  [bold cyan]Enter a model id manually[/] [dim](e.g. my-model)[/]").strip()
 			if not manual:
 				return None
-			all_models = [manual if '/' in manual else f"openai/{manual}"]
+			# A native route's ids carry a vendor segment (`anthropic/claude-…`), so always prefix them.
+			keep = manual.startswith(f'{route}/') or (route == 'openai' and '/' in manual)
+			all_models = [manual if keep else f"{route}/{manual}"]
 		all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
 
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
