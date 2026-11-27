@@ -179,6 +179,7 @@ class TestCallLLM(unittest.TestCase):
             model="test-model",
             messages=[{"role": "user", "content": "hi"}],
             temperature=0.7,
+            drop_params=True,
             api_base="http://localhost:8000",
         )
 
@@ -388,6 +389,83 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["content"], "ok")
         self.assertEqual(mock_completion.call_count, 2)  # transient retry honored
         mock_sleep.assert_called_once()
+
+    @patch('litellm.completion')
+    def test_call_llm_empty_choices_raises_clear_error(self, mock_completion):
+        """A response with no choices raises a readable error, not an IndexError."""
+        import litellm
+        from secator.ai.utils import call_llm
+        mock_completion.return_value = litellm.ModelResponse(
+            id="resp-1", choices=[], stop_reason="refusal",
+            error={"message": "upstream rejected the request"},
+            usage={"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5})
+
+        with self.assertRaises(ValueError) as ctx:
+            call_llm([{"role": "user", "content": "hi"}], "test-model")
+
+        self.assertIn("no choices", str(ctx.exception))
+        self.assertIn("test-model", str(ctx.exception))
+        for expected in ("resp-1", "refusal", "upstream rejected the request", "'prompt_tokens': 5"):
+            self.assertIn(expected, str(ctx.exception))
+
+    def _real_litellm_completion(self):
+        """Patch litellm.completion with the real one (mock_response, no network), so
+        litellm's own per-model param validation runs; record each call's kwargs."""
+        import litellm
+        real, calls = litellm.completion, []
+
+        def fake(**kwargs):
+            calls.append(dict(kwargs))
+            return real(**kwargs, mock_response="ok")
+        return patch('litellm.completion', side_effect=fake), calls
+
+    def test_call_llm_drops_temperature_for_reasoning_models(self):
+        """Models that only take temperature=1 while reasoning (setup call uses 0, the
+        main loop 0.7) no longer fail: litellm drops the temperature."""
+        from secator.ai.utils import call_llm
+        for model, temperature in (("gpt-6.1-terra", 0), ("claude-opus-5-5", 0.7)):
+            with self.subTest(model=model):
+                patcher, calls = self._real_litellm_completion()
+                with patcher:
+                    result = call_llm([{"role": "user", "content": "hi"}], model, temperature, api_key="x")
+                self.assertEqual(result["content"], "ok")
+                self.assertEqual(len(calls), 1)
+                self.assertTrue(calls[0]["drop_params"])
+
+    def test_call_llm_with_tools_on_unknown_reasoning_model(self):
+        """A model litellm only knows by family under the `openai/` prefix: litellm
+        rejects temperature=0.3 and tool_choice for it; the call still goes through
+        with tools."""
+        import litellm
+        from litellm.utils import get_optional_params
+        from secator.ai.utils import call_llm
+        model = "openai/gpt-6.1-terra-2026-10-26"
+        tools = [{"type": "function", "function": {
+            "name": "f", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+        self.assertIn("tools", litellm.get_supported_openai_params(model=model))
+        with self.assertRaises(litellm.UnsupportedParamsError):
+            get_optional_params(model=model.split("/", 1)[1], custom_llm_provider="openai", temperature=0.3)
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            result = call_llm([{"role": "user", "content": "hi"}], model, 0.3,
+                              api_base="https://gw.example.com/v1", api_key="x", tools=tools)
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(calls[0]["tools"], tools)
+        self.assertNotIn("tool_choice", calls[0])
+        sent = get_optional_params(
+            model=model.split("/", 1)[1], custom_llm_provider="openai",
+            temperature=0.3, tools=tools, drop_params=True)
+        self.assertEqual(sent["tools"], tools)
+        self.assertNotIn("temperature", sent)
+
+    def test_call_llm_keeps_supported_temperature(self):
+        """A model that accepts the temperature gets it on the first and only call."""
+        from secator.ai.utils import call_llm
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            call_llm([{"role": "user", "content": "hi"}], "claude-sonnet-4-5", 0.7, api_key="x")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["temperature"], 0.7)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -943,3 +1021,67 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
         ]
         _repair_orphan_tool_uses(m)
         self.assertEqual(self._roles(m), ["system", "user", "assistant", "tool"])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSetupAiVerifyBeforeSave(unittest.TestCase):
+    """`ai setup` verifies the model connection before writing the config."""
+
+    def _run_setup(self, verify_error=None, save_anyway=False, provider="2"):
+        import secator.ai.utils as utils_mod
+        from secator.config import Config
+        answers = {
+            "Select (number": provider,  # entries: [anthropic, custom]
+            "API base URL": "https://new.example.com/v1",
+            "leave empty to keep current": "",
+            "API key": "new-key",
+            "Filter or select": "1",
+        }
+
+        def ask(prompt, *args, **kwargs):
+            return next(v for k, v in answers.items() if k in prompt)
+
+        call_llm = MagicMock(side_effect=verify_error, return_value={"content": "OK"})
+        with patch('litellm.models_by_provider', {'anthropic': ['claude-x']}), \
+                patch.object(utils_mod, 'load_ai_providers', return_value=[]), \
+                patch.object(utils_mod, 'fetch_openai_compatible_models', return_value=['m1']), \
+                patch.object(utils_mod, 'call_llm', call_llm), \
+                patch.object(utils_mod.CONFIG.addons.ai, 'api_base', 'https://old.example.com/v1'), \
+                patch.object(utils_mod.CONFIG.addons.ai, 'api_key', 'old-key'), \
+                patch.object(Config, 'set') as mock_set, \
+                patch.object(Config, 'save') as mock_save, \
+                patch('rich.prompt.Prompt.ask', side_effect=ask), \
+                patch('rich.prompt.Confirm.ask', return_value=save_anyway), \
+                patch.object(utils_mod.console, 'print'):
+            selected = utils_mod._setup_ai_interactive()
+        return selected, call_llm, mock_set, mock_save
+
+    def test_failed_verify_keeps_previous_config(self):
+        selected, call_llm, mock_set, mock_save = self._run_setup(verify_error=RuntimeError("401"))
+        self.assertIsNone(selected)
+        self.assertEqual(call_llm.call_args.kwargs["api_base"], "https://new.example.com/v1")
+        self.assertEqual(call_llm.call_args.kwargs["api_key"], "new-key")
+        mock_set.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_failed_verify_can_save_anyway(self):
+        selected, _, mock_set, mock_save = self._run_setup(verify_error=RuntimeError("401"), save_anyway=True)
+        self.assertEqual(selected, "openai/m1")
+        mock_set.assert_any_call('addons.ai.api_key', 'new-key')
+        mock_save.assert_called_once()
+
+    def test_verified_setup_saves_new_config(self):
+        selected, _, mock_set, mock_save = self._run_setup()
+        self.assertEqual(selected, "openai/m1")
+        mock_set.assert_any_call('addons.ai.api_base', 'https://new.example.com/v1')
+        mock_set.assert_any_call('addons.ai.api_key', 'new-key')
+        mock_save.assert_called_once()
+
+    def test_builtin_route_keeps_key_and_clears_custom_base(self):
+        selected, call_llm, mock_set, mock_save = self._run_setup(provider="1")
+        self.assertEqual(selected, "anthropic/claude-x")
+        self.assertEqual(call_llm.call_args.kwargs["api_base"], "")
+        self.assertEqual(call_llm.call_args.kwargs["api_key"], "old-key")
+        mock_set.assert_any_call('addons.ai.api_base', '')
+        self.assertNotIn('addons.ai.api_key', [c.args[0] for c in mock_set.call_args_list])
+        mock_save.assert_called_once()
