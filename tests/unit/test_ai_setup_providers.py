@@ -147,6 +147,31 @@ class TestProviderPicker:
 		assert len(openrouter) == 1
 		assert 'OpenAI-compatible gateway' in openrouter[0]
 
+	@pytest.mark.parametrize('pick,expected,base', [
+		# native route: priced by LiteLLM
+		('OpenRouter', 'openrouter/anthropic/claude-x', 'https://openrouter.ai/api/v1'),
+		# generic OpenAI-compatible base
+		('OrcaRouter', 'openai/anthropic/claude-x', 'https://api.orcarouter.ai/v1'),
+	])
+	def test_gateway_model_prefix(self, tmp_path, monkeypatch, pick, expected, base):
+		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))
+		answers = iter([pick, 'sk-test', '1'])
+		# Config is a DotMap: patch its methods on the class, never on the instance, so the
+		# user's config file is never written.
+		cfg = 'secator.config.Config'
+		with patch.object(u, 'console', MagicMock()), \
+			patch('rich.prompt.Prompt.ask', side_effect=lambda *a, **k: next(answers)), \
+			patch.object(u, 'fetch_openai_compatible_models', return_value=['anthropic/claude-x']), \
+			patch(f'{cfg}.set') as cfg_set, patch(f'{cfg}.validate', return_value=False), \
+			patch(f'{cfg}.save') as cfg_save, \
+			patch.object(u, 'call_llm', return_value={'content': 'OK'}) as llm:
+			assert u._setup_ai_interactive() == expected
+		cfg_save.assert_not_called()
+		saved = {c.args[0]: c.args[1] for c in cfg_set.call_args_list}
+		assert saved['addons.ai.default_model'] == expected
+		assert saved['addons.ai.api_base'] == base  # the gateway base is still saved
+		assert llm.call_args.args[1] == expected
+
 
 class TestPrettyProvider:
 
