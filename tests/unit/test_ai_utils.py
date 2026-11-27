@@ -1075,3 +1075,17 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
         _repair_orphan_tool_uses(m)
         self.assertEqual(self._roles(m), ["system", "user", "assistant", "tool"])
 
+    def test_tool_result_for_another_call_is_dropped(self):
+        """A result whose id is not one of its parent's calls is dropped (the parent's own
+        call then gets a synthetic result)."""
+        from secator.ai.utils import _repair_orphan_tool_uses
+        m = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "tool_calls": [
+                {"id": "b", "type": "function", "function": {"name": "q", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "a", "content": "{}"},
+            {"role": "user", "content": "next"},
+        ]
+        _repair_orphan_tool_uses(m)
+        self.assertEqual([x.get("tool_call_id") for x in m if x["role"] == "tool"], ["b"])
+
