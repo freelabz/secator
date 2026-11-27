@@ -133,7 +133,9 @@ class TestLoadProviders:
 
 
 def _asker(answers):
-	"""Prompt.ask stub: answers is a list of (label prefix, reply), consumed in order."""
+	"""Prompt.ask stub: answers is a list of (label prefix, reply), consumed in order.
+
+	Like rich, an empty reply returns the prompt's default."""
 	pending = list(answers)
 
 	def ask(prompt, *args, **kwargs):
@@ -141,14 +143,18 @@ def _asker(answers):
 		for i, (prefix, reply) in enumerate(pending):
 			if label.startswith(prefix):
 				del pending[i]
-				return reply
+				return reply or kwargs.get('default') or ''
 		raise AssertionError(f'unexpected prompt: {label}')
 	return ask
 
 
-def _run_wizard(monkeypatch, tmp_path, answers, **patches):
+def _run_wizard(monkeypatch, tmp_path, answers, config=None, **patches):
 	"""Run `ai setup` with scripted answers; Config is patched on the CLASS so nothing is written."""
 	monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))  # bundled registry only
+	# Pin the saved AI config so the run does not depend on the local config file.
+	saved_config = {'default_model': '', 'intent_model': '', 'api_key': '', 'api_base': '', **(config or {})}
+	for name, value in saved_config.items():
+		monkeypatch.setattr(CONFIG.addons.ai, name, value)
 	printed = MagicMock()
 	cfg = 'secator.config.Config'
 	with patch.object(u, 'console', printed), \
@@ -208,14 +214,12 @@ class TestSetupWizard:
 		live.assert_called_once_with('anthropic', 'sk-ant-test')
 
 	def test_model_table_shows_dash_for_unknown_price(self):
-		printed = MagicMock()
-		with patch.object(u, 'console', printed):
-			u._print_models(['anthropic/claude-zz-unpriced-9'])
 		from rich.console import Console
-		rec = Console(record=True, width=120)
-		rec.print(printed.print.call_args_list[1].args[0])
-		row = rec.export_text().splitlines()[-1]
-		assert 'claude-zz-unpriced-9' in row and row.count('—') == 5
+		rec = Console(record=True, width=150)
+		with patch.object(u, 'console', rec):
+			u._print_models(['anthropic/claude-zz-unpriced-9'])
+		row = next(line for line in rec.export_text().splitlines() if 'claude-zz-unpriced-9' in line)
+		assert row.count('—') == 5
 
 	def test_live_listing_falls_back_to_bundled_list(self, tmp_path, monkeypatch):
 		# Provider without live listing (None): the bundled LiteLLM catalog is offered.
@@ -285,14 +289,94 @@ class TestSetupWizard:
 
 	def test_saved_key_never_offered_to_another_provider(self, tmp_path, monkeypatch):
 		# The saved key belongs to another provider: Enter must clear it, not resend it.
-		monkeypatch.setattr(CONFIG.addons.ai, 'api_key', 'sk-old-gateway-key-123456')
-		monkeypatch.setattr(CONFIG.addons.ai, 'api_base', 'https://old.example/v1')
-		monkeypatch.setattr(CONFIG.addons.ai, 'default_model', 'openai/x')
+		old = {'api_key': 'sk-old-gateway-key-123456', 'api_base': 'https://old.example/v1', 'default_model': 'openai/x'}
 		answers = [('Provider', 'Anthropic'), ('API key', ''), ('Model', '1'), ('Intent model', '')]
 		_, saved, _, llm, _ = _run_wizard(
-			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/m']))
+			monkeypatch, tmp_path, answers, config=old,
+			_list_provider_models=MagicMock(return_value=['anthropic/m']))
 		assert llm.call_args.kwargs['api_key'] == ''
 		assert saved['addons.ai.api_key'] == '' and saved['addons.ai.api_base'] == ''
+
+	def test_saved_key_kept_for_same_provider(self, tmp_path, monkeypatch):
+		# Same provider and base: Enter keeps the saved key, which is used and left unchanged.
+		saved_key = 'sk-ant-saved-key-1234567890'
+		live = MagicMock(return_value=['anthropic/claude-x'])
+		answers = [('Provider', ''), ('API key', ''), ('Model', ''), ('Intent model', '')]
+		result, saved, _, llm, _ = _run_wizard(
+			monkeypatch, tmp_path, answers, config={'api_key': saved_key, 'default_model': 'anthropic/claude-x'},
+			_list_provider_models=live)
+		assert result == 'anthropic/claude-x'  # Enter kept the saved provider and model too
+		live.assert_called_once_with('anthropic', saved_key)
+		assert llm.call_args.kwargs['api_key'] == saved_key
+		assert 'addons.ai.api_key' not in saved
+
+	def test_saved_key_not_reused_across_openai_gateways(self, tmp_path, monkeypatch):
+		# Two gateways share the `openai/` route but not the base: the saved key stays with its base.
+		(tmp_path / 'ai_providers.json').write_text(json.dumps(
+			{'providers': [{'name': 'acme', 'label': 'Acme', 'api_base': 'https://acme.example/v1'}]}))
+		fetch = MagicMock(return_value=['m'])
+		answers = [('Provider', 'Acme'), ('API key', ''), ('API key', 'k2'), ('Model', '1'), ('Intent model', '')]
+		_, saved, _, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, fetch_openai_compatible_models=fetch,
+			config={'api_key': 'sk-orca-saved-1234567890', 'api_base': 'https://api.orcarouter.ai/v1',
+			        'default_model': 'openai/m'})
+		assert 'An API key is required' in text
+		fetch.assert_called_once_with('https://acme.example/v1', 'k2')
+		assert saved['addons.ai.api_key'] == 'k2'
+
+	def test_unlisted_model_id_can_be_typed(self, tmp_path, monkeypatch):
+		answers = [('Provider', 'Anthropic'), ('API key', 'k'), ('Model', 'claude-brand-new-9'),
+		           ('No models matching', 'y'), ('Intent model', '')]
+		result, _, _, _, _ = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/m']))
+		assert result == 'anthropic/claude-brand-new-9'
+
+	def test_no_list_at_all_asks_for_an_id(self, tmp_path, monkeypatch):
+		# A plain gateway whose listing fails has no bundled list (not OpenAI's): ask for the id.
+		answers = [('Provider', 'OrcaRouter'), ('API key', 'k'), ('Try another key?', 'n'),
+		           ('Model id', 'my-model'), ('Intent model id', '')]
+		result, saved, _, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, fetch_openai_compatible_models=MagicMock(side_effect=OSError('down')))
+		assert result == 'openai/my-model'
+		assert saved['addons.ai.intent_model'] == 'openai/my-model'
+		assert 'bundled list' not in text
+
+	def test_out_of_range_number_is_filter_text(self, tmp_path, monkeypatch):
+		answers = [('Provider', 'Anthropic'), ('API key', 'k'), ('Model', '405'), ('Intent model', '')]
+		result, _, _, _, _ = _run_wizard(
+			monkeypatch, tmp_path, answers,
+			_list_provider_models=MagicMock(return_value=['anthropic/m', 'anthropic/llama-405b']))
+		assert result == 'anthropic/llama-405b'
+
+	def test_markup_in_model_ids_does_not_crash(self, tmp_path, monkeypatch):
+		from rich.console import Console
+		rec = Console(record=True, width=150)
+		with patch.object(u, 'console', rec):
+			u._print_models(['openai/weird[/]id', 'openai/[bold]x'])
+		assert 'weird[/]id' in rec.export_text()
+
+	def test_saved_intent_model_is_the_default(self, tmp_path, monkeypatch):
+		answers = [('Provider', 'Anthropic'), ('API key', 'k'), ('Model', 'big'), ('Intent model', '')]
+		_, saved, _, _, _ = _run_wizard(
+			monkeypatch, tmp_path, answers, config={'default_model': 'anthropic/big-1', 'intent_model': 'small-1'},
+			_list_provider_models=MagicMock(return_value=['anthropic/big-1', 'anthropic/small-1']))
+		assert saved['addons.ai.intent_model'] == 'anthropic/small-1'
+
+
+class TestListers:
+
+	@pytest.mark.parametrize('provider', ['vertex_ai', 'groq'])
+	def test_providers_without_a_listing_return_none(self, provider):
+		# vertex_ai has a lister class whose listing raises NotImplementedError; groq has none.
+		assert u._list_provider_models(provider, 'k') is None
+
+	def test_short_error_reads_json_body_and_masks_key(self):
+		e = Exception('401 Client Error')
+		e.response = MagicMock()
+		e.response.json.return_value = {'error': {'message': 'bad key sk-secret-value-123456789 [x]'}}
+		msg = u._short_error(e, 'sk-secret-value-123456789')
+		assert 'bad key' in msg and 'sk-secret-value-123456789' not in msg
+		assert '\\[x]' in msg  # escaped for rich markup
 
 
 class TestPrettyProvider:

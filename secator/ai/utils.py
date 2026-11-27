@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG, mask_secret, mask_url
 from secator.output_types import Warning, Error
+from rich.markup import escape
+
 from secator.rich import console, maybe_status
 from secator.runners import Task
 from secator.utils import format_token_count, to_datetime
@@ -740,9 +742,9 @@ def init_llm(api_key: Optional[str] = None):
 
 	import litellm
 
-	# Set API key if provided (can be called multiple times)
-	if api_key:
-		litellm.api_key = api_key
+	# Set the key of THIS call, clearing any earlier one: litellm.api_key is process-wide, so a
+	# stale key would otherwise be sent to whatever provider a later key-less call targets.
+	litellm.api_key = api_key or None
 
 	if _llm_initialized:
 		return
@@ -1396,7 +1398,7 @@ def _yes(label, default):
 
 
 def _short_error(e, secret=None, limit=300):
-	"""The provider's error as one capped line, without a traceback or the key."""
+	"""The provider's error as one capped line, without a traceback or the key, escaped for rich markup."""
 	detail = None
 	try:
 		err = e.response.json().get('error')
@@ -1406,7 +1408,7 @@ def _short_error(e, secret=None, limit=300):
 	msg = ' '.join(f'{e} ({detail})'.split() if detail else str(e).split()) or type(e).__name__
 	if secret:
 		msg = msg.replace(secret, mask_secret(secret))
-	return msg if len(msg) <= limit else msg[:limit] + '…'
+	return escape(msg if len(msg) <= limit else msg[:limit] + '…')
 
 
 def _model_info(model):
@@ -1458,7 +1460,11 @@ def _list_provider_models(provider, api_key):
 		return None
 	if lister is None:
 		return None
-	return sorted({_with_route(provider, m) for m in lister.get_models(api_key=api_key or None)})
+	try:
+		ids = lister.get_models(api_key=api_key or None)
+	except NotImplementedError:  # e.g. vertex_ai: has a lister class without a listing
+		return None
+	return sorted({_with_route(provider, m) for m in ids})
 
 
 def _newest_first(models):
@@ -1493,15 +1499,15 @@ def _print_models(models, default=None, title=''):
 	for i, m in enumerate(models[:_MODEL_ROWS], 1):
 		info = _model_info(m)
 		route, _, rest = m.rpartition('/')
-		name = f'[dim]{route}/[/]{rest}' if route else m
+		name = f'[dim]{escape(route)}/[/]{escape(rest)}' if route else escape(m)
 		if m == default:
-			name = f'[bold green]{m}[/] [green](default)[/]'
+			name = f'[bold green]{escape(m)}[/] [green](default)[/]'
 		table.add_row(
 			str(i), name, _fmt_ctx(info.get('max_input_tokens')),
 			_fmt_price(info.get('input_cost_per_token')), _fmt_price(info.get('output_cost_per_token')),
 			_fmt_flag(info.get('supports_function_calling')), _fmt_flag(info.get('supports_reasoning')),
 		)
-	console.print(f"\n[bold]  {len(models)} models{title}[/]")
+	console.print(f"\n[bold]  {len(models)} models{escape(title)}[/]")
 	console.print(table, highlight=False)
 	if len(models) > _MODEL_ROWS:
 		console.print(f"  [dim]… {len(models) - _MODEL_ROWS} more: type text to filter.[/]")
@@ -1510,10 +1516,11 @@ def _print_models(models, default=None, title=''):
 def _pick_model(models, route, default=None, label='Model', show=True):
 	"""Choose a model by number, id or filter text; Enter takes ``default``.
 
-	With no ``models`` (nothing could be listed), any typed id is accepted. With ``show=False``
-	the table is printed only once the user filters, so a number is read as filter text.
+	With no ``models`` (nothing could be listed), any typed id is accepted; otherwise an unlisted
+	id is used after a confirmation. With ``show=False`` the table is printed only once the user
+	filters, so a number is read as filter text until then.
 	"""
-	hint = f"Enter = {default.split('/', 1)[-1]}, " if default else ''
+	hint = f"Enter = {escape(default.split('/', 1)[-1])}, " if default else ''
 	if not models:
 		while True:
 			raw = _ask(f"{label} id [dim](e.g. my-model)[/]", default=default)
@@ -1523,19 +1530,17 @@ def _pick_model(models, route, default=None, label='Model', show=True):
 	if show:
 		_print_models(models, default)
 	while True:
-		raw = _ask(f"{label} [dim]({hint}number, id or text to filter)[/]")
+		number = 'number, ' if shown is not None else ''
+		raw = _ask(f"{label} [dim]({hint}{number}id or text to filter)[/]")
 		if not raw:
 			if default:
 				return default
 			shown = models
 			_print_models(models)
 			continue
-		if raw.isdigit() and shown is not None:
-			idx = int(raw)
-			if 1 <= idx <= min(len(shown), _MODEL_ROWS):
-				return shown[idx - 1]
-			console.print(f"[bold red]  Invalid number: {idx} (valid: 1-{min(len(shown), _MODEL_ROWS)})[/]")
-			continue
+		# A number picks a shown row; any other number is filter text (e.g. "405").
+		if raw.isdigit() and shown is not None and 1 <= int(raw) <= min(len(shown), _MODEL_ROWS):
+			return shown[int(raw) - 1]
 		low = raw.lower()
 		exact = [m for m in models if low in (m.lower(), m.split('/', 1)[-1].lower())]
 		if exact:
@@ -1543,8 +1548,10 @@ def _pick_model(models, route, default=None, label='Model', show=True):
 		matches = [m for m in models if low in m.lower()]
 		if len(matches) == 1:
 			return matches[0]
+		# Not listed (e.g. newer than LiteLLM's bundled list): the typed id can still be used.
 		if not matches:
-			console.print(f'[bold yellow]  No models matching "{raw}".[/]')
+			if _yes(f'No models matching "{escape(raw)}". Use it as the model id?', default=False):
+				return _with_route(route, raw)
 			continue
 		shown = matches
 		_print_models(matches, default, f' matching "{raw}"')
@@ -1573,7 +1580,7 @@ def _step_provider(state, current):
 	names = {g['name'] for g in gateways}
 	lite = sorted(p for p in litellm.models_by_provider if p not in names and _chat_capable(p))
 	entries = [('lite', p, pretty_provider(p)) for p in lite]
-	entries += [('gateway', g, g.get('label') or g['name']) for g in gateways]
+	entries += [('gateway', g, escape(g.get('label') or g['name'])) for g in gateways]
 	entries += [('custom', None, 'Custom')]
 
 	def show(subset):
@@ -1582,14 +1589,20 @@ def _step_provider(state, current):
 			console.print(Columns(cells, column_first=True, padding=(0, 2)))
 		for i, (kind, val, label) in subset:
 			if kind == 'gateway':
-				console.print(f"  [dim]{i:>3}[/] {label} [dim](OpenAI-compatible gateway) {val['api_base']}[/]")
+				console.print(f"  [dim]{i:>3}[/] {label} [dim](OpenAI-compatible gateway) {escape(val['api_base'])}[/]")
 			elif kind == 'custom':
 				console.print(f"  [dim]{i:>3}[/] {label} [dim](enter your own OpenAI-compatible URL)[/]")
 
+	# Enter keeps the saved provider: same LiteLLM route on its default base, or the same base URL.
+	default = next((label for kind, val, label in entries if (
+		(kind == 'lite' and (val, '') == (current['route'], current['base']))
+		or (kind == 'gateway' and val['api_base'] == current['base']))), None)
+	if not default and current['base']:
+		default = 'Custom'
 	numbered = list(enumerate(entries, 1))
 	show(numbered)
 	while True:
-		raw = _ask("Provider [dim](number or text to filter)[/]")
+		raw = _ask("Provider [dim](number or text to filter)[/]", default=default)
 		if raw.isdigit() and 1 <= int(raw) <= len(entries):
 			kind, val, label = entries[int(raw) - 1]
 			break
@@ -1601,7 +1614,7 @@ def _step_provider(state, current):
 		if matches:
 			show(matches)
 		else:
-			console.print(f'[bold yellow]  No provider matching "{raw}".[/]')
+			console.print(f'[bold yellow]  No provider matching "{escape(raw)}".[/]')
 
 	state.update(kind=kind, label=label, gateway=val if kind == 'gateway' else {})
 	if kind == 'lite':
@@ -1609,7 +1622,8 @@ def _step_provider(state, current):
 		return
 	if kind == 'gateway':
 		route = val.get('litellm_provider') or 'openai'
-		state.update(route=route, base=val['api_base'], catalog=route if route in litellm.models_by_provider else None)
+		# Only a native route has a LiteLLM catalog of its own: a plain `openai/` gateway is not OpenAI.
+		state.update(route=route, base=val['api_base'], catalog=val.get('litellm_provider'))
 		return
 	while True:
 		base, err = _normalize_api_base(_ask("API base URL [dim](https://…)[/]", default=current['base'] or None))
@@ -1635,7 +1649,8 @@ def _list_models(state, key):
 	except Exception as e:  # noqa: BLE001 - shown to the user, then fall back
 		err = _short_error(e, key)
 	if live:
-		console.print(f"[bold green]  Key accepted: {len(live)} models available from {state['label']}.[/]")
+		accepted = 'Key accepted: ' if key else ''
+		console.print(f"[bold green]  {accepted}{len(live)} models listed by {state['label']}.[/]")
 		return live, None
 	if err:
 		console.print(f"[bold red]  Could not list models from {state['label']}: {err}[/]")
@@ -1691,7 +1706,10 @@ def _step_model(state, current):
 def _step_intent(state, current):
 	_step_header(4, 'Intent model')
 	console.print("  [dim]A cheaper model can classify each request before the main model answers.[/]")
-	state['intent'] = _pick_model(state['models'], state['route'], state['model'], 'Intent model', show=False)
+	# Keep a separately chosen saved intent model when it is still offered, else follow the main model.
+	saved = current['intent'] if current['intent'] != current['model'] else None
+	default = next((m for m in state['models'] if saved in (m, m.split('/', 1)[-1])), state['model'])
+	state['intent'] = _pick_model(state['models'], state['route'], default, 'Intent model', show=False)
 
 
 def _step_save(state, current):
@@ -1703,10 +1721,10 @@ def _step_save(state, current):
 		try:
 			with maybe_status(f"[bold orange3]Calling {model}…[/]", spinner="dots"):
 				call_llm([{"role": "user", "content": "Reply with only: OK"}], model, temperature=0, api_base=base, api_key=key)
-			console.print(f"[bold green]  ✓ {model} replied.[/]")
+			console.print(f"[bold green]  ✓ {escape(model)} replied.[/]")
 		except Exception as e:  # noqa: BLE001 - reported, the user decides
 			verified = False
-			console.print(f"[bold red]  ✗ {model}: {_short_error(e, key)}[/]")
+			console.print(f"[bold red]  ✗ {escape(model)}: {_short_error(e, key)}[/]")
 	if not verified and not _yes('Save anyway?', default=False):
 		console.print("[bold yellow]  Nothing saved: the previous config is unchanged.[/]")
 		return None
@@ -1719,12 +1737,12 @@ def _step_save(state, current):
 		return None
 	CONFIG.save()
 	_print_config('Saved:', [
-		('Model', state['model']),
-		('Intent model', state['intent']),
-		('API base', mask_url(base) or 'provider default'),
+		('Model', escape(state['model'])),
+		('Intent model', escape(state['intent'])),
+		('API base', escape(mask_url(base)) or 'provider default'),
 		('API key', mask_secret(key) if key else 'none (provider environment variables)'),
 		('Connection', '[green]verified[/]' if verified else '[red]not verified[/]'),
-		('Config file', CONFIG._path if '_path' in CONFIG else 'n/a'),
+		('Config file', escape(str(CONFIG._path)) if '_path' in CONFIG else 'n/a'),
 	])
 	return state['model']
 
@@ -1752,11 +1770,14 @@ def _setup_ai_interactive():
 		route = litellm.get_llm_provider(model)[1] if model else ''
 	except Exception:  # noqa: BLE001 - unknown model: no saved provider to match
 		route = model.split('/')[0] if '/' in model else ''
-	current = {'model': model, 'route': route, 'base': (ai.api_base or '').rstrip('/'), 'key': ai.api_key or ''}
+	current = {
+		'model': model, 'intent': ai.intent_model or '', 'route': route,
+		'base': (ai.api_base or '').rstrip('/'), 'key': ai.api_key or '',
+	}
 	_print_config('Current AI config:', [
-		('Model', model or 'not set'),
-		('Intent model', ai.intent_model or 'not set'),
-		('API base', mask_url(current['base']) or 'provider default'),
+		('Model', escape(model) or 'not set'),
+		('Intent model', escape(current['intent']) or 'not set'),
+		('API base', escape(mask_url(current['base'])) or 'provider default'),
 		('API key', mask_secret(current['key']) or 'not set'),
 	])
 	steps = (_step_provider, _step_key, _step_model, _step_intent, _step_save)

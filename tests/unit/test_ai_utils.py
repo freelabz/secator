@@ -31,6 +31,19 @@ class TestInitLLM(unittest.TestCase):
         finally:
             litellm.api_key = old_key
 
+    def test_init_llm_clears_a_previous_key(self):
+        # litellm.api_key is process-wide: a key-less call must not reuse the previous call's key.
+        import litellm
+        from secator.ai.utils import init_llm
+
+        old_key = getattr(litellm, 'api_key', None)
+        try:
+            init_llm(api_key="key-for-provider-a")
+            init_llm(api_key=None)
+            self.assertIsNone(litellm.api_key)
+        finally:
+            litellm.api_key = old_key
+
     def test_init_llm_singleton(self):
         """Second call should not re-register callbacks."""
         import litellm
