@@ -1287,7 +1287,7 @@ def _setup_ai_interactive():
 	chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base.
 	"""
 	import litellm
-	from rich.prompt import Prompt
+	from rich.prompt import Confirm, Prompt
 
 	def _provider_catalog(provider):
 		"""The models LiteLLM knows for ONE provider (ids stay canonical for routing)."""
@@ -1506,40 +1506,24 @@ def _setup_ai_interactive():
 					_show_models(displayed, suffix, leading_newline=True)
 					continue
 
-		# Model selected - save config
 		console.print(f"\n[bold green]  Selected: [white]{selected}[/][/]")
-		CONFIG.set('addons.ai.default_model', selected)
-		CONFIG.set('addons.ai.intent_model', selected)
 
-		# Persist base + key. A custom/gateway base already collected the key (and needs
-		# it for routing); the built-in catalog clears any stale custom base and prompts
-		# for the key as before.
+		# Resolve base + key: a custom/gateway base already collected its key; the
+		# built-in catalog uses the provider's default base and keeps the current key
+		# unless a new one is entered.
 		if custom_base:
-			CONFIG.set('addons.ai.api_base', custom_base)
-			if custom_key:
-				CONFIG.set('addons.ai.api_key', custom_key)
+			api_base, api_key = custom_base, custom_key
 		else:
-			if current_base:
-				CONFIG.set('addons.ai.api_base', '')
+			api_base = ''
 			api_key = Prompt.ask(
 				"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
 				default=masked_key,
 				show_default=bool(masked_key),
 			)
-			if api_key and api_key != masked_key:
-				CONFIG.set('addons.ai.api_key', api_key)
+			if not api_key or api_key == masked_key:
+				api_key = current_key
 
-		config = CONFIG.validate()
-		if config:
-			CONFIG.save()
-			console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
-			console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
-		else:
-			console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
-
-		# Verify with a simple LLM call
-		api_key = CONFIG.addons.ai.api_key
-		api_base = CONFIG.addons.ai.api_base
+		# Verify BEFORE touching the config, so a failed check keeps the saved one.
 		console.print()
 		try:
 			with maybe_status("[bold orange3]Verifying model connection...[/]", spinner="dots"):
@@ -1551,6 +1535,22 @@ def _setup_ai_interactive():
 		except Exception as e:
 			console.print(f"[bold red]  Connection failed: {e}[/]")
 			console.print("[dim]  Check your API key and model name.[/]")
+			if not Confirm.ask("  [bold cyan]Save this configuration anyway?[/]", default=False):
+				console.print("[bold yellow]  Nothing saved: the previous config is unchanged.[/]")
+				return None
+
+		CONFIG.set('addons.ai.default_model', selected)
+		CONFIG.set('addons.ai.intent_model', selected)
+		if custom_base or current_base:
+			CONFIG.set('addons.ai.api_base', api_base)
+		if api_key and api_key != current_key:
+			CONFIG.set('addons.ai.api_key', api_key)
+		if CONFIG.validate():
+			CONFIG.save()
+			console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
+			console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
+		else:
+			console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
 
 		return selected
 

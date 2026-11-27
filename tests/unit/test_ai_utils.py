@@ -995,3 +995,57 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
         ]
         _repair_orphan_tool_uses(m)
         self.assertEqual(self._roles(m), ["system", "user", "assistant", "tool"])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSetupAiVerifyBeforeSave(unittest.TestCase):
+    """`ai setup` verifies the model connection before writing the config."""
+
+    def _run_setup(self, verify_error=None, save_anyway=False):
+        import secator.ai.utils as utils_mod
+        from secator.config import Config
+        answers = {
+            "Select (number": "2",  # entries: [anthropic, custom]
+            "API base URL": "https://new.example.com/v1",
+            "API key": "new-key",
+            "Filter or select": "1",
+        }
+
+        def ask(prompt, *args, **kwargs):
+            return next(v for k, v in answers.items() if k in prompt)
+
+        call_llm = MagicMock(side_effect=verify_error, return_value={"content": "OK"})
+        with patch('litellm.models_by_provider', {'anthropic': ['claude-x']}), \
+                patch.object(utils_mod, 'load_ai_providers', return_value=[]), \
+                patch.object(utils_mod, 'fetch_openai_compatible_models', return_value=['m1']), \
+                patch.object(utils_mod, 'call_llm', call_llm), \
+                patch.object(utils_mod.CONFIG.addons.ai, 'api_base', 'https://old.example.com/v1'), \
+                patch.object(utils_mod.CONFIG.addons.ai, 'api_key', 'old-key'), \
+                patch.object(Config, 'set') as mock_set, \
+                patch.object(Config, 'save') as mock_save, \
+                patch('rich.prompt.Prompt.ask', side_effect=ask), \
+                patch('rich.prompt.Confirm.ask', return_value=save_anyway), \
+                patch.object(utils_mod.console, 'print'):
+            selected = utils_mod._setup_ai_interactive()
+        return selected, call_llm, mock_set, mock_save
+
+    def test_failed_verify_keeps_previous_config(self):
+        selected, call_llm, mock_set, mock_save = self._run_setup(verify_error=RuntimeError("401"))
+        self.assertIsNone(selected)
+        self.assertEqual(call_llm.call_args.kwargs["api_base"], "https://new.example.com/v1")
+        self.assertEqual(call_llm.call_args.kwargs["api_key"], "new-key")
+        mock_set.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_failed_verify_can_save_anyway(self):
+        selected, _, mock_set, mock_save = self._run_setup(verify_error=RuntimeError("401"), save_anyway=True)
+        self.assertEqual(selected, "openai/m1")
+        mock_set.assert_any_call('addons.ai.api_key', 'new-key')
+        mock_save.assert_called_once()
+
+    def test_verified_setup_saves_new_config(self):
+        selected, _, mock_set, mock_save = self._run_setup()
+        self.assertEqual(selected, "openai/m1")
+        mock_set.assert_any_call('addons.ai.api_base', 'https://new.example.com/v1')
+        mock_set.assert_any_call('addons.ai.api_key', 'new-key')
+        mock_save.assert_called_once()
