@@ -134,8 +134,11 @@ class TestLoadProviders:
 
 class TestProviderPicker:
 
-	def test_gateway_named_like_litellm_provider_listed_once(self):
+	def test_gateway_named_like_litellm_provider_listed_once(self, tmp_path, monkeypatch):
 		# openrouter is both a LiteLLM provider and a registry gateway: list it once, as the gateway.
+		import litellm
+		assert 'openrouter' in litellm.models_by_provider  # else this test proves nothing
+		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))  # bundled registry only
 		printed = MagicMock()
 		with patch.object(u, 'console', printed), patch('rich.prompt.Prompt.ask', return_value='q'):
 			assert u._setup_ai_interactive() is None
