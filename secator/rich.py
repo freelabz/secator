@@ -449,11 +449,13 @@ class InteractiveMenu:
 		None: if user pressed Escape or Ctrl+C.
 	"""
 
-	def __init__(self, title, options, description=''):
+	def __init__(self, title, options, description='', selected=0):
 		self.title = title
 		self.description = description
 		self.options = options
-		self.selected = 0
+		self.default = selected  # option highlighted when the menu opens
+		self.selected = selected
+		self.interrupted = False  # True when show() returned None because of Ctrl+C (not Escape)
 		self.checked = set()
 		self.typed = ''
 		self.in_input_mode = False
@@ -603,7 +605,7 @@ class InteractiveMenu:
 
 		fd = sys.stdin.fileno()
 		old_settings = termios.tcgetattr(fd)
-		self.selected = 0
+		self.selected = self.default
 		self.typed = ''
 		self.in_input_mode = False
 		output = ''
@@ -620,6 +622,7 @@ class InteractiveMenu:
 
 				if key == 'ctrl_c':
 					self._clear_and_exit(prev_output)
+					self.interrupted = True
 					return None
 
 				elif key == 'escape':

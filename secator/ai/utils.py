@@ -1375,7 +1375,7 @@ _MODEL_ROWS = 40
 # Credential fields of the `ai setup` state, and the config key each one is saved to.
 _CRED_KEYS = {
 	'api_key': 'api_key', 'endpoint': 'oauth2_endpoint', 'client_id': 'oauth2_client_id',
-	'client_secret': 'oauth2_client_secret',
+	'client_secret': 'oauth2_client_secret', 'scope': 'oauth2_scope',
 }
 
 
@@ -1421,11 +1421,10 @@ def _choose(title, options, default=0):
 	"""Pick one of ``options`` (labels): arrow keys on a terminal, a numbered prompt otherwise."""
 	if _tty():
 		from secator.rich import InteractiveMenu
-		menu = InteractiveMenu(f"  [bold]{title}[/]", [{'label': o} for o in options])
-		menu.selected = default
+		menu = InteractiveMenu(f"  [bold]{title}[/]", [{'label': o} for o in options], selected=default)
 		picked = menu.show()
-		if picked is None:  # Esc
-			raise _Back
+		if picked is None:
+			raise _Quit if menu.interrupted else _Back  # Ctrl+C quits, Esc goes back
 		return picked[0]
 	console.print(f"  [bold]{title}[/]")
 	for i, option in enumerate(options, 1):
@@ -1437,6 +1436,7 @@ def _choose(title, options, default=0):
 		match = [i for i, o in enumerate(options) if raw.lower() in o.lower()]
 		if len(match) == 1:
 			return match[0]
+		console.print(f"  [yellow]Type a number from 1 to {len(options)}.[/]")
 
 
 def _short_error(e, *secrets, limit=300):
@@ -1461,6 +1461,8 @@ def _explain_error(e, state, *secrets):
 		found = re.search(r'\b(401|403)\b', str(e))
 		status = int(found.group(1)) if found else None
 	if status in (401, 403):
+		if state['cred']['method'] == 'oauth2' and not state.get('token'):
+			return f"Client ID / secret rejected by the token URL ({status})."
 		what = 'OAuth2 token' if state['cred']['method'] == 'oauth2' else 'Key'
 		docs = state['gateway'].get('docs')
 		return f"{what} rejected by {state['label']} ({status})." + (f" Check it at {escape(docs)}" if docs else '')
@@ -1578,27 +1580,27 @@ def _print_models(models, default=None, title=''):
 			_fmt_price(info.get('input_cost_per_token')), _fmt_price(info.get('output_cost_per_token')),
 			_fmt_flag(info.get('supports_function_calling')), _fmt_flag(info.get('supports_reasoning')),
 		)
-	console.print(f"  [dim]{len(models)} models{escape(title)}[/]")
+	console.print(f"  [dim]{len(models)} model{'s' if len(models) != 1 else ''}{escape(title)}[/]")
 	console.print(table, highlight=False)
 	if len(models) > _MODEL_ROWS:
 		console.print(f"  [dim]… {len(models) - _MODEL_ROWS} more: type text to filter.[/]")
 
 
-def _pick_model(models, route, default=None, label='Model', show=True):
-	"""Choose a model by number, id or filter text; Enter keeps ``default``.
+def _pick_model(models, route, default=None, label='Model', shown=None):
+	"""Choose a model by number, id or filter text; Enter keeps ``default``. Returns ``(model, shown)``.
 
 	With no ``models`` (nothing could be listed), any typed id is accepted; otherwise an unlisted
-	id is used after a confirmation. With ``show=False`` the table is not printed again: numbers
-	refer to the one printed just before.
+	id is used after a confirmation. ``shown`` is the table already on screen (numbers refer to its
+	rows); without it the full table is printed first.
 	"""
 	keep = f"keep {default.split('/', 1)[-1]}" if default else None
 	if not models:
 		while True:
 			raw = _ask(f"{label} id", default=default, enter=keep, help='Type the model id, e.g. my-model.')
 			if raw:
-				return raw if raw == default else _with_route(route, raw)
-	shown = models
-	if show:
+				return (raw if raw == default else _with_route(route, raw)), []
+	if shown is None:
+		shown = models
 		_print_models(models, default)
 	while True:
 		raw = _ask(label, default=default, enter=keep, help='Type a number, an id, or text to filter the list.')
@@ -1607,21 +1609,21 @@ def _pick_model(models, route, default=None, label='Model', show=True):
 			_print_models(models)
 			continue
 		if raw == default:
-			return default
+			return default, shown
 		# A number picks a shown row; any other number is filter text (e.g. "405").
 		if raw.isdigit() and 1 <= int(raw) <= min(len(shown), _MODEL_ROWS):
-			return shown[int(raw) - 1]
+			return shown[int(raw) - 1], shown
 		low = raw.lower()
 		exact = [m for m in models if low in (m.lower(), m.split('/', 1)[-1].lower())]
 		if exact:
-			return exact[0]
+			return exact[0], shown
 		matches = [m for m in models if low in m.lower()]
 		if len(matches) == 1:
-			return matches[0]
+			return matches[0], shown
 		# Not listed (e.g. newer than LiteLLM's bundled list): the typed id can still be used.
 		if not matches:
 			if _yes(f'No model matches "{escape(raw)}". Use it as the model id?', default=False):
-				return _with_route(route, raw)
+				return _with_route(route, raw), shown
 			continue
 		shown = matches
 		_print_models(matches, default, f' matching "{raw}"')
@@ -1756,12 +1758,14 @@ def _step_provider(state, saved):
 	if entry[0] == 'custom':
 		while True:
 			base, err = _normalize_api_base(_ask(
-				'API base URL', default=saved['base'] or None, help='The OpenAI-compatible URL, e.g. https://llm.example.com/v1'))
+				'API base URL', default=saved['base'] or None, enter=saved['base'] and f"keep {mask_url(saved['base'])}",
+				help='The OpenAI-compatible URL, e.g. https://llm.example.com/v1'))
 			if not err:
 				break
 			console.print(f"  [red]{err}[/]")
 	state.update(_entry_state(entry, base))
 	state.pop('models', None)
+	state.pop('shown', None)
 	# Never offer one endpoint's credentials to another one.
 	state['cred'] = dict(saved['cred']) if _same_target(state, saved) else _blank_cred()
 
@@ -1827,6 +1831,7 @@ def _set_models(state, live):
 		if models:
 			console.print(f"  [dim]Showing LiteLLM's bundled list for {state['label']}.[/]")
 	state['models'] = _newest_first(m for m in models if _is_chat_model(m))
+	state.pop('shown', None)
 
 
 def _step_auth(state, saved):
@@ -1840,11 +1845,10 @@ def _step_auth(state, saved):
 	while True:
 		new = _ask_oauth2(state, cred) if method == 'oauth2' else _ask_key(state, cred)
 		state.update(cred=new, token=None)
-		secrets = (new['api_key'], new['client_secret'])
 		try:
 			live = _fetch_models(state)
 		except Exception as e:  # noqa: BLE001 - explained to the user, who retries or goes on
-			console.print(f"  [red]✗ {_explain_error(e, state, *secrets)}[/]")
+			console.print(f"  [red]✗ {_explain_error(e, state, new['api_key'], new['client_secret'], state.get('token'))}[/]")
 			if _yes('Try again?', default=True):
 				# Prefill what was typed, except the rejected secret: Enter keeps the saved one.
 				cred = {**new, 'api_key': cred['api_key'], 'client_secret': cred['client_secret']}
@@ -1853,7 +1857,7 @@ def _step_auth(state, saved):
 		else:
 			what = 'OAuth2 token' if method == 'oauth2' else 'Key'
 			if live and _bearer(state):
-				console.print(f"  [green]✓ {what} accepted: {len(live)} models available.[/]")
+				console.print(f"  [green]✓ {what} accepted: {len(live)} model{'s' if len(live) != 1 else ''} available.[/]")
 			elif live is None and _bearer(state):
 				console.print(f"  [dim]{state['label']} does not list models: the {what.lower()} is checked at the end.[/]")
 		_set_models(state, live)
@@ -1866,14 +1870,15 @@ def _step_model(state, saved):
 		try:
 			live = _fetch_models(state)
 		except Exception as e:  # noqa: BLE001 - fall back to the bundled list
-			console.print(f"  [yellow]{_explain_error(e, state, state['cred']['api_key'], state['cred']['client_secret'])}[/]")
+			cred = state['cred']
+			console.print(f"  [yellow]{_explain_error(e, state, cred['api_key'], cred['client_secret'], state.get('token'))}[/]")
 			live = None
 		_set_models(state, live)
 	# Enter keeps the saved model when the provider did not change, listed or not.
-	match = next((m for m in state['models'] if _same_model(m, saved['model'])), None)
-	default = match or (saved['model'] if _same_target(state, saved) and saved['model'] else None)
-	state['model'] = _pick_model(state['models'], state['route'], default)
-	state['listed'] = True
+	default = None
+	if _same_target(state, saved) and saved['model']:
+		default = next((m for m in state['models'] if _same_model(m, saved['model'])), saved['model'])
+	state['model'], state['shown'] = _pick_model(state['models'], state['route'], default)
 
 
 def _step_intent(state, saved):
@@ -1883,54 +1888,63 @@ def _step_intent(state, saved):
 	if _same_target(state, saved) and saved['intent'] and not _same_model(state['model'], saved['intent']):
 		default = next((m for m in state.get('models', []) if _same_model(m, saved['intent'])), saved['intent'])
 	# Right after the model step its table is still on screen: its numbers stay valid.
-	state['intent'] = _pick_model(
-		state.get('models', []), state['route'], default, 'Intent model', show=not state.get('listed'))
+	state['intent'], _ = _pick_model(
+		state.get('models', []), state['route'], default, 'Intent model', shown=state.get('shown'))
 
 
 def _step_save(state, saved):
 	"""Verify what changed, then save it; on failure the saved setup is kept."""
 	import litellm
 	cred = state['cred']
-	values = {'api_base': state['base']}
-	for field, key in _CRED_KEYS.items():
-		if cred['method'] == 'oauth2' or field == 'api_key':
-			values[key] = cred[field]
-	if cred['method'] == 'oauth2':
-		values['api_key'] = saved['cred']['api_key']  # cleared below only on confirmation
-	auth_changed = state['base'] != saved['base'] or any(
-		values[k] != (CONFIG.addons.ai[k] or '') for k in _CRED_KEYS.values() if k in values)
-	model = saved['model'] if _same_model(state['model'], saved['model']) else state['model']
-	intent = saved['intent'] if _same_model(state['intent'], saved['intent']) else state['intent']
+	oauth2 = cred['method'] == 'oauth2'
+	# Every credential is written: an API-key setup clears stale OAuth2 settings, and OAuth2 keeps
+	# the saved key until the user confirms its removal below.
+	values = {key: cred[field] if oauth2 else '' for field, key in _CRED_KEYS.items()}
+	values.update(api_base=state['base'], api_key=saved['cred']['api_key'] if oauth2 else cred['api_key'])
+	auth_changed = any(values[k] != (CONFIG.addons.ai[k] or '') for k in ('api_base', *_CRED_KEYS.values()))
+	same = _same_target(state, saved)
+	model = saved['model'] if same and _same_model(state['model'], saved['model']) else state['model']
+	intent = saved['intent'] if same and _same_model(state['intent'], saved['intent']) else state['intent']
 	changed = [m for m in (model, intent) if m and (auth_changed or m not in (saved['model'], saved['intent']))]
 	checks = list(dict.fromkeys(changed))
 	if not checks:
 		console.print("\n  [green]✓ Nothing changed.[/]")
 		return None
 	console.print()
-	token, failed = None, False
-	for m in checks:
+	failed, back_to = [], None
+	try:
+		token = _bearer(state)
+	except Exception as e:  # noqa: BLE001 - explained to the user, who decides
+		console.print(f"  [red]✗ {_explain_error(e, state, cred['client_secret'])}[/]")
+		failed, back_to = checks, _step_auth
+	for m in checks if not failed else []:
 		console.print(f"  [dim]Checking {escape(m)}…[/]")
 		try:
-			token = _bearer(state)
 			with console.capture():  # call_llm's own retry / auth logs would bury the result
 				call_llm([{"role": "user", "content": "Reply with only: OK"}], m, temperature=0,
 				         api_base=state['base'], api_key=token)
 			console.print(f"  [green]✓ {escape(m)} replied.[/]")
 		except Exception as e:  # noqa: BLE001 - explained to the user, who decides
-			failed = True
+			failed.append(m)
+			back_to = back_to or (_step_model if m == model else _step_intent)
 			console.print(f"  [red]✗ {escape(m)}: {_explain_error(e, state, token, cred['client_secret'])}[/]")
 		finally:
 			litellm.api_key = None  # the setup token / key must not linger in the process
 	if failed:
 		console.print("  [yellow]Your saved setup is unchanged.[/]")
 		if _yes('Pick something else?', default=True):
-			raise _Back
-		if not _yes('Save anyway?', default=False):
+			raise _Back(back_to)
+		# OAuth2 settings are saved only once they worked: no "Save anyway" for them.
+		if (oauth2 and auth_changed) or not _yes('Save anyway?', default=False):
 			return None
 	values.update(default_model=model, intent_model=intent)
-	if cred['method'] == 'oauth2' and values['api_key'] and _yes(
-			'Remove the saved API key? OAuth2 is only used without one.', default=True):
-		values['api_key'] = ''
+	if oauth2 and auth_changed and values['api_key']:
+		if _yes('Remove the saved API key? OAuth2 is only used without one.', default=True):
+			values['api_key'] = ''
+		else:
+			console.print("  [yellow]The saved API key stays in use: OAuth2 settings not saved.[/]")
+			values.update({k: CONFIG.addons.ai[k] or '' for k in _CRED_KEYS.values()})
+			state['cred'] = {**saved['cred'], 'method': 'key'}
 	for name, value in values.items():
 		if value != (CONFIG.addons.ai[name] or ''):
 			CONFIG.set(f'addons.ai.{name}', value)
@@ -1939,8 +1953,12 @@ def _step_save(state, saved):
 		return None
 	CONFIG.save()
 	rows = _settings_rows({**state, 'model': model, 'intent': intent})
-	rows.append(('Checked', '[red]✗ failed, saved anyway[/]' if failed else '[green]✓ ' + ', '.join(checks) + '[/]'))
-	_print_panel('✓ AI setup saved', rows, style='green')
+	if failed:
+		rows.append(('Checked', '[red]✗ failed[/]'))
+		_print_panel('Saved without a successful check', rows, style='yellow')
+	else:
+		rows.append(('Checked', '[green]✓ ' + ', '.join(escape(c) for c in checks) + '[/]'))
+		_print_panel('✓ AI setup saved', rows, style='green')
 	if '_path' in CONFIG:
 		console.print(f"  [dim]Saved to {escape(str(CONFIG._path))}[/]")
 	return model
@@ -1980,9 +1998,12 @@ def _setup_ai_interactive():
 	LiteLLM's bundled list; a gateway or custom base lists ``<base>/models``. ``b`` at any
 	prompt goes back one step. Returns the saved model, or ``None`` when nothing was saved.
 	"""
+	from secator.config import AiAddon
 	saved = _saved_setup()
 	cred = saved['cred']
-	first_run = not (saved['base'] or cred['api_key'] or cred['client_id'])
+	# Anything set beyond the defaults (env-var keys included: a model was picked) is a re-run.
+	first_run = not (saved['base'] or cred['api_key'] or cred['client_id']
+	                 or saved['model'] not in ('', AiAddon.model_fields['default_model'].default))
 	if first_run:
 		console.print("\n  [bold cyan]AI setup[/] [dim]· pick a provider, sign in, choose a model.[/]")
 		plan = [_step_provider, _step_auth, _step_model, _step_intent, _step_save]
@@ -1995,8 +2016,10 @@ def _setup_ai_interactive():
 		state['step'] = (i if plan[0] is _step_menu else i + 1, len(plan) - (plan[0] is _step_menu) - 1)
 		try:
 			result = plan[i](state, saved)
-		except _Back:
-			i = max(i - 1, 0)
+		except _Back as back:
+			# Back one step, or to the step named by the save step (e.g. the model that failed).
+			target = back.args[0] if back.args else None
+			i = plan.index(target) if target in plan else max(i - 1, 0)
 			continue
 		if plan[i] is _step_menu:
 			if not result:
