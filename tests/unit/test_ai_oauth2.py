@@ -203,11 +203,15 @@ def _run_start_warnings():
 	from secator.tasks.ai import ai
 	runner = ai([], prompt='hi', mode='chat')
 
+	reached = []
+
 	def _no_model():
+		reached.append(True)
 		runner.model = ''  # stop the run right after the start-up checks
 		return iter(())
 	with patch.object(runner, '_verify_model', _no_model):
 		results = list(runner.yielder())
+	assert reached, 'run stopped before the start-up checks'
 	return [r.message for r in results if r._type == 'warning' and 'oauth2_endpoint' in r.message]
 
 

@@ -460,7 +460,7 @@ class AiAddon(StrictModel):
 	# OAuth2 client-credentials token URL (https). When set, an access token is fetched from it
 	# and used as the API key for `api_base` (leave `api_key` empty); it is refreshed before it
 	# expires. Must be set explicitly: when empty, OAuth2 is not used (a warning is shown if a
-	# client id/secret is set). Setup suggests origin of `api_base` + `/oauth2/token`.
+	# client id/secret is set). Usual value: origin of `api_base` + `/oauth2/token`.
 	# Env: SECATOR_ADDONS_AI_OAUTH2_ENDPOINT.
 	oauth2_endpoint: str = ''
 	oauth2_client_id: str = ''  # Env: SECATOR_ADDONS_AI_OAUTH2_CLIENT_ID
