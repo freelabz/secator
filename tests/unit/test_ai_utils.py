@@ -458,6 +458,29 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(sent["tools"], tools)
         self.assertNotIn("temperature", sent)
 
+    def test_call_llm_tool_messages_have_no_name(self):
+        """Tool messages go out without `name` (not in the Chat Completions schema);
+        the caller's history keeps it."""
+        from secator.ai.utils import call_llm
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}},
+                # no result: the orphan repair inserts one (with a name) before sending
+                {"id": "call_2", "type": "function", "function": {"name": "g", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "call_1", "name": "f", "content": "done"},
+        ]
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            result = call_llm(messages, "openai/gpt-6.1", api_base="https://gw.example.com/v1", api_key="x")
+        self.assertEqual(result["content"], "ok")
+        sent_tools = [m for m in calls[0]["messages"] if m["role"] == "tool"]
+        self.assertEqual([m["tool_call_id"] for m in sent_tools], ["call_1", "call_2"])
+        self.assertEqual(sent_tools[0], {"role": "tool", "tool_call_id": "call_1", "content": "done"})
+        self.assertNotIn("name", sent_tools[1])
+        self.assertEqual(messages[2]["name"], "f")
+
     def test_call_llm_keeps_supported_temperature(self):
         """A model that accepts the temperature gets it on the first and only call."""
         from secator.ai.utils import call_llm

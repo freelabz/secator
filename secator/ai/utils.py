@@ -1017,6 +1017,13 @@ def call_llm(
 		litellm.APIError
 	)
 	for attempt in range(1, max_retries + 1):
+		# Chat Completions tool messages have no `name` and strict OpenAI-compatible
+		# endpoints reject it; litellm's other routes match tool results by
+		# `tool_call_id` (Gemini recovers the name from it). Done per attempt, as the
+		# orphan repair inserts tool messages (these dicts are already copies).
+		for msg in kwargs["messages"]:
+			if msg.get("role") == "tool":
+				msg.pop("name", None)
 		try:
 			response = litellm.completion(**kwargs)
 			break
