@@ -5,8 +5,6 @@ import re
 import sys
 import unittest.mock
 
-from fp.fp import FreeProxy
-
 from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 							   FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
@@ -29,6 +27,11 @@ USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 TASKS = get_configs_by_type('task')
 WORKFLOWS = get_configs_by_type('workflow')
 SCANS = get_configs_by_type('scan')
+
+
+def _random_proxy():
+	from fp.fp import FreeProxy  # lazy: heavy import, only needed when USE_PROXY is set
+	return FreeProxy(timeout=0.5).get()
 
 
 #------------#
@@ -97,7 +100,7 @@ META_OPTS = {
 	FOLLOW_REDIRECT: True,
 	METHOD: 'GET',
 	MATCH_CODES: '200',
-	PROXY: FreeProxy(timeout=0.5).get() if USE_PROXY else False,
+	PROXY: _random_proxy() if USE_PROXY else False,
 	RATE_LIMIT: 10000,
 	RETRIES: 0,
 	THREADS: 50,

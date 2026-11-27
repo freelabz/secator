@@ -11,8 +11,6 @@ from stat import S_ISFIFO
 
 import rich_click as click
 from dotmap import DotMap
-from fp.fp import FreeProxy
-from jinja2 import Template
 from rich.live import Live
 from rich.markup import escape
 from secator.rich import CustomMarkdown as Markdown
@@ -252,6 +250,7 @@ def util():
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy"""
 	import requests
+	from fp.fp import FreeProxy
 
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
@@ -330,6 +329,7 @@ def revshell(name, host, port, interface, listen, force):
 		command = shell['command'].replace('[', r'\[')
 		alias = shell['alias']
 		name = shell['name']
+		from jinja2 import Template
 		command_str = Template(command).render(ip=host, port=port, shell='bash')
 		console.print(Rule(f'[bold gold3]{alias}[/] - [bold red]{name} REMOTE SHELL', style='bold red', align='left'))
 		lang = shell.get('lang') or 'sh'
@@ -986,6 +986,7 @@ def workspace_summary(workspace_opt, driver, template_path):
 	def _query(type_or_expr, **kwargs):
 		return _summary_query(engine, type_or_expr, **kwargs)
 
+	from jinja2 import Template
 	rendered = Template(template_str).render(workspace=workspace_name, query=_query, q=_query)
 	console.print(rendered)
 

@@ -22,8 +22,6 @@ import traceback
 import validators
 import warnings
 
-import dns.exception
-import dns.resolver
 import idna
 
 from contextlib import contextmanager
@@ -1368,6 +1366,8 @@ def _resolve_host(host, timeout):
 	"""
 	if not host:
 		return False
+	import dns.exception  # lazy: dnspython is a heavy import and only needed here
+	import dns.resolver
 	resolver = dns.resolver.Resolver()
 	resolver.timeout = timeout
 	resolver.lifetime = timeout
