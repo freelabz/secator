@@ -5,6 +5,7 @@ its resource module under ``secator/ai/tools/`` — the same contract external t
 """
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
@@ -386,6 +387,26 @@ def _get_result_context(action, ctx):
 	return {**new_ctx, **action_context}
 
 
+@contextmanager
+def _batch_executor(ctx: ActionContext, max_workers: int):
+	"""Thread pool running a batch's actions.
+
+	A stop (Ctrl-C, revoked task) reaches only the calling thread. When the batch exits before its
+	actions are done (a stop, or the caller closing it), cancel the queued actions and stop the
+	runners they started.
+	"""
+	spawned_before = set(ctx.spawned_runners.values())
+	with ThreadPoolExecutor(max_workers=max_workers) as executor:
+		try:
+			yield executor
+		except BaseException:
+			executor.shutdown(wait=False, cancel_futures=True)
+			for runner in set(ctx.spawned_runners.values()) - spawned_before:
+				if not runner.done:
+					runner.stop()
+			raise
+
+
 def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	"""Execute multiple actions in parallel with Rich progress display.
 
@@ -523,7 +544,7 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 			finally:
 				q.put(done_sentinel)  # always signal completion, even on error
 
-		with ThreadPoolExecutor(max_workers=max_workers) as executor:
+		with _batch_executor(ctx, max_workers) as executor:
 			for a in actions:
 				executor.submit(run_single_stream, a)
 			remaining = len(actions)
@@ -542,7 +563,7 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 				label = _get_action_label(act)
 				progress_ids[i] = progress.add_task('', label=label, state='[bold cyan]RUNNING[/]', count='', tokens='')
 
-		with ThreadPoolExecutor(max_workers=max_workers) as executor:
+		with _batch_executor(ctx, max_workers) as executor:
 			futures = {executor.submit(run_single, a, i): i for i, a in enumerate(actions)}
 			for future in as_completed(futures):
 				idx = futures[future]

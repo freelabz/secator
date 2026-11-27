@@ -1,13 +1,17 @@
 """Stopping runners: a stopped task ends REVOKED (not FAILURE), and a task revoked while still
-queued never runs, whichever worker picks it up."""
+queued never runs, whichever worker picks it up. See also test_revoked_runners_worker.py."""
+import signal
+import threading
+import time
 import unittest
 from unittest import mock
 
 from celery import states
-from celery.exceptions import Ignore
+from celery.exceptions import ChordError, Ignore
 
 from secator import celery as secator_celery
-from secator.celery import app, revoke_task, run_command
+from secator.ai.actions import ActionContext, _batch_executor
+from secator.celery import app, break_task, revoke_task, run_command
 from secator.output_types import Error
 from secator.runners import Command, Task
 
@@ -62,28 +66,54 @@ class TestStoppedCommand(unittest.TestCase):
 
 class TestRevokeTask(unittest.TestCase):
 
-	def _revoke(self, ready):
+	def _revoke(self, *metas):
 		with (
 			mock.patch.object(app.control, 'revoke') as revoke,
-			mock.patch.object(app, 'AsyncResult', return_value=mock.Mock(ready=lambda: ready)),
+			mock.patch.object(app.backend, 'get_task_meta', side_effect=metas),
 			mock.patch.object(app.backend, 'mark_as_revoked') as mark,
 		):
 			revoke_task('some-id')
-		revoke.assert_called_once_with('some-id', terminate=True)
-		return mark
+		return revoke, mark
 
 	def test_unfinished_task_is_recorded_as_revoked(self):
-		self._revoke(ready=False).assert_called_once_with('some-id', reason='revoked')
+		revoke, mark = self._revoke({'status': states.PENDING, 'result': None})
+		revoke.assert_called_once_with('some-id', terminate=True)
+		mark.assert_called_once_with('some-id', reason='revoked')
 
 	def test_finished_task_keeps_its_state(self):
-		self._revoke(ready=True).assert_not_called()
+		_, mark = self._revoke({'status': states.SUCCESS, 'result': []})
+		mark.assert_not_called()
+
+	def test_chunked_task_revokes_its_chunks(self):
+		revoke, _ = self._revoke(
+			{'status': 'RUNNING', 'result': {'celery_ids': ['chunk-1', 'chunk-2']}},
+			{'status': 'RUNNING', 'result': {'celery_ids': []}},
+			{'status': states.PENDING, 'result': None},
+		)
+		self.assertEqual([c.args[0] for c in revoke.call_args_list], ['some-id', 'chunk-1', 'chunk-2'])
+
+	def test_chunks_are_read_before_the_broadcast(self):
+		# A worker receiving the revoke stores REVOKED over the task's state, chunk ids included.
+		meta = {'status': 'RUNNING', 'result': {'celery_ids': ['chunk-1']}}
+		revoked = {'status': states.REVOKED, 'result': None}
+
+		def broadcast(task_id, **kwargs):
+			meta.update(revoked)
+
+		with (
+			mock.patch.object(app.control, 'revoke', side_effect=broadcast) as revoke,
+			mock.patch.object(app.backend, 'get_task_meta', side_effect=lambda task_id: dict(meta)),
+			mock.patch.object(app.backend, 'mark_as_revoked'),
+		):
+			revoke_task('some-id')
+		self.assertEqual([c.args[0] for c in revoke.call_args_list], ['some-id', 'chunk-1'])
 
 
 class TestRevokedBeforeStart(unittest.TestCase):
 
-	def _run(self, state, is_eager=False):
+	def _run(self, state, is_eager=False, chord=None):
 		"""Run run_command up to the task lookup, with the given stored state for its own id."""
-		run_command.push_request(id='some-id', is_eager=is_eager)
+		run_command.push_request(id='some-id', is_eager=is_eager, chord=chord)
 		self.addCleanup(run_command.pop_request)
 		reached = RuntimeError('task was built')
 		with (
@@ -102,6 +132,12 @@ class TestRevokedBeforeStart(unittest.TestCase):
 		with self.assertRaises(Ignore):
 			self._run(states.REVOKED)
 
+	def test_revoked_chunk_still_counts_in_its_chord(self):
+		# Else the chord never completes, and the chunked task is never finalized.
+		with mock.patch.object(run_command.backend, 'mark_as_revoked') as mark, self.assertRaises(Ignore):
+			self._run(states.REVOKED, chord={'task': 'callback'})
+		self.assertEqual(mark.call_args.kwargs['request'].chord, {'task': 'callback'})
+
 	def test_pending_task_runs(self):
 		built, _ = self._run(states.PENDING)
 		self.assertTrue(built)
@@ -110,3 +146,107 @@ class TestRevokedBeforeStart(unittest.TestCase):
 		built, result = self._run(states.REVOKED, is_eager=True)
 		self.assertTrue(built)
 		result.assert_not_called()
+
+
+class Sleep(Command):
+	"""A command that runs until it is stopped."""
+	cmd = 'sleep'
+	input_flag = None
+	input_types = []
+	output_types = []
+	input_chunk_size = 1
+
+	def is_installed(self):
+		return True
+
+
+def _wait_for_process(cmd, timeout=10):
+	deadline = time.time() + timeout
+	while not cmd.process:
+		if time.time() > deadline:
+			raise TimeoutError('the command did not start')
+		time.sleep(0.05)
+
+
+class TestRunnerStop(unittest.TestCase):
+
+	def test_stop_ends_a_command_revoked(self):
+		# Started from a process ignoring SIGINT, like a Celery prefork pool process: the command
+		# must not inherit it, else stop() cannot interrupt it.
+		previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+		self.addCleanup(signal.signal, signal.SIGINT, previous)
+		cmd = Sleep('30', enable_reports=False, quiet=True)
+		thread = threading.Thread(target=cmd.run)
+		thread.start()
+		_wait_for_process(cmd)
+		cmd.stop()
+		thread.join(10)
+		self.assertFalse(thread.is_alive())
+		self.assertEqual(cmd.status, 'REVOKED')
+
+	def test_command_stopped_before_it_starts_is_interrupted(self):
+		cmd = Sleep('30', enable_reports=False, quiet=True)
+		cmd.stop()
+		cmd.run()
+		self.assertTrue(cmd.killed)
+		self.assertEqual(cmd.status, 'REVOKED')
+
+	def test_stop_revokes_the_celery_tasks_of_an_async_runner(self):
+		cmd = Sleep('30', enable_reports=False, quiet=True)
+		cmd.sync = False
+		with mock.patch.object(cmd, 'stop_celery_tasks') as stop_celery_tasks:
+			cmd.stop()
+		stop_celery_tasks.assert_called_once_with()
+		self.assertTrue(cmd.revoked)
+
+
+class TestBatchStop(unittest.TestCase):
+
+	def test_stop_cancels_queued_actions_and_stops_running_runners(self):
+		ctx = ActionContext(targets=[], model='')
+		earlier = Sleep('30', enable_reports=False, quiet=True)  # spawned by an earlier batch, left alone
+		ctx.record_runner(earlier, 'earlier-id')
+		running = Sleep('30', enable_reports=False, quiet=True)
+		with self.assertRaises(KeyboardInterrupt):
+			with _batch_executor(ctx, max_workers=1) as executor:
+				ctx.record_runner(running, 'id', 'other-id')
+				executor.submit(running.run)
+				queued = executor.submit(self.fail, 'queued action ran')
+				_wait_for_process(running)
+				raise KeyboardInterrupt
+		self.assertTrue(queued.cancelled())
+		self.assertEqual(running.status, 'REVOKED')
+		self.assertFalse(earlier.revoked)
+
+
+class TestChunkedTaskChordError(unittest.TestCase):
+	"""A revoked or failed chunk fails the chord, which skips its callback: the callback's error
+	callback finalizes the chunked task instead."""
+
+	def _fail_chord(self, exc, chunk_states=(states.SUCCESS, states.SUCCESS)):
+		task = Sleep(['10', '11'], enable_reports=False, quiet=True, context={'celery_id': 'task-id'})
+		task.has_children = True
+		callback = break_task(task, {}).body
+		chunk_states = dict(zip(task.celery_ids_map, chunk_states))
+		with (
+			mock.patch.object(secator_celery.mark_runner_completed, 'si') as si,
+			mock.patch.object(app.backend, 'fail_from_current_stack'),
+			mock.patch.object(app, 'AsyncResult', side_effect=lambda task_id: mock.Mock(state=chunk_states[task_id])),
+		):
+			app.backend.chord_error_from_stack(callback, exc)
+		return si
+
+	def test_revoked_chunk_ends_the_task_revoked(self):
+		si = self._fail_chord(ChordError('Dependency chunk-id raised ...'), (states.SUCCESS, states.REVOKED))
+		self.assertTrue(si.call_args.kwargs['runner'].revoked)
+		self.assertIsNone(si.call_args.kwargs['error'])
+		si.return_value.apply_async.assert_called_once_with(queue='results')
+
+	def test_failed_chunk_ends_the_task_failed(self):
+		si = self._fail_chord(ChordError("Dependency chunk-id raised ValueError('boom')"), (states.SUCCESS, states.FAILURE))
+		self.assertFalse(si.call_args.kwargs['runner'].revoked)
+		self.assertIn("ValueError('boom')", si.call_args.kwargs['error'].message)
+		si.return_value.apply_async.assert_called_once_with(queue='results')
+
+	def test_failed_callback_is_left_alone(self):
+		self._fail_chord(ValueError('boom')).assert_not_called()

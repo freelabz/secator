@@ -7,7 +7,7 @@ import kombu
 import kombu.exceptions
 
 from celery.result import AsyncResult, GroupResult
-from celery.exceptions import TaskRevokedError
+from celery.exceptions import ChordError, TaskRevokedError
 from greenlet import GreenletExit
 from rich.panel import Panel
 from rich.padding import Padding
@@ -345,7 +345,8 @@ class CeleryData(object):
 				data['ready'] = True
 			else:
 				debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
-				raise info
+				# FAILURE is final. A failed chord is reported by its error callback (mark_runner_chord_failed).
+				data['results'] = [] if isinstance(info, ChordError) else [Error.from_exception(info, _source=data['name'])]
 
 		elif isinstance(info, list):
 			data['results'] = info

@@ -8,7 +8,7 @@ from time import time
 
 from celery import Celery, chord, states
 from celery.canvas import signature
-from celery.exceptions import Ignore
+from celery.exceptions import ChordError, Ignore
 from celery.app import trace
 
 from rich.logging import RichHandler
@@ -184,13 +184,19 @@ def revoke_task(task_id, task_name=None):
 	message = f'Revoked task {task_id}'
 	if task_name:
 		message += f' ({task_name})'
+	meta = app.backend.get_task_meta(task_id)  # before the broadcast: a worker may store REVOKED over it
 	app.control.revoke(task_id, terminate=True)
 	# The broadcast only reaches workers alive right now. Also record the revoke on the result
 	# backend, so that a still-queued task picked up later by a worker that never saw it (e.g. one
 	# started afterwards) is skipped at start (see run_command). Finished tasks keep their state.
-	if not app.AsyncResult(task_id).ready():
+	if meta['status'] not in states.READY_STATES:
 		app.backend.mark_as_revoked(task_id, reason='revoked')
 	console.print(Info(message=message))
+	# The state of a chunked task (see break_task), workflow or scan (see build_celery_workflow) lists
+	# the ids of its tasks: revoke them too.
+	if isinstance(meta['result'], dict):
+		for child_id in meta['result'].get('celery_ids', []):
+			revoke_task(child_id, task_name)
 
 
 # --------------#
@@ -351,6 +357,8 @@ def run_command(self, results, name, targets, opts={}):
 	# touch its state, and do not trigger the rest of its chain / chord.
 	if not self.request.is_eager and self.AsyncResult(self.request.id).state == states.REVOKED:
 		console.print(Info(message=f'Task {name} was revoked before it started, skipping'))
+		if self.request.chord:  # still count it in its chord (see mark_runner_chord_failed)
+			self.backend.mark_as_revoked(self.request.id, reason='revoked', request=self.request)
 		raise Ignore()
 
 	task_cls = Task.get_task_class(name)
@@ -516,13 +524,14 @@ def mark_runner_started(results, runner, enable_hooks=True):
 
 
 @app.task
-def mark_runner_completed(results, runner, enable_hooks=True):
+def mark_runner_completed(results, runner, enable_hooks=True, error=None):
 	"""Mark a runner as completed and run on_end hooks.
 
 	Args:
 		results (list): Task results
 		runner (Runner): Secator runner instance
 		enable_hooks (bool): Enable hooks.
+		error (Error): Error to add first (a failed chord, see mark_runner_chord_failed).
 
 	Returns:
 		list: Final results
@@ -536,6 +545,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	# `results` (the upstream return) is topology-only and ignored — the fan-in is never
 	# rehydrated into the runner; every consumer queries the store instead.
 	runner.enable_hooks = enable_hooks
+	if error:
+		runner.add_result(error)
 
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True). The findings
 	# stay in the store — the summary counts them run-scoped, never re-materialized here.
@@ -549,6 +560,28 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Topology-only return: the run's results live in the store, not the payload.
 	return []
+
+
+@app.task
+def mark_runner_chord_failed(request, exc, traceback, runner):
+	"""Error callback of a chunked task's chord (see break_task): finalize the task.
+
+	A revoked or failed chunk fails the chord, and Celery skips its callback (mark_runner_completed).
+	Celery calls this inline where the chord failed, possibly in the worker main process: queue the
+	callback instead.
+
+	Args:
+		request (celery.app.task.Context): Request of the chord callback.
+		exc (Exception): Error.
+		traceback (str): Traceback.
+		runner (Runner): Chunked task.
+	"""
+	if not isinstance(exc, ChordError):  # the callback itself failed
+		return
+	# The chunks' stored states, not exc: it names the first failed chunk only, and its wording varies.
+	runner.revoked = any(app.AsyncResult(task_id).state == states.REVOKED for task_id in runner.celery_ids_map)
+	error = None if runner.revoked else Error(message=f'Chunk failed: {exc}')
+	mark_runner_completed.si([], runner=runner, error=error).apply_async(queue='results')
 
 
 # --------------#
@@ -600,6 +633,7 @@ def replace(task_instance, sig):
 	process = psutil.Process(os.getpid())
 	length = len(task_instance.request.chain) if task_instance.request.chain else 0
 	# console.print(f'Adding {length} chain tasks from request chain')
+	errbacks = sig.body.options.get('link_error')  # see break_task
 	for ix, t in enumerate(reversed(task_instance.request.chain or [])):
 		console.print(Info(message=f'Adding chain task {t.name} from request chain ({ix + 1}/{length})'))
 		chain_task = signature(t, app=task_instance.app)
@@ -609,6 +643,10 @@ def replace(task_instance, sig):
 		del t
 		memory_bytes = process.memory_info().rss
 		console.print(Info(message=f'Memory usage: {memory_bytes / 1024 / 1024:.2f} MB (chain task {ix + 1}/{length})'))
+	# `chord | task` chains the task onto the chord callback, but without its error callback. The chain passes it on
+	# to its later tasks too, where mark_runner_chord_failed ignores any error that is not the chord's.
+	if errbacks:
+		sig.body.set(link_error=errbacks)
 	gc.collect()
 	return task_instance.on_replace(sig)
 
@@ -703,10 +741,9 @@ def break_task(task, task_opts):
 	# console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
-	workflow = chord(
-		tuple(sigs),
-		mark_runner_completed.s(runner=task).set(queue='results'),
-	)
+	callback = mark_runner_completed.s(runner=task).set(queue='results')
+	callback.link_error(mark_runner_chord_failed.s(runner=task))
+	workflow = chord(tuple(sigs), callback)
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
 	return workflow

@@ -24,7 +24,7 @@ class Workflow(Runner):
 			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import mark_runner_started, mark_runner_completed, join_results
+		from secator.celery import app, mark_runner_started, mark_runner_completed, join_results
 
 		# Prepare run options
 		opts = self.run_opts.copy()
@@ -180,4 +180,8 @@ class Workflow(Runner):
 			*sigs,
 			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
 		)
+		# Record the run's Celery id, and list its tasks under it: revoke_task(<id>) revokes them all.
+		if not self.sync:
+			self.context['celery_id'] = sig.freeze().id
+			app.backend.store_result(self.context['celery_id'], {'celery_ids': list(self.celery_ids_map)}, 'RUNNING')
 		return sig
