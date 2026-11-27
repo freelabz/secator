@@ -606,6 +606,7 @@ class InteractiveMenu:
 		fd = sys.stdin.fileno()
 		old_settings = termios.tcgetattr(fd)
 		self.selected = self.default
+		self.interrupted = False
 		self.typed = ''
 		self.in_input_mode = False
 		output = ''

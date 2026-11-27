@@ -1239,13 +1239,17 @@ def _normalize_api_base(raw):
 	base = (raw or '').strip().rstrip('/')
 	if not base:
 		return '', 'API base cannot be empty.'
+	from urllib.parse import urlparse
 	if base.startswith('https://'):
-		return base, None
+		try:
+			host = urlparse(base).hostname
+		except ValueError:
+			host = None
+		return (base, None) if host else ('', 'Invalid API base URL.')
 	# http:// is allowed ONLY for a bare localhost dev gateway. Resolve the REAL
 	# destination via urlparse (not string-splitting): `http://localhost@evil` parses
 	# to host `evil`, and embedded userinfo (`user:pass@`) must be rejected — otherwise
 	# the Bearer key would be sent in cleartext to a remote host.
-	from urllib.parse import urlparse
 	try:
 		parsed = urlparse(base)
 	except ValueError:
@@ -1613,11 +1617,15 @@ def _pick_model(models, route, default=None, label='Model', shown=None):
 		if exact:
 			return exact[0], shown
 		matches = [m for m in models if low in m.lower()]
-		if len(matches) == 1:
+		# Filter text picks its only match; a full id (with a "/") must match exactly.
+		if len(matches) == 1 and '/' not in raw:
 			return matches[0], shown
 		# Not listed (e.g. newer than LiteLLM's bundled list): the typed id can still be used.
-		if not matches:
-			if _yes(f'No model matches "{escape(raw)}". Use it as the model id?', default=False):
+		if len(matches) == 1:
+			shown = matches
+			_print_models(matches, default, f' matching "{raw}"')
+		if len(matches) <= 1:
+			if _yes(f'"{escape(raw)}" is not listed. Use it as the model id?', default=False):
 				return _with_route(route, raw), shown
 			continue
 		shown = matches
@@ -1832,12 +1840,12 @@ def _fetch_models(state):
 
 
 def _set_models(state, live):
-	models = live
-	if models is None:
+	models = [m for m in live if _is_chat_model(m)] if live is not None else None
+	if not models and state['catalog']:  # nothing listed, or nothing to chat with in the listing
 		models = _provider_catalog(state['catalog']) if state['catalog'] else []
 		if models:
 			console.print(f"  [dim]Showing LiteLLM's bundled list for {state['label']}.[/]")
-	state['models'] = _newest_first(m for m in models if _is_chat_model(m))
+	state['models'] = _newest_first(m for m in models or [] if _is_chat_model(m))
 	state.pop('shown', None)
 
 
@@ -1858,7 +1866,8 @@ def _step_auth(state, saved):
 			console.print(f"  [red]✗ {_explain_error(e, state, new['api_key'], new['client_secret'], state.get('token'))}[/]")
 			if _yes('Try again?', default=True):
 				# Prefill what was typed, except the rejected secret: Enter keeps the saved one.
-				cred = {**new, 'api_key': cred['api_key'], 'client_secret': cred['client_secret']}
+				same_url = new['endpoint'] == (cred['endpoint'] or default_oauth2_token_url(state['base']))
+				cred = {**new, 'api_key': cred['api_key'], 'client_secret': cred['client_secret'] if same_url else ''}
 				continue
 			live = None
 		else:
@@ -1901,7 +1910,8 @@ def _step_intent(state, saved):
 	if _same_target(state, saved) and saved['intent'] and not _same_model(state['model'], saved['intent']):
 		default = next((m for m in state['models'] if _same_model(m, saved['intent'])), saved['intent'])
 	# Right after the model step its table is still on screen: its numbers stay valid.
-	state['intent'], _ = _pick_model(state['models'], state['route'], default, 'Intent model', shown=state.get('shown'))
+	state['intent'], state['shown'] = _pick_model(
+		state['models'], state['route'], default, 'Intent model', shown=state.get('shown'))
 
 
 def _step_save(state, saved):
@@ -1912,7 +1922,8 @@ def _step_save(state, saved):
 	# OAuth2 keeps the saved API key until the user confirms its removal below.
 	values = {key: cred[field] for field, key in _CRED_KEYS.items()}
 	values.update(api_base=state['base'], api_key=saved['cred']['api_key'] if oauth2 else cred['api_key'])
-	auth_changed = any(values[k] != (CONFIG.addons.ai[k] or '') for k in ('api_base', *_CRED_KEYS.values()))
+	auth_changed = cred['method'] != saved['cred']['method'] or any(
+		values[k] != (CONFIG.addons.ai[k] or '') for k in ('api_base', *_CRED_KEYS.values()))
 	same = _same_target(state, saved)
 	model = saved['model'] if same and _same_model(state['model'], saved['model']) else state['model']
 	intent = saved['intent'] if same and _same_model(state['intent'], saved['intent']) else state['intent']
@@ -1953,15 +1964,12 @@ def _step_save(state, saved):
 	if oauth2 and os.environ.get('SECATOR_ADDONS_AI_API_KEY'):
 		console.print("  [yellow]SECATOR_ADDONS_AI_API_KEY is set and overrides the config: unset it to use OAuth2.[/]")
 	if oauth2 and auth_changed and values['api_key']:
-		if _yes('Remove the saved API key? OAuth2 is only used without one.', default=True):
-			values['api_key'] = ''
-		elif not same:  # the old endpoint's key must never be saved with the new base
-			console.print("  [yellow]Nothing saved: the saved API key belongs to another endpoint.[/]")
+		# Declined: nothing is saved. The key would win at runtime while the checks above used OAuth2,
+		# and on a new base the old endpoint's key must never be saved with it.
+		if not _yes('Remove the saved API key? OAuth2 is only used without one.', default=True):
+			console.print("  [yellow]Nothing saved: the saved API key would still be used instead of OAuth2.[/]")
 			return None
-		else:
-			console.print("  [yellow]The saved API key stays in use: OAuth2 settings not saved.[/]")
-			values.update({k: CONFIG.addons.ai[k] or '' for k in _CRED_KEYS.values()})
-			state['cred'] = {**saved['cred'], 'method': 'key'}
+		values['api_key'] = ''
 	for name, value in values.items():
 		if value != (CONFIG.addons.ai[name] or ''):
 			CONFIG.set(f'addons.ai.{name}', value)
@@ -2040,6 +2048,8 @@ def _setup_ai_interactive():
 		except _Back as back:
 			# Back one step, or to the step named by the save step (e.g. the model that failed).
 			target = back.args[0] if back.args else None
+			if target and target not in plan:  # e.g. a rejected OAuth2 secret during a model-only re-run
+				plan.insert(1, target)
 			i = plan.index(target) if target in plan else max(i - 1, 0)
 			continue
 		if plan[i] is _step_menu:

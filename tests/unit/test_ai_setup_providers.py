@@ -32,6 +32,7 @@ class TestNormalizeApiBase:
 		# the localhost exception (would leak the Bearer key over cleartext to a remote).
 		assert u._normalize_api_base('http://localhost@evil.example/v1')[0] == ''
 		assert u._normalize_api_base('http://user:pass@localhost/v1')[0] == ''
+		assert u._normalize_api_base('https://[')[0] == ''  # malformed: no host
 
 
 class TestFetchModels:
@@ -345,10 +346,25 @@ class TestSetupWizard:
 
 	def test_unlisted_model_id_can_be_typed(self, tmp_path, monkeypatch):
 		answers = [('Provider', 'Anthropic'), ('API key', 'k'), ('Model', 'claude-brand-new-9'),
-		           ('No model matches', 'y'), ('Intent model', '')]
+		           ('"claude-brand-new-9" is not listed', 'y'), ('Intent model', '')]
 		result, _, _, _, _ = _run_wizard(
 			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/m']))
 		assert result == 'anthropic/claude-brand-new-9'
+
+	def test_full_id_is_not_swapped_for_a_longer_listed_one(self, tmp_path, monkeypatch):
+		# "anthropic/chat" only partly matches "anthropic/chat-preview": ask, never pick it silently.
+		answers = [('Provider', 'Anthropic'), ('API key', 'k'), ('Model', 'anthropic/chat'),
+		           ('"anthropic/chat" is not listed', 'y'), ('Intent model', '')]
+		result, _, _, _, _ = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=MagicMock(return_value=['anthropic/chat-preview']))
+		assert result == 'anthropic/chat'
+
+	def test_listing_without_chat_models_falls_back_to_the_bundled_list(self, tmp_path, monkeypatch):
+		answers = [('Provider', 'Openai'), ('API key', 'k'), ('Model', 'gpt-4o'), ('Intent model', '')]
+		result, _, _, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers,
+			_list_provider_models=MagicMock(return_value=['openai/text-embedding-3-small']))
+		assert 'bundled list' in text and result == 'openai/gpt-4o'
 
 	def test_no_list_at_all_asks_for_an_id(self, tmp_path, monkeypatch):
 		# A plain gateway whose listing fails has no bundled list (not OpenAI's): ask for the id.
@@ -470,8 +486,8 @@ class TestOAuth2Setup:
 				'addons.ai.api_key': '', 'addons.ai.oauth2_client_id': 'cid',
 				'addons.ai.oauth2_client_secret': 'cs-0123456789abcdefgh',
 				'addons.ai.oauth2_endpoint': 'https://gw.example/oauth2/token'}
-		else:  # the key keeps winning at runtime, so the OAuth2 settings are not saved
-			assert not saved and 'stays in use' in text
+		else:  # the key keeps winning at runtime, so nothing is saved
+			assert not saved and 'Nothing saved' in text
 
 	def test_switching_to_an_api_key_clears_oauth2(self, tmp_path, monkeypatch):
 		answers = [('Choice', '3'), ('Choice', '1'), ('API key', 'sk-gw-new-0123456789')]
@@ -517,7 +533,7 @@ class TestOAuth2Setup:
 				fetch_openai_compatible_models=MagicMock(return_value=['m']))
 		assert result is None and not saved
 		save.assert_not_called()
-		assert 'belongs to another endpoint' in text
+		assert 'Nothing saved' in text
 
 	def test_saved_api_key_wins_over_oauth2_like_the_runtime(self, tmp_path, monkeypatch):
 		# Both saved: the runtime uses the key, so a model switch checks with the key (no token fetch).
@@ -561,6 +577,29 @@ class TestOAuth2Setup:
 		assert post.call_args.args[0] == 'https://gw.example/oauth2/token'
 		assert post.call_args.kwargs['auth'] == ('cid', 'cs-saved-secret-0123456789')  # confirmed URL: saved secret kept
 		assert saved['addons.ai.oauth2_endpoint'] == 'https://gw.example/oauth2/token'
+
+	def test_retry_with_a_new_token_url_needs_the_secret_again(self, tmp_path, monkeypatch):
+		# A failed listing, then a retry: the saved secret never goes to the newly typed token URL.
+		answers = [('Choice', '3'), ('Choice', ''), ('Client ID', ''), ('Token URL', 'https://other.example/token'),
+		           ('Client secret', 'cs-typo-0123456789abcdef'), ('Try again?', 'y'), ('Client ID', ''),
+		           ('Token URL', ''), ('Client secret', ''), ('Client secret', 'cs-other-0123456789abc')]
+		bad, good = MagicMock(status_code=401), MagicMock(status_code=200)
+		good.json.return_value = {'access_token': 'tok-1', 'expires_in': 3600}
+		with patch('requests.post', side_effect=[bad, good, good]) as post:
+			_run_wizard(monkeypatch, tmp_path, answers, config=OAUTH,
+			            fetch_openai_compatible_models=MagicMock(return_value=['a']))
+		assert all(c.kwargs['auth'][1] != 'cs-saved-secret-0123456789' for c in post.call_args_list)
+
+	def test_switch_to_saved_oauth2_settings_is_a_change(self, tmp_path, monkeypatch):
+		# Key active, OAuth2 fields saved and kept as they are: choosing OAuth2 is still a change.
+		answers = [('Choice', '3'), ('Choice', '2'), ('Client ID', ''), ('Token URL', ''), ('Client secret', ''),
+		           ('Remove the saved API key?', 'y')]
+		with _token_endpoint():
+			_, saved, save, _, _ = _run_wizard(
+				monkeypatch, tmp_path, answers, config={**OAUTH, 'api_key': 'sk-gw-key-0123456789'},
+				fetch_openai_compatible_models=MagicMock(return_value=['a']))
+		assert saved == {'addons.ai.api_key': ''}
+		save.assert_called_once()
 
 	def test_saved_setup_never_fills_the_token_url(self, monkeypatch):
 		for name, value in {**OAUTH, 'oauth2_endpoint': '', 'api_key': ''}.items():
@@ -631,6 +670,18 @@ class TestReRun:
 			monkeypatch, tmp_path, [('Choice', ''), ('Model', 'anthropic/new')], config=config,
 			fetch_openai_compatible_models=fetch)
 		assert saved == {'addons.ai.default_model': 'openrouter/anthropic/new'}
+
+	def test_rejected_oauth2_secret_on_a_model_switch_goes_to_credentials(self, tmp_path, monkeypatch):
+		# The token fetch fails at the final check: "Pick something else?" opens the credentials step.
+		answers = [('Choice', ''), ('Model', 'openai/c'), ('Pick something else?', 'y'), ('Choice', 'q')]
+		good, bad = MagicMock(status_code=200), MagicMock(status_code=401)
+		good.json.return_value = {'access_token': 'tok-1', 'expires_in': 3600}
+		with patch('requests.post', side_effect=[good, bad]):
+			result, saved, _, _, text = _run_wizard(
+				monkeypatch, tmp_path, answers, config=OAUTH,
+				fetch_openai_compatible_models=MagicMock(return_value=['a', 'c']))
+		assert result is None and not saved
+		assert 'Credentials' in text.split('Pick something else?')[-1]
 
 	def test_failed_model_switch_keeps_the_old_model(self, tmp_path, monkeypatch):
 		answers = [('Choice', ''), ('Model', 'openai/c'), ('Pick something else?', 'y'), ('Model', 'q')]
