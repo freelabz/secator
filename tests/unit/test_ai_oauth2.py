@@ -96,6 +96,26 @@ def test_second_401_raises(oauth2):
 	assert oauth2.completion.call_count == 2
 
 
+def test_config_change_refetches(oauth2):
+	oauth2.post.side_effect = [_token_resp('tok-1'), _token_resp('tok-2')]
+	_call()
+	CONFIG.addons.ai.oauth2_client_secret = 'rotated'
+	_call()
+	assert oauth2.completion.call_args.kwargs['api_key'] == 'tok-2'
+
+
+@pytest.mark.parametrize('resp', [
+	_token_resp('tok-1', status=400),
+	_token_resp(''),  # empty token would let litellm fall back to another key
+	_token_resp('tok-1', expires_in='soon'),
+])
+def test_bad_token_response_raises(oauth2, resp):
+	oauth2.post.return_value = resp
+	with pytest.raises(RuntimeError, match='OAuth2'):
+		_call()
+	oauth2.completion.assert_not_called()
+
+
 def test_scope_sent_when_set(oauth2):
 	CONFIG.addons.ai.oauth2_scope = 'llm.invoke'
 	oauth2.post.return_value = _token_resp('tok-1')

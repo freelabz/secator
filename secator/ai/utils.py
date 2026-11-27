@@ -913,6 +913,7 @@ class OAuth2TokenCache:
 	@staticmethod
 	def _fetch(endpoint, client_id, client_secret, scope):
 		"""POST a client_credentials grant (RFC 6749 4.4, HTTP Basic client auth)."""
+		import math
 		import requests
 		_, err = _normalize_api_base(endpoint)
 		if err:
@@ -930,10 +931,15 @@ class OAuth2TokenCache:
 			token = body['access_token']
 			ttl = float(body.get('expires_in') or 300)
 		except (ValueError, KeyError, TypeError):
-			raise RuntimeError('OAuth2 token response has no valid access_token.') from None
+			token, ttl = None, 0
+		# An empty token would make litellm fall back to another configured key for this base.
+		if not token or not isinstance(token, str) or not math.isfinite(ttl) or ttl <= 0:
+			raise RuntimeError('OAuth2 token response has no valid access_token.')
 		return token, ttl
 
 
+# Process-wide so every call (agent loop, subagents, compaction) shares one token; keeping it on the
+# runner would put the token into runner state and subagent opts.
 _oauth2_tokens = OAuth2TokenCache()
 
 
@@ -982,6 +988,7 @@ def call_llm(
 	)
 	# OAuth2: (re)checked on every call so a long run never sends an expired token.
 	use_oauth2 = _uses_oauth2(api_base, api_key)
+	oauth2_retried = False
 	if use_oauth2:
 		kwargs["api_key"] = _oauth2_tokens.get()
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
@@ -1032,15 +1039,15 @@ def call_llm(
 			else:
 				raise
 		except litellm.AuthenticationError as e:
-			if use_oauth2 and attempt < max_retries:
+			if use_oauth2 and not oauth2_retried and attempt < max_retries:
 				# Token revoked or expired early: refetch once and retry.
-				use_oauth2 = False
+				oauth2_retried = True
 				kwargs["api_key"] = _oauth2_tokens.get(force=True)
 				continue
 			console.print(Error(message=e))
-			console.print(Error(
-				message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`'
-			))
+			hint = ('Check addons.ai.oauth2_client_id / oauth2_client_secret / oauth2_scope' if use_oauth2
+				else 'Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
+			console.print(Error(message=hint))
 			raise
 
 	message = response.choices[0].message
