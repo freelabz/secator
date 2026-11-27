@@ -908,10 +908,11 @@ class OAuth2TokenCache:
 		self._token = None
 		self._expires_at = 0.0
 
-	def get(self, force=False):
+	def get(self, cfg=None, force=False):
+		"""The access token for ``cfg`` (a :func:`resolve_ai_profile` result; default: the active profile)."""
 		import time
-		cfg = CONFIG.addons.ai
-		key = (cfg.oauth2_endpoint, cfg.oauth2_client_id, cfg.oauth2_client_secret, cfg.oauth2_scope)
+		cfg = cfg or resolve_ai_profile()
+		key = (cfg['oauth2_endpoint'], cfg['oauth2_client_id'], cfg['oauth2_client_secret'], cfg['oauth2_scope'])
 		with self._lock:
 			if force or key != self._key or time.monotonic() >= self._expires_at:
 				self._token, ttl = self._fetch(*key)
@@ -970,11 +971,47 @@ def default_oauth2_token_url(api_base):
 	return f'{parts.scheme}://{host}/oauth2/token'
 
 
-def _uses_oauth2(api_base, api_key):
-	"""Whether this call gets the OAuth2 token: only with no explicit key, on the configured base."""
+# The fields of an AI profile (addons.ai.profiles.<name>), and the addons.ai field each one falls back to.
+_PROFILE_FIELDS = {
+	'model': 'default_model', 'intent_model': 'intent_model', 'api_base': 'api_base', 'api_key': 'api_key',
+	'oauth2_endpoint': 'oauth2_endpoint', 'oauth2_client_id': 'oauth2_client_id',
+	'oauth2_client_secret': 'oauth2_client_secret', 'oauth2_scope': 'oauth2_scope',
+}
+_ENDPOINT_FIELDS = ('api_key', 'oauth2_endpoint', 'oauth2_client_id', 'oauth2_client_secret', 'oauth2_scope')
+DEFAULT_PROFILE = 'default'  # the addons.ai fields themselves
+
+
+def resolve_ai_profile(name=None):
+	"""The model settings of AI profile ``name`` (``None`` = the active ``addons.ai.profile``).
+
+	``default`` (or ``''``) is the addons.ai fields. A profile field left unset falls back to the
+	addons.ai one, except on another ``api_base``: there the credentials stay empty and the intent
+	model is the profile's model, so nothing set for one endpoint is ever sent to another.
+
+	Returns:
+		dict: ``name`` plus the ``_PROFILE_FIELDS`` keys. Holds secrets: never log or persist it.
+
+	Raises:
+		ValueError: no profile has that name.
+	"""
 	cfg = CONFIG.addons.ai
-	base = (cfg.api_base or '').rstrip('/')
-	return bool(cfg.oauth2_endpoint and base and not api_key and (api_base or '').rstrip('/') == base)
+	name = (cfg.profile if name is None else name) or DEFAULT_PROFILE
+	merged = {field: cfg[key] or '' for field, key in _PROFILE_FIELDS.items()}
+	if name == DEFAULT_PROFILE:
+		return {'name': name, **merged}
+	profiles = cfg.profiles or {}
+	if name not in profiles:
+		raise ValueError(f'Unknown AI profile "{name}". Known: {", ".join([DEFAULT_PROFILE, *profiles])}.')
+	own = {k: v for k, v in (profiles[name] or {}).items() if k in _PROFILE_FIELDS and v is not None}
+	if 'api_base' in own and own['api_base'].rstrip('/') != merged['api_base'].rstrip('/'):
+		merged.update({field: '' for field in _ENDPOINT_FIELDS}, intent_model=own.get('model', merged['model']))
+	return {'name': name, **merged, **own}
+
+
+def _uses_oauth2(api_base, api_key, cfg):
+	"""Whether this call gets the OAuth2 token: only with no explicit key, on the profile's base."""
+	base = (cfg['api_base'] or '').rstrip('/')
+	return bool(cfg['oauth2_endpoint'] and base and not api_key and (api_base or '').rstrip('/') == base)
 
 
 def call_llm(
@@ -984,8 +1021,13 @@ def call_llm(
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
 	tools: Optional[List[Dict]] = None,
+	profile: Optional[str] = None,
 ) -> Dict:
-	"""Call litellm completion and return response with usage."""
+	"""Call litellm completion and return response with usage.
+
+	``profile`` (an addons.ai.profiles name, ``None`` = the active one) gives the OAuth2 settings used
+	when no ``api_key`` is passed.
+	"""
 	import time
 	import litellm
 
@@ -1017,12 +1059,13 @@ def call_llm(
 		api_base=api_base,
 	)
 	# OAuth2: (re)checked on every call so a long run never sends an expired token.
-	use_oauth2 = _uses_oauth2(api_base, api_key)
+	oauth2_cfg = None if api_key else resolve_ai_profile(profile)
+	use_oauth2 = bool(oauth2_cfg) and _uses_oauth2(api_base, api_key, oauth2_cfg)
 	oauth2_retried = False
 	if use_oauth2:
 		if _normalize_api_base(api_base)[1]:
 			raise ValueError('addons.ai.api_base must be https:// (http:// only for a bare localhost host) with OAuth2.')
-		kwargs["api_key"] = _oauth2_tokens.get()
+		kwargs["api_key"] = _oauth2_tokens.get(oauth2_cfg)
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
 	if tools is not None:
@@ -1082,7 +1125,7 @@ def call_llm(
 			if use_oauth2 and not oauth2_retried and attempt < max_retries:
 				# Token revoked or expired early: refetch once and retry.
 				oauth2_retried = True
-				kwargs["api_key"] = _oauth2_tokens.get(force=True)
+				kwargs["api_key"] = _oauth2_tokens.get(oauth2_cfg, force=True)
 				continue
 			console.print(Error(message=e))
 			hint = ('Check addons.ai.oauth2_client_id / oauth2_client_secret / oauth2_scope' if use_oauth2
@@ -1112,6 +1155,8 @@ def call_llm(
 			"tokens": response.usage.total_tokens,
 			"prompt_tokens": getattr(response.usage, "prompt_tokens", None),
 			"completion_tokens": getattr(response.usage, "completion_tokens", None),
+			# litellm maps every provider's cache reads (e.g. Anthropic cache_read_input_tokens) here.
+			"cached_tokens": getattr(getattr(response.usage, "prompt_tokens_details", None), "cached_tokens", None),
 			"cost": cost,
 		}
 	else:
@@ -1647,7 +1692,10 @@ def _settings_rows(state):
 		]
 	else:
 		rows.append(('API key', escape(mask_secret(cred['api_key'])) if cred['api_key'] else "[dim]provider's env vars[/]"))
-	return rows + [('Model', escape(state['model'] or 'not set')), ('Intent model', escape(state['intent'] or 'not set'))]
+	rows += [('Model', escape(state['model'] or 'not set')), ('Intent model', escape(state['intent'] or 'not set'))]
+	if state.get('profile', DEFAULT_PROFILE) != DEFAULT_PROFILE or CONFIG.addons.ai.profiles:
+		rows.insert(0, ('Profile', escape(state.get('profile') or DEFAULT_PROFILE)))
+	return rows
 
 
 def _print_panel(title, rows, style='cyan'):
@@ -1719,10 +1767,13 @@ def _step_menu(state, saved):
 		('Change provider / API base', [_step_provider, _step_auth, _step_model, _step_intent, _step_save]),
 		('Change credentials', [_step_auth, _step_save]),
 		('Change intent model', [_step_intent, _step_save]),
+		*([('Switch profile', [_step_switch_profile])] if CONFIG.addons.ai.profiles else []),
+		('Add profile', [_step_provider, _step_auth, _step_model, _step_intent, _step_save]),
 		('Done', []),
 	]
 	picked = _choose('What do you want to change?', [a[0] for a in actions])
 	steps = actions[picked][1]
+	state['add_profile'] = actions[picked][0] == 'Add profile'
 	# OAuth2 without a saved token URL: the secret is only sent once the user confirmed one.
 	cred = state['cred']
 	if cred['method'] == 'oauth2' and not cred['endpoint'] and steps and _step_auth not in steps:
@@ -1916,16 +1967,58 @@ def _step_intent(state, saved):
 		state['models'], state['route'], default, 'Intent model', shown=state.get('shown'))
 
 
+def _step_switch_profile(state, saved):
+	"""Make another AI profile the active one (``addons.ai.profile``)."""
+	_step_header(state, 'Switch profile')
+	names = [DEFAULT_PROFILE, *CONFIG.addons.ai.profiles]
+	labels = [f"{n} · {resolve_ai_profile(n)['model'] or 'no model'}" for n in names]
+	name = names[_choose('Use which profile?', labels, default=names.index(saved['profile']))]
+	if name == saved['profile']:
+		console.print("\n  [green]✓ Nothing changed.[/]")
+		return None
+	CONFIG.set('addons.ai.profile', '' if name == DEFAULT_PROFILE else name)
+	if not CONFIG.validate():
+		console.print("  [red]The config did not validate: nothing saved.[/]")
+		return None
+	CONFIG.save()
+	_print_panel(f'✓ Now using profile {escape(name)}', _settings_rows(_saved_setup(name)), style='green')
+	return resolve_ai_profile(name)['model']
+
+
+def _ask_profile(state, saved):
+	"""The profile to save to: Enter keeps the one the setup started from, a new name adds one."""
+	default = None if state.get('add_profile') else saved['profile']
+	while True:
+		name = _ask('Save as profile', default=default, help=(
+			f"Enter keeps {default}; a new name saves a profile to switch to later." if default else
+			'Name the new profile, e.g. fast or local.'))
+		if re.fullmatch(r'[\w-]+', name):
+			return name
+		console.print("  [yellow]Type a name: letters, digits, - or _.[/]")
+
+
+def _profile_key(profile, field):
+	"""The config key of a profile field, and its saved value."""
+	ai = CONFIG.addons.ai
+	if profile == DEFAULT_PROFILE:
+		return f'addons.ai.{_PROFILE_FIELDS[field]}', ai[_PROFILE_FIELDS[field]] or ''
+	return f'addons.ai.profiles.{profile}.{field}', (ai.profiles.get(profile) or {}).get(field)
+
+
 def _step_save(state, saved):
-	"""Verify what changed, then save it; on failure the saved setup is kept."""
+	"""Pick the profile, verify what changed, then save it; on failure the saved setup is kept."""
 	import litellm
+	target = _ask_profile(state, saved)
+	same_profile = target == saved['profile']
 	cred = state['cred']
 	oauth2 = cred['method'] == 'oauth2'
-	# OAuth2 keeps the saved API key until the user confirms its removal below.
+	# OAuth2 keeps the saved API key until the user confirms its removal below (a new profile gets none).
 	values = {key: cred[field] for field, key in _CRED_KEYS.items()}
-	values.update(api_base=state['base'], api_key=saved['cred']['api_key'] if oauth2 else cred['api_key'])
-	auth_changed = cred['method'] != saved['cred']['method'] or any(
-		values[k] != (CONFIG.addons.ai[k] or '') for k in ('api_base', *_CRED_KEYS.values()))
+	values.update(api_base=state['base'], api_key=(
+		saved['cred']['api_key'] if same_profile else '') if oauth2 else cred['api_key'])
+	current = resolve_ai_profile(saved['profile'])
+	auth_changed = not same_profile or cred['method'] != saved['cred']['method'] or any(
+		values[k] != current[k] for k in ('api_base', *_CRED_KEYS.values()))
 	same = _same_target(state, saved)
 	model = saved['model'] if same and _same_model(state['model'], saved['model']) else state['model']
 	intent = saved['intent'] if same and _same_model(state['intent'], saved['intent']) else state['intent']
@@ -1962,8 +2055,8 @@ def _step_save(state, saved):
 		# OAuth2 settings are saved only once they worked: no "Save anyway" for them.
 		if (oauth2 and auth_changed) or not _yes('Save anyway?', default=False):
 			return None
-	values.update(default_model=model, intent_model=intent)
-	if oauth2 and os.environ.get('SECATOR_ADDONS_AI_API_KEY'):
+	values.update(model=model, intent_model=intent)
+	if oauth2 and target == DEFAULT_PROFILE and os.environ.get('SECATOR_ADDONS_AI_API_KEY'):
 		console.print("  [yellow]SECATOR_ADDONS_AI_API_KEY is set and overrides the config: unset it to use OAuth2.[/]")
 	if oauth2 and auth_changed and values['api_key']:
 		# Declined: nothing is saved. The key would win at runtime while the checks above used OAuth2,
@@ -1972,14 +2065,18 @@ def _step_save(state, saved):
 			console.print("  [yellow]Nothing saved: the saved API key would still be used instead of OAuth2.[/]")
 			return None
 		values['api_key'] = ''
-	for name, value in values.items():
-		if value != (CONFIG.addons.ai[name] or ''):
-			CONFIG.set(f'addons.ai.{name}', value)
+	# Same profile: write what changed (a field it inherits stays inherited). Another one: write it whole.
+	for field, value in values.items():
+		key, saved_value = _profile_key(target, field)
+		if value != (current[field] if same_profile else saved_value):
+			CONFIG.set(key, value)
+	if target != (CONFIG.addons.ai.profile or DEFAULT_PROFILE):
+		CONFIG.set('addons.ai.profile', '' if target == DEFAULT_PROFILE else target)
 	if not CONFIG.validate():
 		console.print("  [red]The config did not validate: nothing saved.[/]")
 		return None
 	CONFIG.save()
-	rows = _settings_rows({**state, 'model': model, 'intent': intent})
+	rows = _settings_rows({**state, 'model': model, 'intent': intent, 'profile': target})
 	if failed:
 		rows.append(('Checked', '[red]✗ failed[/]'))
 		_print_panel('Saved without a successful check', rows, style='yellow')
@@ -2000,19 +2097,24 @@ def setup_ai():
 		return None
 
 
-def _saved_setup():
-	"""The saved AI setup, as the wizard state it starts from."""
+def _saved_setup(profile=None):
+	"""The saved AI setup of AI profile ``profile`` (None = the active one), as the wizard state it starts from."""
 	import litellm
-	ai = CONFIG.addons.ai
-	model = ai.default_model or ''
+	try:
+		ai = resolve_ai_profile(profile)
+	except ValueError as e:
+		console.print(f"  [yellow]{escape(str(e))} Starting from the {DEFAULT_PROFILE} profile.[/]")
+		ai = resolve_ai_profile(DEFAULT_PROFILE)
+	model = ai['model']
 	try:
 		route = litellm.get_llm_provider(model)[1] if model else ''
 	except Exception:  # noqa: BLE001 - unknown model: no saved provider to match
 		route = model.split('/')[0] if '/' in model else ''
-	saved = {'model': model, 'intent': ai.intent_model or '', 'route': route, 'base': (ai.api_base or '').rstrip('/')}
+	saved = {'profile': ai['name'], 'model': model, 'intent': ai['intent_model'], 'route': route,
+	         'base': ai['api_base'].rstrip('/')}
 	# Same precedence as the runtime: a saved API key wins over OAuth2 settings.
-	cred = _blank_cred('oauth2' if ai.oauth2_client_id and not ai.api_key else 'key')
-	cred.update({field: ai[key] or '' for field, key in _CRED_KEYS.items()})
+	cred = _blank_cred('oauth2' if ai['oauth2_client_id'] and not ai['api_key'] else 'key')
+	cred.update({field: ai[key] for field, key in _CRED_KEYS.items()})
 	entry = _saved_entry(_provider_entries(), saved)
 	provider = _entry_state(entry, saved['base']) if entry else _entry_state(('lite', route, pretty_provider(route)))
 	# The provider entry's route wins (e.g. a registry `openrouter` route over an older `openai/` id),
@@ -2033,7 +2135,7 @@ def _setup_ai_interactive():
 	saved = _saved_setup()
 	cred = saved['cred']
 	# Anything set beyond the defaults (env-var keys included: a model was picked) is a re-run.
-	first_run = not (saved['base'] or cred['api_key'] or cred['client_id']
+	first_run = not (saved['base'] or cred['api_key'] or cred['client_id'] or CONFIG.addons.ai.profiles
 	                 or saved['model'] not in ('', AiAddon.model_fields['default_model'].default))
 	if first_run:
 		console.print("\n  [bold cyan]AI setup[/] [dim]· pick a provider, sign in, choose a model.[/]")

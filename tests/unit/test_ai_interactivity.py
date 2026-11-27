@@ -825,7 +825,7 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 		fake_self._summarize_auto = _empty_gen
 		fake_self._summarize_user = _empty_gen
 		fake_self._drain_history_usage = lambda: None
-		fake_self._account_usage = lambda u: None
+		fake_self._account_usage = lambda u, model=None: None
 		fake_self._add_assistant_to_history = lambda c, t: {"role": "assistant", "content": c}
 		fake_self._save_history = lambda: None
 		fake_self._persist_pii_map = lambda: None
@@ -917,7 +917,7 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 		fake_self._summarize_auto = _empty_gen
 		fake_self._summarize_user = _empty_gen
 		fake_self._drain_history_usage = lambda: None
-		fake_self._account_usage = lambda u: None
+		fake_self._account_usage = lambda u, model=None: None
 		# _add_assistant_to_history now returns the litellm message dict (the
 		# caller feeds it to cap_message(...) for persistence); the stub must
 		# match that contract instead of returning None -- a bare None broke

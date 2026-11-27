@@ -28,6 +28,7 @@ class ActionContext:
 	model: str
 	api_key: str = ""
 	api_base: str = ""
+	profile: Optional[str] = None  # AI profile (addons.ai.profiles) in use: its OAuth2 settings authenticate calls
 	encryptor: Any = None
 	dry_run: bool = False
 	verbose: bool = False
@@ -347,6 +348,7 @@ USAGE_COUNTERS = (
 # Context keys that account for ONE run and must never flow from a parent to the
 # children it spawns: the usage counters and the subagent budget counters.
 _PER_RUN_CONTEXT_KEYS = tuple(ctx_key for _, ctx_key, _ in USAGE_COUNTERS) + (
+	"ai_usage_by_model",
 	"ai_subagent_count",
 	"ai_subagent_turn_count",
 )

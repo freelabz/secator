@@ -33,7 +33,7 @@ from secator.ai.session import (
 	save_history, show_session_picker, pick_session_via_backend, replay_session, restore_history_from_db,
 	print_session_results)
 from secator.ai.utils import (
-	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
+	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls, resolve_ai_profile,
 	_decrypt_dict, _build_action_display, TOOL_ACK_RESULT,
 )
 
@@ -328,6 +328,7 @@ class ai(PythonRunner):
 	# path that drives the loop before setup runs get_opt_value("isolated") — a resume/respawn
 	# via ai.__new__(ai), or the bare-task test harnesses. Real runs override this in setup.
 	isolated = False
+	ai_profile = None  # the addons.ai.profiles name in use (set by _use_profile)
 	# Never redelivered on worker loss: a replay spends the chat's tokens again, and the user's
 	# next message resumes it from its saved history.
 	max_retries = 0
@@ -335,7 +336,9 @@ class ai(PythonRunner):
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
-		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
+		# Model / intent model default to the AI profile's (see _use_profile), so they stay '' here.
+		"model": {"type": str, "default": "", "help": "LLM model (default: the AI profile's model)"},
+		"profile": {"type": str, "default": "", "help": "AI profile from addons.ai.profiles (default: addons.ai.profile)"},
 		# Never default this to CONFIG.addons.ai.api_key: a remote server serves task opts
 		# (incl. defaults) to clients, which would leak the key into client-rendered run options.
 		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
@@ -345,7 +348,7 @@ class ai(PythonRunner):
 		"max_iterations": {"type": int, "default": CONFIG.addons.ai.max_iterations, "help": "Max iterations"},
 		"temperature": {"type": float, "default": CONFIG.addons.ai.temperature, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
-		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
+		"intent_model": {"type": str, "default": "", "help": "Model for intent detection (default: the AI profile's)"},
 		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name or
 		# fnmatch glob (e.g. add_suggestion, sysreptor_*). Merged with CONFIG.addons.ai.extra_tools;
 		# every exact name must resolve to a loaded tool; a glob expands to the matching external
@@ -630,6 +633,7 @@ class ai(PythonRunner):
 				return
 			self.context["session_name"] = self.session_name
 			yield from result
+			yield from self._apply_mode_profile()
 			yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 			try:
 				yield from self._run_loop()
@@ -666,6 +670,7 @@ class ai(PythonRunner):
 		self.system_prompt = self._system_prompt_for(self.mode)
 		self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 		yield self._emit_user_prompt(self.prompt)
+		yield from self._apply_mode_profile()
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 
 		# Run loop
@@ -960,6 +965,7 @@ class ai(PythonRunner):
 			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 
+		yield from self._apply_mode_profile()
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		try:
 			yield from self._run_loop()
@@ -1109,6 +1115,7 @@ class ai(PythonRunner):
 			model=self.model,
 			api_key=self.api_key,
 			api_base=self.api_base,
+			profile=self.ai_profile,
 			encryptor=self.encryptor,
 			dry_run=self.dry_run,
 			verbose=self.verbose,
@@ -1210,7 +1217,9 @@ class ai(PythonRunner):
 
 				msg = format_llm_status(token_count, ctx_window, by_role)
 				with maybe_status(msg, spinner="dots"):
-					result = call_llm(messages, self.model, self.temp, self.api_base, self.api_key, tools=self.tool_schemas)
+					result = call_llm(
+						messages, self.model, self.temp, self.api_base, self.api_key, tools=self.tool_schemas,
+						profile=self.ai_profile)
 
 				# reset rate-limit guard on success
 				rate_limit_streak = 0
@@ -1233,7 +1242,7 @@ class ai(PythonRunner):
 				# Accumulate billed tokens for this run (read by the billing chore
 				# as context.ai_tokens). Done here, before any empty-response
 				# `continue`, so every billed call is counted exactly once.
-				self._account_usage(usage)
+				self._account_usage(usage, self.model)
 
 				self.debug(f'content: {content[:200] if content else "(empty)"}', sub='llm')
 
@@ -1555,14 +1564,8 @@ class ai(PythonRunner):
 		"""Initialize all run options as instance attributes."""
 		self.resume = self.get_opt_value("resume")
 		self.is_subagent = self.get_opt_value("subagent")
-		self.model = self.get_opt_value("model")
-		self.intent_model = self.get_opt_value("intent_model")
-		# SECURITY (LLM CREDS): don't reuse the configured key on a caller-overridden api_base (gated).
-		self.api_base, self.api_key, self._credential_error = resolve_llm_credentials(
-			self.get_opt_value("api_base"), self.get_opt_value("api_key"),
-			CONFIG.addons.ai.api_base, CONFIG.addons.ai.api_key,
-			CONFIG.addons.ai.custom_disallow_config_token,
-		)
+		self.model = self.intent_model = self.api_base = self.api_key = ""
+		self._credential_error = self._use_profile(self.get_opt_value("profile") or None)
 		self.sensitive = self.get_opt_value("sensitive")
 		# Mode intent. An empty opt or the explicit "auto" sentinel means AUTO-DETECT:
 		# the mode follows the conversation and is re-classified every turn (chat <->
@@ -1652,8 +1655,8 @@ class ai(PythonRunner):
 		self._init_usage_counters()
 
 		# Record the resolved model id so the metering chore can price tokens against
-		# the model registry. Set unconditionally (not setdefault) — records the
-		# configured model even if the user switches mid-session.
+		# the model registry. Set unconditionally (not setdefault); a profile switch
+		# (_use_profile) updates it, and ai_usage_by_model splits the usage per model.
 		self.context["ai_model"] = self.model
 		# Persist the auto/hard-set intent so a resume keeps it (an auto session stays
 		# auto and keeps re-detecting; it never congeals into the last resolved mode).
@@ -1692,6 +1695,51 @@ class ai(PythonRunner):
 		if self.backend.owns_display:
 			self.print_item = False
 			self.print_line = False
+
+	def _use_profile(self, name=None, run_opts=True):
+		"""Point the run at AI profile ``name`` (None = the active ``addons.ai.profile``).
+
+		Sets the model, intent model and credentials from the profile; with ``run_opts`` an explicit
+		--model / --intent-model / --api-base / --api-key still wins. Returns an error message (and
+		changes nothing) when the profile is unknown or its credentials can't be used.
+		"""
+		opt = self.get_opt_value if run_opts else (lambda _: None)
+		try:
+			prof = resolve_ai_profile(name)
+		except ValueError as e:
+			return str(e)
+		# SECURITY (LLM CREDS): don't reuse the configured key on a caller-overridden api_base (gated).
+		api_base, api_key, error = resolve_llm_credentials(
+			opt("api_base"), opt("api_key"), prof["api_base"], prof["api_key"],
+			CONFIG.addons.ai.custom_disallow_config_token,
+		)
+		if error:
+			return error
+		self.ai_profile, self.api_base, self.api_key = prof["name"], api_base, api_key
+		self.model = opt("model") or prof["model"]
+		self.intent_model = opt("intent_model") or prof["intent_model"]
+		self.context["ai_model"] = self.model
+		if getattr(self, "history", None) is not None:
+			self.history.model = self.model
+		ictx = getattr(self, "_isolation_ctx", None)  # the live action context: subagents inherit it
+		if ictx is not None:
+			ictx.model, ictx.api_base, ictx.api_key, ictx.profile = self.model, api_base, api_key, self.ai_profile
+		return None
+
+	def _apply_mode_profile(self):
+		"""Switch to the profile of the run's mode (addons.ai.mode_profiles) once that mode is resolved.
+
+		Run start only: the model then stays fixed for the run, a later mode change (auto
+		re-detection, switch_mode, the TUI toggle) keeps it. An explicit --profile / --model wins.
+		"""
+		name = (CONFIG.addons.ai.mode_profiles or {}).get(self.mode)
+		if not name or name == self.ai_profile or self.get_opt_value("profile") or self.get_opt_value("model"):
+			return
+		error = self._use_profile(name)
+		if error:
+			yield Warning(message=f'addons.ai.mode_profiles.{self.mode}: {error} Keeping AI profile "{self.ai_profile}".')
+			return
+		yield Info(message=f'Mode {self.mode}: using AI profile "{name}"')
 
 	# -------------------------------------------------------------------------
 	# Model verification
@@ -1760,8 +1808,10 @@ class ai(PythonRunner):
 				prompt = maybe_encrypt(self.prompt, getattr(self, "encryptor", None))
 				messages = [{"role": "user", "content": f"{selection_prompt}\n{prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
-					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
-				self._account_usage(result.get("usage"))
+					result = call_llm(
+						messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key,
+						profile=self.ai_profile)
+				self._account_usage(result.get("usage"), self.intent_model)
 				mode = normalize_mode(result["content"])
 				if mode in MODES:  # honor any real mode (incl. exploit), don't discard it
 					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
@@ -1822,7 +1872,8 @@ class ai(PythonRunner):
 		only: the loop keeps mutating the live history on its own thread.
 		"""
 		msgs = [dict(m) for m in list(self.history.messages) if isinstance(m, dict)]
-		return {"messages": msgs, "encrypted": self.encryptor is not None}
+		return {"messages": msgs, "encrypted": self.encryptor is not None,
+		        "profile": getattr(self, "ai_profile", None), "model": getattr(self, "model", "")}
 
 	def _report_tui_meta(self, token_count=None, ctx_window=None):
 		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
@@ -1862,7 +1913,7 @@ class ai(PythonRunner):
 			self.debug(f'meta report failed: {e}', sub='llm')
 
 	def _apply_tui_control(self):
-		"""Apply mid-flight guardrail/mode changes the user requested from the TUI meta bar.
+		"""Apply mid-flight guardrail/mode/profile changes the user requested from the TUI.
 
 		Generator (``yield from``-compatible with the loop): yields a note / mode_changed Ai
 		item so the change is visible in the transcript. Best-effort; never crashes the run.
@@ -1910,6 +1961,16 @@ class ai(PythonRunner):
 				ictx.mode = self.mode
 				ictx.mode_is_auto = self.mode_is_auto
 			yield Ai(content=self.mode or "auto", ai_type="mode_changed")
+		if 'profile' in ctrl:
+			# `/model <profile>`: the next model call (this loop boundary, so every tool call already has
+			# its result) goes to the new profile, with the same history. Nothing to strip from it: it
+			# keeps only role / content / tool_calls (no thinking blocks or signatures), and litellm
+			# drops Gemini thought signatures from tool call ids for other providers.
+			error = self._use_profile(ctrl['profile'], run_opts=False)
+			if error:
+				yield Warning(message=error)
+			else:
+				yield Ai(content=f'Switched to AI profile "{self.ai_profile}" ({self.model}).', ai_type="note")
 		if 'session_name' in ctrl:
 			# user renamed the conversation via /name — persist it so every subsequent item
 			# (and the saved report) carries the new name.
@@ -1991,7 +2052,7 @@ class ai(PythonRunner):
 		"""Auto-compact history when context exceeds 85% threshold."""
 		self.debug('checking auto-compaction...', sub='context')
 		summarized, old_tokens, new_tokens = self.history.maybe_summarize(
-			self.model, api_base=self.api_base, api_key=self.api_key)
+			self.model, api_base=self.api_base, api_key=self.api_key, profile=self.ai_profile)
 		if summarized:
 			self.debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='context')
 			yield Ai(
@@ -2022,7 +2083,7 @@ class ai(PythonRunner):
 				if ctx_result is not None:
 					idx, _ = ctx_result
 					if idx == 1:  # Compact
-						self.history.compact(self.model, self.api_base, self.api_key)
+						self.history.compact(self.model, self.api_base, self.api_key, profile=self.ai_profile)
 						new_tokens = self.history.count_tokens(self.model)
 						yield Ai(
 							content=f"Chat history compacted: {token_count} -> {new_tokens} tokens",
@@ -2305,8 +2366,12 @@ class ai(PythonRunner):
 				self.context[ctx_key] = cast(0)
 			else:
 				self.context.setdefault(ctx_key, cast(0))
+		if self.is_subagent:
+			self.context["ai_usage_by_model"] = {}
+		else:
+			self.context.setdefault("ai_usage_by_model", {})
 
-	def _account_usage(self, usage):
+	def _account_usage(self, usage, model=None):
 		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
 
 		`usage` is the dict returned by `call_llm`
@@ -2315,6 +2380,8 @@ class ai(PythonRunner):
 		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
 		is persisted onto the task doc and read by the billing chore.
 		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
+		With ``model`` (the model that made the call), the call is also added to
+		`context["ai_usage_by_model"][model]`, so a run that switched models is priced per model.
 		"""
 		if not usage:
 			return
@@ -2323,6 +2390,16 @@ class ai(PythonRunner):
 				self.context[ctx_key] = cast(self.context.get(ctx_key, 0) or 0) + cast(usage.get(usage_key) or 0)
 			except (TypeError, ValueError):
 				pass
+		if model:
+			by_model = dict(self.context.get("ai_usage_by_model") or {})
+			row = dict(by_model.get(model) or {})
+			for key in ("prompt_tokens", "completion_tokens", "cached_tokens"):
+				try:
+					row[key] = int(row.get(key) or 0) + int(usage.get(key) or 0)
+				except (TypeError, ValueError):
+					row.setdefault(key, 0)
+			# New dicts, not in-place: items already yielded hold a shallow copy of the context.
+			self.context["ai_usage_by_model"] = {**by_model, model: row}
 
 	def _drain_history_usage(self):
 		"""Roll billed usage accrued by history summarization into context.ai_tokens.
@@ -2343,7 +2420,7 @@ class ai(PythonRunner):
 				"prompt_tokens": prompt_tokens,
 				"completion_tokens": completion_tokens,
 				"cost": cost,
-			})
+			}, getattr(self, "model", None))
 			history.billed_tokens = 0
 			history.billed_prompt_tokens = 0
 			history.billed_completion_tokens = 0

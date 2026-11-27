@@ -634,6 +634,9 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `addons.ai.profile` | `string` | `''` | Active AI profile (a `profiles` name; `''` or `default` = the `addons.ai` fields). See **AI profiles** below |
+| `addons.ai.profiles` | `dict` | `{}` | Named model setups: `{name: {model, intent_model, api_base, api_key, oauth2_endpoint, oauth2_client_id, oauth2_client_secret, oauth2_scope}}` |
+| `addons.ai.mode_profiles` | `dict` | `{}` | Profile per mode, e.g. `{exploit: big, chat: fast}`, picked at run start |
 | `addons.ai.api_key` | `string` | `''` | AI provider API key |
 | `addons.ai.api_base` | `string` | `''` | Custom API base URL |
 | `addons.ai.oauth2_endpoint` | `string` | `''` | OAuth2 token URL (https). When set (and `api_key` is empty), a `client_credentials` token is fetched and sent as the API key to `api_base` only (https `api_base` required); refreshed before expiry and once on a 401. Must be set explicitly: when empty, OAuth2 is not used (the `ai` task warns if a client id/secret is set). The usual value is the origin of `api_base` + `/oauth2/token` (`https://company.com/v1` → `https://company.com/oauth2/token`) |
@@ -675,6 +678,42 @@ bundled entries by `name`). Add a gateway with a data-only entry — no code:
   ]
 }
 ```
+
+**AI profiles.** A profile is a named model setup, so you can keep several (a big model for
+exploitation, a fast or local one for chat) and switch between them:
+
+```yaml
+addons:
+  ai:
+    default_model: claude-sonnet-4-6       # the `default` profile is these addons.ai fields
+    profile: fast                          # active profile ('' = default)
+    profiles:
+      fast:
+        model: claude-haiku-4-5            # unset fields fall back to addons.ai (key, intent model...)
+      local:
+        model: openai/qwen3-coder
+        api_base: http://localhost:8000/v1
+        api_key: sk-local                  # another api_base never inherits addons.ai credentials
+    mode_profiles:
+      exploit: default
+```
+
+- A profile sets only the fields it lists (`model` stands for `default_model`); the others fall
+  back to the `addons.ai` fields, except on another `api_base`: there the credentials stay empty
+  and the intent model defaults to the profile's `model`, so a key is never sent to another endpoint.
+- Secrets in profiles (`api_key`, `oauth2_client_secret`) are masked like the top-level ones.
+- Which profile a run uses: `secator x ai --profile <name>` for one run, else the mode's entry in
+  `mode_profiles` (applied once the run's mode is known, at run start), else `addons.ai.profile`.
+  `--model` / `--intent-model` / `--api-base` / `--api-key` still win over the profile's values, and
+  `--profile` or `--model` turns `mode_profiles` off for that run.
+- The model stays fixed for the run: a later mode change (auto re-detection, `switch_mode`, the
+  TUI toggle) keeps it. In the TUI, `/model` lists the profiles and `/model <name>` switches the
+  chat to one from its next model call, keeping the conversation.
+- Change the default with `secator config set addons.ai.profile <name>`, or with `secator x ai setup`
+  (**Switch profile** / **Add profile**, and **Save as profile** at the end of the setup).
+- Usage is also recorded per model on the run context: `ai_usage_by_model = {model: {prompt_tokens,
+  completion_tokens, cached_tokens}}` (intent-detection calls under the intent model), next to the
+  existing `ai_tokens` / `ai_cost` totals.
 
 **AI permission policy** (`addons.ai.permissions`) has three keys — `allow`, `deny`, and `ask` — each a list of permission rules:
 

@@ -454,7 +454,28 @@ class WebSearchConfig(StrictModel):
 	tavily_api_key: Secret = ''
 
 
+class AiProfile(StrictModel):
+	# A named model setup, `addons.ai.profiles.<name>`. A field left unset falls back to the
+	# addons.ai field of the same name (`model` -> `default_model`), except that a profile on
+	# another `api_base` never inherits the addons.ai credentials or intent model.
+	model: Optional[str] = None
+	intent_model: Optional[str] = None
+	api_base: Optional[str] = None
+	api_key: Optional[Secret] = None
+	oauth2_endpoint: Optional[str] = None
+	oauth2_client_id: Optional[str] = None
+	oauth2_client_secret: Optional[Secret] = None
+	oauth2_scope: Optional[str] = None
+
+
 class AiAddon(StrictModel):
+	# Active profile name (from `profiles`); '' or 'default' = the addons.ai fields below.
+	# Change it with `secator config set addons.ai.profile <name>`. Env: SECATOR_ADDONS_AI_PROFILE.
+	profile: str = ''
+	profiles: Dict[str, AiProfile] = {}
+	# Profile to use per mode, e.g. {exploit: big, chat: fast}: picked once, from the mode
+	# resolved at run start, unless the run sets --profile or --model.
+	mode_profiles: Dict[str, str] = {}
 	api_key: Secret = ''
 	api_base: str = ''
 	# OAuth2 client-credentials token URL (https). When set, an access token is fetched from it

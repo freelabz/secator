@@ -366,6 +366,9 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 			opts["model"] = ctx.model
 		opts.pop("api_key", None)
 		opts.pop("api_base", None)
+		opts.pop("profile", None)
+		if ctx.profile:
+			opts["profile"] = ctx.profile
 		if ctx.api_key:
 			opts["api_key"] = ctx.api_key
 		if ctx.api_base:

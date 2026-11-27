@@ -55,7 +55,8 @@ def _clear_values_absent(text):
 
 def test_complete_slash():
 	cmds = AITUI.SLASH_COMMANDS
-	assert complete_slash("/mo", cmds) == ("/model-view", ["/model-view"])
+	assert complete_slash("/mo", cmds) == ("/model", ["/model", "/model-view"])
+	assert complete_slash("/model-", cmds) == ("/model-view", ["/model-view"])
 	# a command that takes arguments completes with a trailing space
 	assert complete_slash("/na", cmds) == ("/name ", ["/name"])
 	assert complete_slash("/zz", cmds) == ("/zz", [])
@@ -238,7 +239,7 @@ async def _help_and_complete_body():
 	async with app.run_test(size=(120, 40)) as pilot:
 		await pilot.pause(0.05)
 		inp = app.query_one("#prompt-input", PromptInput)
-		inp.text = "/mo"
+		inp.text = "/model-"
 		inp.move_cursor(inp.document.end)
 		await pilot.press("tab")
 		await pilot.pause(0.05)
