@@ -494,6 +494,23 @@ class TestCallLLM(unittest.TestCase):
         self.assertNotIn("name", sent_tools[1])
         self.assertEqual(messages[2]["name"], "f")
 
+    def test_call_llm_tool_call_turn_empty_content_sent_as_none(self):
+        """A saved history may hold `content: ""` on a tool-call turn: it goes out as
+        None, so converters do not read it as a text message and drop the calls."""
+        from secator.ai.utils import call_llm
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "stop", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+            {"role": "user", "content": "next"},
+        ]
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            call_llm(messages, "openai/gpt-6.1", api_base="https://gw.example.com/v1", api_key="x")
+        self.assertIsNone(calls[0]["messages"][1]["content"])
+        self.assertEqual(messages[1]["content"], "")
+
     def test_call_llm_keeps_supported_temperature(self):
         """A model that accepts the temperature gets it on the first and only call."""
         from secator.ai.utils import call_llm

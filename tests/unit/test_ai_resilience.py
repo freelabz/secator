@@ -499,3 +499,63 @@ class TestRevokedDuringToolCall(unittest.TestCase):
 			sys.modules.pop("celery.worker.state", None)
 			self.assertFalse(_is_revoked("own-id"))
 		self.assertFalse(_is_revoked(None))
+
+
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestToolCallPairingAcrossTurns(unittest.TestCase):
+	"""Turn 1 ends on a `stop` tool call (shown as a plain reply), the user answers, and
+	turn 2 is sent through the real call_llm: every tool result must follow the assistant
+	message that holds its call, and that tool-call turn must carry no empty content."""
+
+	def test_second_turn_keeps_tool_call_pairing(self):
+		import litellm
+		from secator.ai.utils import call_llm
+		task = _make_loop_task()
+		task.model = "openai/gpt-6.1"
+		task.history.set_system("SYS")
+		task.history.add_user("hello")
+		sent = []
+		replies = [
+			{"role": "assistant", "content": None, "tool_calls": [{
+				"id": "call_1", "type": "function",
+				"function": {"name": "stop", "arguments": json.dumps({"reason": "Hello! How can I help?"})}}]},
+			{"role": "assistant", "content": "I can run scans."},
+		]
+
+		def completion(**kwargs):
+			sent.append([dict(m) for m in kwargs["messages"]])
+			return litellm.ModelResponse(
+				choices=[{"index": 0, "message": replies[len(sent) - 1], "finish_reason": "stop"}],
+				usage={"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10})
+
+		answers = iter(["what can you do ?"])
+
+		def prompt(self, *a, **k):
+			answer = next(answers, None)
+			if answer is None:
+				return None
+			self.history.add_user(answer)
+			return iter(())
+
+		with _driven(task, []) as state, \
+				patch('secator.tasks.ai.call_llm', wraps=call_llm), \
+				patch('litellm.completion', side_effect=completion), \
+				patch('litellm.completion_cost', return_value=0.0), \
+				patch.object(ai, '_prompt_and_redetect', prompt):
+			list(task._run_loop())
+		self.assertIsNone(state["aborted_with"])
+		self.assertEqual(len(sent), 2)
+		turn2 = sent[1]
+		self.assertEqual(turn2[-1], {"role": "user", "content": "what can you do ?"})
+		for i, m in enumerate(turn2):
+			if m["role"] != "tool":
+				continue
+			j = i - 1
+			while turn2[j]["role"] == "tool":
+				j -= 1
+			parent = turn2[j]
+			self.assertEqual(parent["role"], "assistant")
+			self.assertIn(m["tool_call_id"], [tc["id"] for tc in parent["tool_calls"]])
+			self.assertTrue(all(tc["type"] == "function" for tc in parent["tool_calls"]))
+			self.assertIsNone(parent["content"])
+

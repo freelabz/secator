@@ -1023,8 +1023,10 @@ def call_llm(
 
 	# Normalize assistant messages that have tool_calls but no 'content' key.
 	# litellm's trim_messages crashes with KeyError: 'content' on such messages.
+	# An empty content on a tool-call turn (older saved histories) becomes None too:
+	# some Chat-to-Responses converters treat "" as a text message and drop the calls.
 	for msg in kwargs["messages"]:
-		if msg.get("role") == "assistant" and "content" not in msg:
+		if msg.get("role") == "assistant" and ("content" not in msg or (msg.get("tool_calls") and msg["content"] == "")):
 			msg["content"] = None
 
 	# Sanitize orphan tool_use blocks (Anthropic requires every tool_use to have
