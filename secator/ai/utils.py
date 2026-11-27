@@ -1060,11 +1060,11 @@ def call_llm(
 			break
 		except litellm.BadRequestError as e:
 			# 400s fail fast, except the orphan tool_use case which we repair
-			# and retry (not counted as an attempt — the repair is the real fix).
+			# and retry without backoff, while attempts remain (else raise it).
 			err_str = str(e)
 			if 'tool_use' in err_str and 'tool_result' in err_str:
 				repaired = _repair_orphan_tool_uses(kwargs["messages"])
-				if repaired:
+				if repaired and attempt < max_retries:
 					console.print(Warning(
 						message=f"Repaired {repaired} orphan tool_use block(s); retrying LLM call."))
 					continue
