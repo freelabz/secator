@@ -636,6 +636,10 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 |-------|------|---------|-------------|
 | `addons.ai.api_key` | `string` | `''` | AI provider API key |
 | `addons.ai.api_base` | `string` | `''` | Custom API base URL |
+| `addons.ai.oauth2_endpoint` | `string` | `''` | OAuth2 token URL (https). When set (and `api_key` is empty), a `client_credentials` token is fetched and sent as the API key to `api_base` only (https `api_base` required); refreshed before expiry and once on a 401. Empty with `oauth2_client_id` + `oauth2_client_secret` set: defaults to the origin of `api_base` + `/oauth2/token` (`https://company.com/v1` → `https://company.com/oauth2/token`) |
+| `addons.ai.oauth2_client_id` | `string` | `''` | OAuth2 client id (sent with HTTP Basic auth, form-encoded per RFC 6749) |
+| `addons.ai.oauth2_client_secret` | `string` | `''` | OAuth2 client secret |
+| `addons.ai.oauth2_scope` | `string` | `''` | Optional OAuth2 scope |
 | `addons.ai.default_model` | `string` | `claude-sonnet-4-6` | Default AI model |
 | `addons.ai.intent_model` | `string` | `claude-haiku-4-5` | Lightweight intent-detection model |
 | `addons.ai.temperature` | `float` | `0.7` | Sampling temperature |

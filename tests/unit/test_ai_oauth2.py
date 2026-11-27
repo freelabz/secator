@@ -108,6 +108,7 @@ def test_config_change_refetches(oauth2):
 	_token_resp('tok-1', status=400),
 	_token_resp(''),  # empty token would let litellm fall back to another key
 	_token_resp('tok-1', expires_in='soon'),
+	_token_resp('tok-1', expires_in=0),
 ])
 def test_bad_token_response_raises(oauth2, resp):
 	oauth2.post.return_value = resp
@@ -138,6 +139,49 @@ def test_http_token_endpoint_rejected(oauth2):
 	with pytest.raises(ValueError, match='https'):
 		_call()
 	oauth2.post.assert_not_called()
+
+
+def test_basic_auth_parts_form_encoded(oauth2):
+	CONFIG.addons.ai.oauth2_client_id = 'client+blue'
+	CONFIG.addons.ai.oauth2_client_secret = 'a:b/c'
+	oauth2.post.return_value = _token_resp('tok-1')
+	_call()
+	assert oauth2.post.call_args.kwargs['auth'] == ('client%2Bblue', 'a%3Ab%2Fc')
+
+
+def test_token_never_sent_over_plain_http(oauth2):
+	CONFIG.addons.ai.api_base = 'http://llm.example.com/v1'
+	with pytest.raises(ValueError, match='https'):
+		_call(api_base='http://llm.example.com/v1')
+	oauth2.post.assert_not_called()
+	oauth2.completion.assert_not_called()
+
+
+@pytest.mark.parametrize('api_base,expected', [
+	('https://company.com/v1', 'https://company.com/oauth2/token'),
+	('https://company.com:8443/api/v1/', 'https://company.com:8443/oauth2/token'),
+	('https://user:pw@company.com/v1', 'https://company.com/oauth2/token'),
+	('', ''),
+	('not a url', ''),
+])
+def test_default_oauth2_token_url(api_base, expected):
+	assert u.default_oauth2_token_url(api_base) == expected
+
+
+def test_empty_endpoint_defaults_from_api_base(oauth2):
+	CONFIG.addons.ai.oauth2_endpoint = ''
+	oauth2.post.return_value = _token_resp('tok-1')
+	_call()
+	assert oauth2.post.call_args.args[0] == 'https://llm.example.com/oauth2/token'
+	assert oauth2.completion.call_args.kwargs['api_key'] == 'tok-1'
+
+
+def test_no_default_endpoint_without_client_credentials(oauth2):
+	CONFIG.addons.ai.oauth2_endpoint = ''
+	CONFIG.addons.ai.oauth2_client_secret = ''
+	_call()
+	oauth2.post.assert_not_called()
+	assert 'api_key' not in oauth2.completion.call_args.kwargs
 
 
 def test_secret_and_token_never_logged(oauth2, caplog):
