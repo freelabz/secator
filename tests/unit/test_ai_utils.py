@@ -432,6 +432,32 @@ class TestCallLLM(unittest.TestCase):
                 self.assertEqual(len(calls), 1)
                 self.assertTrue(calls[0]["drop_params"])
 
+    def test_call_llm_with_tools_on_unknown_reasoning_model(self):
+        """A model litellm only knows by family under the `openai/` prefix: litellm
+        rejects temperature=0.3 and tool_choice for it; the call still goes through
+        with tools."""
+        import litellm
+        from litellm.utils import get_optional_params
+        from secator.ai.utils import call_llm
+        model = "openai/gpt-6.1-terra-2026-10-26"
+        tools = [{"type": "function", "function": {
+            "name": "f", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+        self.assertIn("tools", litellm.get_supported_openai_params(model=model))
+        with self.assertRaises(litellm.UnsupportedParamsError):
+            get_optional_params(model=model.split("/", 1)[1], custom_llm_provider="openai", temperature=0.3)
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            result = call_llm([{"role": "user", "content": "hi"}], model, 0.3,
+                              api_base="https://gw.example.com/v1", api_key="x", tools=tools)
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(calls[0]["tools"], tools)
+        self.assertNotIn("tool_choice", calls[0])
+        sent = get_optional_params(
+            model=model.split("/", 1)[1], custom_llm_provider="openai",
+            temperature=0.3, tools=tools, drop_params=True)
+        self.assertEqual(sent["tools"], tools)
+        self.assertNotIn("temperature", sent)
+
     def test_call_llm_keeps_supported_temperature(self):
         """A model that accepts the temperature gets it on the first and only call."""
         from secator.ai.utils import call_llm
@@ -1001,12 +1027,13 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
 class TestSetupAiVerifyBeforeSave(unittest.TestCase):
     """`ai setup` verifies the model connection before writing the config."""
 
-    def _run_setup(self, verify_error=None, save_anyway=False):
+    def _run_setup(self, verify_error=None, save_anyway=False, provider="2"):
         import secator.ai.utils as utils_mod
         from secator.config import Config
         answers = {
-            "Select (number": "2",  # entries: [anthropic, custom]
+            "Select (number": provider,  # entries: [anthropic, custom]
             "API base URL": "https://new.example.com/v1",
+            "leave empty to keep current": "",
             "API key": "new-key",
             "Filter or select": "1",
         }
@@ -1048,4 +1075,13 @@ class TestSetupAiVerifyBeforeSave(unittest.TestCase):
         self.assertEqual(selected, "openai/m1")
         mock_set.assert_any_call('addons.ai.api_base', 'https://new.example.com/v1')
         mock_set.assert_any_call('addons.ai.api_key', 'new-key')
+        mock_save.assert_called_once()
+
+    def test_builtin_route_keeps_key_and_clears_custom_base(self):
+        selected, call_llm, mock_set, mock_save = self._run_setup(provider="1")
+        self.assertEqual(selected, "anthropic/claude-x")
+        self.assertEqual(call_llm.call_args.kwargs["api_base"], "")
+        self.assertEqual(call_llm.call_args.kwargs["api_key"], "old-key")
+        mock_set.assert_any_call('addons.ai.api_base', '')
+        self.assertNotIn('addons.ai.api_key', [c.args[0] for c in mock_set.call_args_list])
         mock_save.assert_called_once()

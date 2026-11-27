@@ -924,8 +924,7 @@ def call_llm(
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
 	if tools is not None:
-		kwargs["tools"] = tools
-		kwargs["tool_choice"] = "auto"
+		kwargs["tools"] = tools  # tool_choice left unset: "auto" is the default with tools
 
 	# Normalize assistant messages that have tool_calls but no 'content' key.
 	# litellm's trim_messages crashes with KeyError: 'content' on such messages.
