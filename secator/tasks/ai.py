@@ -522,6 +522,11 @@ class ai(PythonRunner):
 		if self._credential_error:
 			yield Error(message=self._credential_error)
 			return
+		ai_cfg = CONFIG.addons.ai
+		if not self.is_subagent and (ai_cfg.oauth2_client_id or ai_cfg.oauth2_client_secret) and not ai_cfg.oauth2_endpoint:
+			yield Warning(message=(
+				'OAuth2 client credentials are set but addons.ai.oauth2_endpoint is empty, so OAuth2 is skipped. '
+				'Set the token URL: `secator config set addons.ai.oauth2_endpoint <url>` or `secator x ai setup`.'))
 
 		# Verify model is configured and reachable
 		yield from self._verify_model()

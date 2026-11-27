@@ -885,7 +885,7 @@ def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) 
 class OAuth2TokenCache:
 	"""In-memory OAuth2 client-credentials access token for the configured LLM endpoint.
 
-	The token is fetched from ``_oauth2_endpoint()`` and reused until shortly before
+	The token is fetched from ``addons.ai.oauth2_endpoint`` and reused until shortly before
 	its ``expires_in``; ``get(force=True)`` refetches it (e.g. after a 401). It is never
 	logged or persisted.
 	"""
@@ -902,7 +902,7 @@ class OAuth2TokenCache:
 	def get(self, force=False):
 		import time
 		cfg = CONFIG.addons.ai
-		key = (_oauth2_endpoint(), cfg.oauth2_client_id, cfg.oauth2_client_secret, cfg.oauth2_scope)
+		key = (cfg.oauth2_endpoint, cfg.oauth2_client_id, cfg.oauth2_client_secret, cfg.oauth2_scope)
 		with self._lock:
 			if force or key != self._key or time.monotonic() >= self._expires_at:
 				self._token, ttl = self._fetch(*key)
@@ -946,7 +946,10 @@ _oauth2_tokens = OAuth2TokenCache()
 
 
 def default_oauth2_token_url(api_base):
-	"""Default OAuth2 token URL for an API base: its origin + ``/oauth2/token`` ('' without a base).
+	"""Suggested OAuth2 token URL for an API base: its origin + ``/oauth2/token`` ('' without a base).
+
+	Only a prefilled suggestion for setup: never used as a runtime fallback, so the client
+	secret is only ever sent to a token URL the user set explicitly.
 
 	``https://company.com/v1`` -> ``https://company.com/oauth2/token``.
 	"""
@@ -958,21 +961,11 @@ def default_oauth2_token_url(api_base):
 	return f'{parts.scheme}://{host}/oauth2/token'
 
 
-def _oauth2_endpoint():
-	"""The token URL in use: ``oauth2_endpoint``, else the api_base default once client credentials are set."""
-	cfg = CONFIG.addons.ai
-	if cfg.oauth2_endpoint:
-		return cfg.oauth2_endpoint
-	if cfg.oauth2_client_id and cfg.oauth2_client_secret:
-		return default_oauth2_token_url(cfg.api_base)
-	return ''
-
-
 def _uses_oauth2(api_base, api_key):
 	"""Whether this call gets the OAuth2 token: only with no explicit key, on the configured base."""
 	cfg = CONFIG.addons.ai
 	base = (cfg.api_base or '').rstrip('/')
-	return bool(_oauth2_endpoint() and base and not api_key and (api_base or '').rstrip('/') == base)
+	return bool(cfg.oauth2_endpoint and base and not api_key and (api_base or '').rstrip('/') == base)
 
 
 def call_llm(
