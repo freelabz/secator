@@ -178,6 +178,7 @@ class ChatHistory:
     billed_tokens: int = 0
     billed_prompt_tokens: int = 0
     billed_completion_tokens: int = 0
+    billed_cached_tokens: int = 0
     billed_cost: float = 0.0
 
     def set_system(self, content: str) -> None:
@@ -553,6 +554,7 @@ class ChatHistory:
             ("billed_tokens", "tokens", int),
             ("billed_prompt_tokens", "prompt_tokens", int),
             ("billed_completion_tokens", "completion_tokens", int),
+            ("billed_cached_tokens", "cached_tokens", int),
             ("billed_cost", "cost", float),
         ):
             try:

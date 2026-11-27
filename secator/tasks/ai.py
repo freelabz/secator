@@ -531,6 +531,10 @@ class ai(PythonRunner):
 				'OAuth2 client credentials are set but addons.ai.oauth2_endpoint is empty, so OAuth2 is skipped. '
 				'Set the token URL: `secator config set addons.ai.oauth2_endpoint <url>` or `secator x ai setup`.'))
 
+		# An explicit --mode is known now: its profile may be what supplies the model.
+		if self.mode:
+			yield from self._apply_mode_profile()
+
 		# Verify model is configured and reachable
 		yield from self._verify_model()
 		if not self.model:
@@ -2423,11 +2427,13 @@ class ai(PythonRunner):
 				"tokens": tokens,
 				"prompt_tokens": prompt_tokens,
 				"completion_tokens": completion_tokens,
+				"cached_tokens": getattr(history, "billed_cached_tokens", 0) or 0,
 				"cost": cost,
 			}, getattr(self, "model", None))
 			history.billed_tokens = 0
 			history.billed_prompt_tokens = 0
 			history.billed_completion_tokens = 0
+			history.billed_cached_tokens = 0
 			history.billed_cost = 0.0
 
 	def _add_assistant_to_history(self, content, tool_calls):

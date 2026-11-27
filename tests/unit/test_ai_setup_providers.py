@@ -776,6 +776,20 @@ class TestProfiles:
 		save.assert_not_called()
 		assert 'Nothing saved' in text
 
+	def test_profile_moved_to_another_base_keeps_the_key_it_was_checked_with(self, tmp_path, monkeypatch):
+		# "gw" inherits the key on base A; on base B it inherits none, so the same key must be written.
+		key = 'sk-a-saved-0123456789'
+		config = {'api_base': 'https://a.example/v1', 'api_key': key, 'default_model': 'openai/m',
+		          'profile': 'gw', 'profiles': {'gw': {'model': 'openai/m'}}}
+		answers = [('Choice', '2'), ('Provider', 'Custom'), ('API base URL', GW), ('Choice', '1'),
+		           ('API key', key), ('Model', '1'), ('Intent model', '')]
+		_, saved, save, _, _ = _run_wizard(monkeypatch, tmp_path, answers, config=config,
+		                                   fetch_openai_compatible_models=MagicMock(return_value=['m']))
+		assert saved['addons.ai.profiles.gw.api_base'] == GW
+		assert saved['addons.ai.profiles.gw.api_key'] == key
+		assert not any(k.startswith('addons.ai.') and '.profiles.' not in k for k in saved)
+		save.assert_called_once()
+
 	def test_add_profile_needs_a_name(self, tmp_path, monkeypatch):
 		live = MagicMock(return_value=['anthropic/claude-z'])
 		answers = [('Choice', 'Add profile'), ('Provider', 'Anthropic'), ('API key', 'sk-ant-other-0123456789'),

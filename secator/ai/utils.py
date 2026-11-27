@@ -2068,9 +2068,14 @@ def _step_save(state, saved):
 			return None
 		values['api_key'] = ''
 	# Same profile: write what changed (a field it inherits stays inherited). Another one: write it whole.
+	# A profile off the addons.ai endpoint inherits no credentials, so it gets them written as well.
+	top = resolve_ai_profile(DEFAULT_PROFILE)
+	moved = target != DEFAULT_PROFILE and any(
+		values[k].rstrip('/') != top[k].rstrip('/') for k in ('api_base', 'oauth2_endpoint'))
 	for field, value in values.items():
 		key, saved_value = _profile_key(target, field)
-		if value != (current[field] if same_profile else saved_value):
+		inherits = same_profile and not (moved and field in _ENDPOINT_FIELDS)
+		if value != (current[field] if inherits else saved_value):
 			CONFIG.set(key, value)
 	if target != (CONFIG.addons.ai.profile or DEFAULT_PROFILE):
 		CONFIG.set('addons.ai.profile', '' if target == DEFAULT_PROFILE else target)

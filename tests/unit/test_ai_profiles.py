@@ -194,6 +194,23 @@ def test_auto_mode_profile_and_intent_usage(cfg, monkeypatch):
 	assert runner.toDict()['context']['ai_usage_by_model'] == usage
 
 
+def test_explicit_mode_profile_supplies_the_model(cfg, monkeypatch):
+	"""--mode exploit with no top-level model: the exploit profile's model passes the model check."""
+	from secator.tasks.ai import ai
+	monkeypatch.setitem(CONFIG.addons.ai, 'default_model', '')
+	monkeypatch.setitem(CONFIG.addons.ai, 'mode_profiles', {'exploit': 'big'})
+	runner = ai([], prompt='do the thing', mode='exploit', interactive='auto')
+	seen = {}
+
+	def fake_verify():
+		seen['model'] = runner.model
+		runner.model = ''  # stop the run right after the check
+		return iter(())
+	with patch.object(runner, '_verify_model', fake_verify):
+		list(runner.yielder())
+	assert seen == {'model': 'big-model'}
+
+
 # ---- /model switch + usage per model ----
 
 def _loop_task(model='top-model'):
@@ -283,6 +300,16 @@ def test_subagent_starts_with_empty_usage_by_model():
 	parent._account_usage({'prompt_tokens': 3, 'completion_tokens': 1}, 'm')
 	ctx = ActionContext(targets=[], model='m', context=parent.context)
 	assert 'ai_usage_by_model' not in _get_result_context({'name': 'ai'}, ctx)
+
+
+def test_compaction_cached_tokens_are_counted_per_model():
+	task = _loop_task()
+	task.history.billed_tokens, task.history.billed_prompt_tokens = 9, 8
+	task.history.billed_completion_tokens, task.history.billed_cached_tokens = 1, 6
+	task._drain_history_usage()
+	row = task.context['ai_usage_by_model']['top-model']
+	assert row == {'prompt_tokens': 8, 'completion_tokens': 1, 'cached_tokens': 6}
+	assert task.history.billed_cached_tokens == 0
 
 
 def test_call_llm_reports_cached_tokens():
