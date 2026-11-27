@@ -547,6 +547,8 @@ class TestToolCallPairingAcrossTurns(unittest.TestCase):
 		self.assertEqual(len(sent), 2)
 		turn2 = sent[1]
 		self.assertEqual(turn2[-1], {"role": "user", "content": "what can you do ?"})
+		self.assertEqual([m["tool_call_id"] for m in turn2 if m["role"] == "tool"], ["call_1"])
+		self.assertEqual([tc["id"] for m in turn2 if m.get("tool_calls") for tc in m["tool_calls"]], ["call_1"])
 		for i, m in enumerate(turn2):
 			if m["role"] != "tool":
 				continue

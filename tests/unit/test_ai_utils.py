@@ -1088,4 +1088,3 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
         ]
         _repair_orphan_tool_uses(m)
         self.assertEqual([x.get("tool_call_id") for x in m if x["role"] == "tool"], ["b"])
-
