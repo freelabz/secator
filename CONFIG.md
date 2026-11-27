@@ -636,7 +636,7 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 |-------|------|---------|-------------|
 | `addons.ai.api_key` | `string` | `''` | AI provider API key |
 | `addons.ai.api_base` | `string` | `''` | Custom API base URL |
-| `addons.ai.oauth2_endpoint` | `string` | `''` | OAuth2 token URL (https). When set (and `api_key` is empty), a `client_credentials` token is fetched and sent as the API key to `api_base` only (https `api_base` required); refreshed before expiry and once on a 401. Empty with `oauth2_client_id` + `oauth2_client_secret` set: defaults to the origin of `api_base` + `/oauth2/token` (`https://company.com/v1` → `https://company.com/oauth2/token`) |
+| `addons.ai.oauth2_endpoint` | `string` | `''` | OAuth2 token URL (https). When set (and `api_key` is empty), a `client_credentials` token is fetched and sent as the API key to `api_base` only (https `api_base` required); refreshed before expiry and once on a 401. Must be set explicitly: when empty, OAuth2 is not used (the `ai` task warns if a client id/secret is set). The usual value is the origin of `api_base` + `/oauth2/token` (`https://company.com/v1` → `https://company.com/oauth2/token`) |
 | `addons.ai.oauth2_client_id` | `string` | `''` | OAuth2 client id (sent with HTTP Basic auth, form-encoded per RFC 6749) |
 | `addons.ai.oauth2_client_secret` | `string` | `''` | OAuth2 client secret |
 | `addons.ai.oauth2_scope` | `string` | `''` | Optional OAuth2 scope |

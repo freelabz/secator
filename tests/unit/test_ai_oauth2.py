@@ -173,7 +173,7 @@ def test_missing_expires_in_defaults_to_300s(oauth2):
 
 def test_localhost_http_api_base_allowed(oauth2):
 	CONFIG.addons.ai.api_base = 'http://localhost:4000/v1'
-	CONFIG.addons.ai.oauth2_endpoint = ''
+	CONFIG.addons.ai.oauth2_endpoint = 'http://localhost:4000/oauth2/token'
 	oauth2.post.return_value = _token_resp('tok-1')
 	_call(api_base='http://localhost:4000/v1')
 	assert oauth2.post.call_args.args[0] == 'http://localhost:4000/oauth2/token'
@@ -191,20 +191,41 @@ def test_default_oauth2_token_url(api_base, expected):
 	assert u.default_oauth2_token_url(api_base) == expected
 
 
-def test_empty_endpoint_defaults_from_api_base(oauth2):
+def test_empty_endpoint_skips_oauth2(oauth2):
+	# Client credentials alone never trigger a token request: the secret only goes to an explicit URL.
 	CONFIG.addons.ai.oauth2_endpoint = ''
-	oauth2.post.return_value = _token_resp('tok-1')
-	_call()
-	assert oauth2.post.call_args.args[0] == 'https://llm.example.com/oauth2/token'
-	assert oauth2.completion.call_args.kwargs['api_key'] == 'tok-1'
-
-
-def test_no_default_endpoint_without_client_credentials(oauth2):
-	CONFIG.addons.ai.oauth2_endpoint = ''
-	CONFIG.addons.ai.oauth2_client_secret = ''
 	_call()
 	oauth2.post.assert_not_called()
 	assert 'api_key' not in oauth2.completion.call_args.kwargs
+
+
+def _run_start_warnings():
+	from secator.tasks.ai import ai
+	runner = ai([], prompt='hi', mode='chat')
+
+	reached = []
+
+	def _no_model():
+		reached.append(True)
+		runner.model = ''  # stop the run right after the start-up checks
+		return iter(())
+	with patch.object(runner, '_verify_model', _no_model):
+		results = list(runner.yielder())
+	assert reached, 'run stopped before the start-up checks'
+	return [r.message for r in results if r._type == 'warning' and 'oauth2_endpoint' in r.message]
+
+
+def test_warns_when_client_credentials_set_without_endpoint(oauth2):
+	CONFIG.addons.ai.oauth2_endpoint = ''
+	warnings = _run_start_warnings()
+	assert len(warnings) == 1
+	assert 'OAuth2 is skipped' in warnings[0] and 'secator config set addons.ai.oauth2_endpoint' in warnings[0]
+	assert SECRET not in warnings[0]
+	oauth2.post.assert_not_called()
+
+
+def test_no_warning_with_endpoint_set(oauth2):
+	assert _run_start_warnings() == []
 
 
 def test_secret_and_token_never_logged(oauth2, caplog):
