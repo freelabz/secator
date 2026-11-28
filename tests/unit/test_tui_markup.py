@@ -77,23 +77,19 @@ def test_info_warning_error_messages_literal():
 	screens = _show(info, NOT_MARKUP)
 	_assert_literal(screens)
 	assert all("[INF]" in s for s in screens.values())   # the item's own markup still renders
-	_assert_literal(_show(warning, [t for t in NOT_MARKUP if "[/]" not in t]))   # Warning() rejects a stray [/]
+	_assert_literal(_show(warning, NOT_MARKUP))
 	_assert_literal(_show(error, NOT_MARKUP))
-
-
-# rich_escape() turns "]" into a "\\]" that markup keeps, so the closing bracket shows as "\\]"
-SHOWN_CODE = CODE[:-1]
 
 
 def test_error_traceback_literal():
 	async def feed(app, text):
 		await app._render(Error(message="boom", traceback=TRACEBACK, _source="ai"))
 	screens = _show(feed, [CODE])
-	assert f"stack.extend({SHOWN_CODE}" in screens[CODE]
+	assert f"stack.extend({CODE}" in screens[CODE]
 
 
 def test_error_traceback_escaped_once():
-	assert f"stack.extend({SHOWN_CODE}" in Error(message="boom", traceback=TRACEBACK).__repr__()
+	assert f"stack.extend({CODE}" in Error(message="boom", traceback=TRACEBACK).__repr__()
 
 
 def test_choices_literal():

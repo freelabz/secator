@@ -58,7 +58,7 @@ class CVEProvider:
 	@staticmethod
 	def lookup_local_cve(cve_id):
 		"""Lookup a CVE by ID from local cache."""
-		cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
+		cve_path = f'{CONFIG.dirs.cves}/{cve_id}.json'
 		if os.path.exists(cve_path):
 			debug(f'{cve_id}: found in cache at {cve_path}', sub='cve')
 			with open(cve_path, 'r') as f:

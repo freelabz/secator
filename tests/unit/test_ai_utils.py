@@ -31,6 +31,19 @@ class TestInitLLM(unittest.TestCase):
         finally:
             litellm.api_key = old_key
 
+    def test_init_llm_clears_a_previous_key(self):
+        # litellm.api_key is process-wide: a key-less call must not reuse the previous call's key.
+        import litellm
+        from secator.ai.utils import init_llm
+
+        old_key = getattr(litellm, 'api_key', None)
+        try:
+            init_llm(api_key="key-for-provider-a")
+            init_llm(api_key=None)
+            self.assertIsNone(litellm.api_key)
+        finally:
+            litellm.api_key = old_key
+
     def test_init_llm_singleton(self):
         """Second call should not re-register callbacks."""
         import litellm
@@ -179,6 +192,7 @@ class TestCallLLM(unittest.TestCase):
             model="test-model",
             messages=[{"role": "user", "content": "hi"}],
             temperature=0.7,
+            drop_params=True,
             api_base="http://localhost:8000",
         )
 
@@ -388,6 +402,123 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["content"], "ok")
         self.assertEqual(mock_completion.call_count, 2)  # transient retry honored
         mock_sleep.assert_called_once()
+
+    @patch('litellm.completion')
+    def test_call_llm_empty_choices_raises_clear_error(self, mock_completion):
+        """A response with no choices raises a readable error, not an IndexError."""
+        import litellm
+        from secator.ai.utils import call_llm
+        mock_completion.return_value = litellm.ModelResponse(
+            id="resp-1", choices=[], stop_reason="refusal",
+            error={"message": "upstream rejected the request"},
+            usage={"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5})
+
+        with self.assertRaises(ValueError) as ctx:
+            call_llm([{"role": "user", "content": "hi"}], "test-model")
+
+        self.assertIn("no choices", str(ctx.exception))
+        self.assertIn("test-model", str(ctx.exception))
+        for expected in ("resp-1", "refusal", "upstream rejected the request", "'prompt_tokens': 5"):
+            self.assertIn(expected, str(ctx.exception))
+
+    def _real_litellm_completion(self):
+        """Patch litellm.completion with the real one (mock_response, no network), so
+        litellm's own per-model param validation runs; record each call's kwargs."""
+        import litellm
+        real, calls = litellm.completion, []
+
+        def fake(**kwargs):
+            calls.append(dict(kwargs))
+            return real(**kwargs, mock_response="ok")
+        return patch('litellm.completion', side_effect=fake), calls
+
+    def test_call_llm_drops_temperature_for_reasoning_models(self):
+        """Models that only take temperature=1 while reasoning (setup call uses 0, the
+        main loop 0.7) no longer fail: litellm drops the temperature."""
+        from secator.ai.utils import call_llm
+        for model, temperature in (("gpt-6.1-terra", 0), ("claude-opus-5-5", 0.7)):
+            with self.subTest(model=model):
+                patcher, calls = self._real_litellm_completion()
+                with patcher:
+                    result = call_llm([{"role": "user", "content": "hi"}], model, temperature, api_key="x")
+                self.assertEqual(result["content"], "ok")
+                self.assertEqual(len(calls), 1)
+                self.assertTrue(calls[0]["drop_params"])
+
+    def test_call_llm_with_tools_on_unknown_reasoning_model(self):
+        """A model litellm only knows by family under the `openai/` prefix: litellm
+        rejects temperature=0.3 and tool_choice for it; the call still goes through
+        with tools."""
+        import litellm
+        from litellm.utils import get_optional_params
+        from secator.ai.utils import call_llm
+        model = "openai/gpt-6.1-terra-2026-10-26"
+        tools = [{"type": "function", "function": {
+            "name": "f", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+        self.assertIn("tools", litellm.get_supported_openai_params(model=model))
+        with self.assertRaises(litellm.UnsupportedParamsError):
+            get_optional_params(model=model.split("/", 1)[1], custom_llm_provider="openai", temperature=0.3)
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            result = call_llm([{"role": "user", "content": "hi"}], model, 0.3,
+                              api_base="https://gw.example.com/v1", api_key="x", tools=tools)
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(calls[0]["tools"], tools)
+        self.assertNotIn("tool_choice", calls[0])
+        sent = get_optional_params(
+            model=model.split("/", 1)[1], custom_llm_provider="openai",
+            temperature=0.3, tools=tools, drop_params=True)
+        self.assertEqual(sent["tools"], tools)
+        self.assertNotIn("temperature", sent)
+
+    def test_call_llm_tool_messages_have_no_name(self):
+        """Tool messages go out without `name` (not in the Chat Completions schema);
+        the caller's history keeps it."""
+        from secator.ai.utils import call_llm
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}},
+                # no result: the orphan repair inserts one (with a name) before sending
+                {"id": "call_2", "type": "function", "function": {"name": "g", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "call_1", "name": "f", "content": "done"},
+        ]
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            result = call_llm(messages, "openai/gpt-6.1", api_base="https://gw.example.com/v1", api_key="x")
+        self.assertEqual(result["content"], "ok")
+        sent_tools = [m for m in calls[0]["messages"] if m["role"] == "tool"]
+        self.assertEqual([m["tool_call_id"] for m in sent_tools], ["call_1", "call_2"])
+        self.assertEqual(sent_tools[0], {"role": "tool", "tool_call_id": "call_1", "content": "done"})
+        self.assertNotIn("name", sent_tools[1])
+        self.assertEqual(messages[2]["name"], "f")
+
+    def test_call_llm_tool_call_turn_empty_content_sent_as_none(self):
+        """A saved history may hold `content: ""` on a tool-call turn: it goes out as
+        None, so converters do not read it as a text message and drop the calls."""
+        from secator.ai.utils import call_llm
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "stop", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+            {"role": "user", "content": "next"},
+        ]
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            call_llm(messages, "openai/gpt-6.1", api_base="https://gw.example.com/v1", api_key="x")
+        self.assertIsNone(calls[0]["messages"][1]["content"])
+        self.assertEqual(messages[1]["content"], "")
+
+    def test_call_llm_keeps_supported_temperature(self):
+        """A model that accepts the temperature gets it on the first and only call."""
+        from secator.ai.utils import call_llm
+        patcher, calls = self._real_litellm_completion()
+        with patcher:
+            call_llm([{"role": "user", "content": "hi"}], "claude-sonnet-4-5", 0.7, api_key="x")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["temperature"], 0.7)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -943,3 +1074,17 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
         ]
         _repair_orphan_tool_uses(m)
         self.assertEqual(self._roles(m), ["system", "user", "assistant", "tool"])
+
+    def test_tool_result_for_another_call_is_dropped(self):
+        """A result whose id is not one of its parent's calls is dropped (the parent's own
+        call then gets a synthetic result)."""
+        from secator.ai.utils import _repair_orphan_tool_uses
+        m = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "tool_calls": [
+                {"id": "b", "type": "function", "function": {"name": "q", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "a", "content": "{}"},
+            {"role": "user", "content": "next"},
+        ]
+        _repair_orphan_tool_uses(m)
+        self.assertEqual([x.get("tool_call_id") for x in m if x["role"] == "tool"], ["b"])

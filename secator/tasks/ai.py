@@ -328,6 +328,9 @@ class ai(PythonRunner):
 	# path that drives the loop before setup runs get_opt_value("isolated") — a resume/respawn
 	# via ai.__new__(ai), or the bare-task test harnesses. Real runs override this in setup.
 	isolated = False
+	# Never redelivered on worker loss: a replay spends the chat's tokens again, and the user's
+	# next message resumes it from its saved history.
+	max_retries = 0
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
@@ -338,9 +341,9 @@ class ai(PythonRunner):
 		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
-		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
+		"sensitive": {"is_flag": True, "default": CONFIG.addons.ai.encrypt_pii, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": CONFIG.addons.ai.max_iterations, "help": "Max iterations"},
-		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
+		"temperature": {"type": float, "default": CONFIG.addons.ai.temperature, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
 		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name or
@@ -519,6 +522,11 @@ class ai(PythonRunner):
 		if self._credential_error:
 			yield Error(message=self._credential_error)
 			return
+		ai_cfg = CONFIG.addons.ai
+		if not self.is_subagent and (ai_cfg.oauth2_client_id or ai_cfg.oauth2_client_secret) and not ai_cfg.oauth2_endpoint:
+			yield Warning(message=(
+				'OAuth2 client credentials are set but addons.ai.oauth2_endpoint is empty, so OAuth2 is skipped. '
+				'Set the token URL: `secator config set addons.ai.oauth2_endpoint <url>` or `secator x ai setup`.'))
 
 		# Verify model is configured and reachable
 		yield from self._verify_model()

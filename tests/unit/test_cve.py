@@ -19,7 +19,7 @@ class TestCveHelpers(unittest.TestCase):
 	def test_lookup_cve(self):
 		fixture = load_fixture('cve_circle_output', FIXTURES_DIR)
 		fixture = circl.convert_cve_info(fixture)
-		cve_dir = CONFIG.dirs.data / 'cves'
+		cve_dir = CONFIG.dirs.cves
 		os.makedirs(cve_dir, exist_ok=True)
 		cve_path = cve_dir / 'CVE-2023-5568.json'
 		with open(cve_path, 'w') as f:

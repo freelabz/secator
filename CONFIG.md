@@ -131,9 +131,7 @@ Directory paths used by Secator. All paths support `~` expansion.
 | `dirs.wordlists` | `Path` | `{data}/wordlists` | Wordlists |
 | `dirs.cves` | `Path` | `{data}/cves` | CVE data |
 | `dirs.payloads` | `Path` | `{data}/payloads` | Exploit payloads |
-| `dirs.performance` | `Path` | `{data}/performance` | Performance metrics |
 | `dirs.revshells` | `Path` | `{data}/revshells` | Reverse shell payloads |
-| `dirs.celery` | `Path` | `{data}/celery` | Celery broker files |
 | `dirs.celery_data` | `Path` | `{data}/celery/data` | Celery data files |
 | `dirs.celery_results` | `Path` | `{data}/celery/results` | Celery result files |
 
@@ -205,6 +203,10 @@ celery:
   result_expires: 172800  # 2 days
 ```
 
+Celery's own `CELERY_BROKER_URL`, `CELERY_BROKER_READ_URL`, `CELERY_BROKER_WRITE_URL` and
+`CELERY_RESULT_BACKEND` variables take precedence over `celery.broker_url` / `celery.result_backend`
+inside the Celery app; secator prints a warning when one of them is set to a different value.
+
 ---
 
 ## cli
@@ -216,7 +218,6 @@ CLI behavior settings.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `cli.github_token` | `string` | `$GITHUB_TOKEN` or `''` | GitHub API token |
-| `cli.record` | `bool` | `false` | Record CLI sessions |
 | `cli.stdin_timeout` | `int` | `1000` | Stdin timeout (ms) |
 | `cli.show_http_response_headers` | `bool` | `false` | Show HTTP response headers |
 | `cli.show_command_output` | `bool` | `false` | Show raw command output |
@@ -250,8 +251,8 @@ Settings that control how tasks, workflows, and scans execute.
 | `runners.threads` | `int` | `50` | Default thread count |
 | `runners.prompt_timeout` | `int` | `20` | Interactive prompt timeout (s) |
 | `runners.chunk_rate_limit` | `bool` | `true` | Rate-limit chunk processing |
+| `runners.show_subtasks` | `bool` | `false` | Show non-chunk subtasks in the CLI progress panel of Celery runs |
 | `runners.skip_cve_search` | `bool` | `false` | Skip CVE enrichment |
-| `runners.skip_exploit_search` | `bool` | `false` | Skip exploit search |
 | `runners.skip_cve_low_confidence` | `bool` | `false` | Skip low-confidence CVEs |
 | `runners.remove_duplicates` | `bool` | `false` | Deduplicate results |
 
@@ -463,7 +464,6 @@ Wordlist management.
 |-------|------|---------|-------------|
 | `wordlists.defaults` | `dict[str, str]` | `{http: bo0m_fuzz, dns: combined_subdomains, http_params: burp-parameter-names}` | Type → wordlist name |
 | `wordlists.templates` | `dict[str, str]` | See below | Name → URL/path |
-| `wordlists.lists` | `dict[str, list[str]]` | `{}` | Inline wordlists |
 
 **Default templates:**
 
@@ -480,8 +480,6 @@ wordlists:
     http: my_custom_wordlist
   templates:
     my_custom_wordlist: https://example.com/wordlist.txt
-  lists:
-    inline_list: [admin, test, api, login]
 ```
 
 ---
@@ -560,7 +558,6 @@ Optional integrations and addon configurations.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `addons.gdrive.enabled` | `bool` | `false` | Enable Google Drive integration |
 | `addons.gdrive.drive_parent_folder_id` | `string` | `''` | Target Drive folder ID |
 | `addons.gdrive.credentials_path` | `string` | `''` | Path to credentials JSON |
 
@@ -568,15 +565,8 @@ Optional integrations and addon configurations.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `addons.gcs.enabled` | `bool` | `false` | Enable GCS integration |
 | `addons.gcs.bucket_name` | `string` | `''` | GCS bucket name |
-| `addons.gcs.credentials_path` | `string` | `''` | Path to credentials JSON |
-
-### addons.worker — Distributed Worker
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `addons.worker.enabled` | `bool` | `false` | Enable distributed worker |
+| `addons.gcs.credentials_path` | `string` | `''` | Path to a service account key JSON (default: application default credentials) |
 
 ### addons.mongodb — MongoDB
 
@@ -584,7 +574,6 @@ Optional integrations and addon configurations.
 |-------|------|---------|-------------|
 | `addons.mongodb.enabled` | `bool` | `false` | Enable MongoDB integration |
 | `addons.mongodb.url` | `string` | `mongodb://localhost` | Connection URL |
-| `addons.mongodb.update_frequency` | `int` | `60` | Push interval (s) |
 | `addons.mongodb.max_pool_size` | `int` | `10` | Max connection pool size |
 | `addons.mongodb.server_selection_timeout_ms` | `int` | `5000` | Server selection timeout (ms) |
 | `addons.mongodb.max_items` | `int` | `-1` | Max items stored; `-1` = unlimited |
@@ -601,7 +590,6 @@ Optional integrations and addon configurations.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `addons.discord.enabled` | `bool` | `false` | Enable Discord integration |
 | `addons.discord.webhook_url` | `string` | `''` | Webhook URL |
 | `addons.discord.bot_token` | `string` | `''` | Bot token (alternative to webhook) |
 | `addons.discord.send_runner_updates` | `bool` | `true` | Send runner lifecycle events |
@@ -626,7 +614,6 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `addons.api.enabled` | `bool` | `false` | Enable API integration |
 | `addons.api.url` | `string` | `https://app.secator.cloud/api` | API base URL |
 | `addons.api.key` | `string` | `''` | API key |
 | `addons.api.header_name` | `string` | `Bearer` | Auth header scheme |
@@ -647,17 +634,19 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `addons.ai.enabled` | `bool` | `false` | Enable AI integration |
 | `addons.ai.api_key` | `string` | `''` | AI provider API key |
 | `addons.ai.api_base` | `string` | `''` | Custom API base URL |
+| `addons.ai.oauth2_endpoint` | `string` | `''` | OAuth2 token URL (https). When set (and `api_key` is empty), a `client_credentials` token is fetched and sent as the API key to `api_base` only (https `api_base` required); refreshed before expiry and once on a 401. Must be set explicitly: when empty, OAuth2 is not used (the `ai` task warns if a client id/secret is set). The usual value is the origin of `api_base` + `/oauth2/token` (`https://company.com/v1` → `https://company.com/oauth2/token`) |
+| `addons.ai.oauth2_client_id` | `string` | `''` | OAuth2 client id (sent with HTTP Basic auth, form-encoded per RFC 6749) |
+| `addons.ai.oauth2_client_secret` | `string` | `''` | OAuth2 client secret |
+| `addons.ai.oauth2_scope` | `string` | `''` | Optional OAuth2 scope |
 | `addons.ai.default_model` | `string` | `claude-sonnet-4-6` | Default AI model |
 | `addons.ai.intent_model` | `string` | `claude-haiku-4-5` | Lightweight intent-detection model |
 | `addons.ai.temperature` | `float` | `0.7` | Sampling temperature |
-| `addons.ai.max_tokens` | `int` | `30000` | Max tokens per response |
 | `addons.ai.max_tokens_total` | `int` | `100000` | Max tokens per session |
-| `addons.ai.max_results` | `int` | `500` | Max results passed to AI |
 | `addons.ai.user_response_timeout` | `int` | `600` | User interaction timeout (s) |
 | `addons.ai.encrypt_pii` | `bool` | `true` | Encrypt PII before sending |
+| `addons.ai.exec_wrappers` | `list[str]` | `[]` | Extra exec wrappers whose wrapped command the AI shell guardrails re-check |
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |
 | `addons.ai.fetch_url_ssrf_protection` | `bool` | `false` | Strict SSRF mode for the AI `fetch_url` tool: resolve the host locally and require public IPs, plus a connected-peer check (DNS rebinding). Off = no address filtering (http/https only). Enable on shared or server-side deployments. |
 | `addons.ai.web_proxy_url` | `string` | `''` | Proxy for the AI's own web calls only (`fetch_url`, `web_search`): `http://`, `https://` or `socks5h://` (socks needs `pip install 'requests[socks]'`). `HTTP(S)_PROXY` env vars are ignored by `fetch_url`. In strict mode the target host must still resolve locally. |
@@ -694,7 +683,6 @@ bundled entries by `name`). Add a gateway with a data-only entry — no code:
 ```yaml
 addons:
   ai:
-    enabled: true
     permissions:
       allow:
         - "target({targets})"
@@ -722,21 +710,17 @@ addons:
   mongodb:
     enabled: true
     url: mongodb://localhost:27017/secator
-    update_frequency: 30
     max_items: 10000
   discord:
-    enabled: true
     webhook_url: https://discord.com/api/webhooks/…
     min_severity: medium
   gdrive:
-    enabled: true
     drive_parent_folder_id: 1a2b3c4d5e6f
     credentials_path: ~/.config/gdrive/credentials.json
   vulners:
     enabled: true
     api_key: VULNERS_API_KEY
   ai:
-    enabled: true
     api_key: sk-ant-…
     default_model: claude-sonnet-4-6
 ```
@@ -751,7 +735,7 @@ Data provider defaults.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `providers.defaults` | `dict[str, str]` | `{cve: circl, exploit: exploitdb, ghsa: ghsa}` | Default provider per data type |
+| `providers.defaults` | `dict[str, str]` | `{cve: circl, exploit: exploitdb}` | Default provider per data type |
 
 **Supported providers by type:**
 
@@ -759,7 +743,6 @@ Data provider defaults.
 |------|---------|
 | `cve` | `circl`, `vulners` |
 | `exploit` | `exploitdb` |
-| `ghsa` | `ghsa` |
 
 ```yaml
 providers:
@@ -832,6 +815,10 @@ security:
   prompt_sudo_password: false
 ```
 
+`SECATOR_PACKAGE_MANAGER` (environment only) forces the system package manager used to install tool
+dependencies. It takes a known package manager name (`apt`, `pacman`, `apk`, `dnf`, `yum`, `zypper`,
+`brew`, `winget`, `choco`, `scoop`) or a full install command (e.g. `apt-get install -y`).
+
 ---
 
 ## offline_mode
@@ -887,6 +874,10 @@ export SECATOR_OFFLINE_MODE=true
 ```
 
 Environment variables take precedence over the config file.
+
+Values are validated against the config schema: boolean keys accept `true`/`false`, `1`/`0`, `yes`/`no`,
+`on`/`off` (case-insensitive), and an invalid value (e.g. a non-integer for an integer key, or a value that
+is not a JSON object for a dict key) is ignored with an `(override failed, ignored)` message.
 
 ---
 
@@ -957,10 +948,8 @@ addons:
   mongodb:
     enabled: true
     url: mongodb://localhost:27017/secator
-    update_frequency: 30
     max_items: 10000
   discord:
-    enabled: true
     webhook_url: https://discord.com/api/webhooks/…
     min_severity: medium
   vulners:
@@ -974,3 +963,16 @@ security:
 
 offline_mode: false
 ```
+
+---
+
+## Deprecated keys
+
+These keys had no effect and were removed. A config file or `SECATOR_*` variable that still sets one keeps
+loading: the key is ignored with a one-time notice, and `secator config` drops it from the file on the next save.
+
+`dirs.celery`, `dirs.performance`, `dirs.queries`, `cli.record`, `runners.skip_exploit_search`,
+`wordlists.lists`, `addons.gdrive.enabled`, `addons.gcs.enabled`, `addons.worker` (the whole section),
+`addons.mongodb.update_frequency` (use `runners.backend_update_frequency`), `addons.sqlite.enabled`,
+`addons.ai.enabled`, `addons.ai.max_tokens`, `addons.ai.max_results`, `addons.discord.enabled`,
+`addons.api.enabled`. Drivers and exporters are selected with `--driver` / `-o` or `drivers.defaults`.

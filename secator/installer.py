@@ -892,13 +892,38 @@ def check_updates(timeout=(1, 1)):
 		console.print(Info(message=f'Newer data files are available ({", ".join(stale)}). Run [bold green4]secator update --data-only[/] to refresh them.'))  # noqa: E501
 
 
-def get_distro_config():
-	"""Detects the system's package manager based on the OS distribution and return the default installation command."""
+# Package manager name -> (install command, cleanup command).
+PACKAGE_MANAGERS = {
+	'apt': ('apt install -y --no-install-recommends', 'rm -rf /var/lib/apt/lists/*'),
+	'pacman': ('pacman -S --noconfirm --needed', None),
+	'apk': ('apk add --no-cache', None),
+	'dnf': ('dnf install -y', 'dnf clean all'),
+	'yum': ('yum -y', 'yum clean all'),
+	'zypper': ('zypper -n', 'zypper clean --all'),
+	'brew': ('brew install', None),
+	'winget': ('winget install --disable-interactivity', None),
+	'choco': ('choco install -y --no-progress', None),
+	'scoop': ('scoop', None),
+}
 
-	# If explicitely set by the user, use that one
-	package_manager_variable = os.environ.get('SECATOR_PACKAGE_MANAGER')
-	if package_manager_variable:
-		return package_manager_variable
+# Other commands of a known package manager, so that a full-command override (e.g. `apt-get install -y`)
+# selects the dependencies declared for that package manager (e.g. under the `apt` key).
+PACKAGE_MANAGER_ALIASES = {
+	'apt-get': 'apt',
+	'aptitude': 'apt',
+	'microdnf': 'dnf',
+}
+
+
+def get_distro_config():
+	"""Detects the system's package manager based on the OS distribution and return the default installation command.
+
+	The ``SECATOR_PACKAGE_MANAGER`` environment variable forces the package manager. It takes either a known
+	package manager name (e.g. ``apt``, ``apk``, ``dnf``), or a full install command (e.g. ``apt-get install -y``).
+
+	Returns:
+		Distribution: detected distribution and package manager.
+	"""
 	installer = None
 	finalizer = None
 	system = platform.system()
@@ -909,37 +934,42 @@ def get_distro_config():
 		distrib = distrib.split(' ')[0] if distrib else None
 
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
-			installer = "apt install -y --no-install-recommends"
-			finalizer = "rm -rf /var/lib/apt/lists/*"
+			installer, finalizer = PACKAGE_MANAGERS['apt']
 		elif distrib in ["arch", "manjaro", "endeavouros", "cachyos"]:
-			installer = "pacman -S --noconfirm --needed"
+			installer, finalizer = PACKAGE_MANAGERS['pacman']
 		elif distrib in ["alpine"]:
-			installer = "apk add --no-cache"
+			installer, finalizer = PACKAGE_MANAGERS['apk']
 		elif distrib in ["fedora"]:
-			installer = "dnf install -y"
-			finalizer = "dnf clean all"
+			installer, finalizer = PACKAGE_MANAGERS['dnf']
 		elif distrib in ["centos", "rhel", "rocky", "alma"]:
-			installer = "yum -y"
-			finalizer = "yum clean all"
+			installer, finalizer = PACKAGE_MANAGERS['yum']
 		elif distrib in ["opensuse", "sles"]:
-			installer = "zypper -n"
-			finalizer = "zypper clean --all"
+			installer, finalizer = PACKAGE_MANAGERS['zypper']
 
 	elif system == "Darwin":  # macOS
-		installer = "brew install"
+		installer, finalizer = PACKAGE_MANAGERS['brew']
 
 	elif system == "Windows":
 		if shutil.which("winget"):
-			installer = "winget install --disable-interactivity"
+			installer, finalizer = PACKAGE_MANAGERS['winget']
 		elif shutil.which("choco"):
-			installer = "choco install -y --no-progress"
+			installer, finalizer = PACKAGE_MANAGERS['choco']
 		else:
-			installer = "scoop"  # Alternative package manager for Windows
+			installer, finalizer = PACKAGE_MANAGERS['scoop']  # Alternative package manager for Windows
+
+	# If explicitly set by the user, use that one
+	forced = os.environ.get('SECATOR_PACKAGE_MANAGER', '').strip()
+	if forced:
+		if forced in PACKAGE_MANAGERS:
+			installer, finalizer = PACKAGE_MANAGERS[forced]
+		else:
+			installer, finalizer = forced, None
 
 	if not installer:
 		console.print(Error(message=f'Could not find installer for your distribution (system: {system}, distrib: {distrib})'))  # noqa: E501
 
 	manager = installer.split(' ')[0] if installer else ''
+	manager = PACKAGE_MANAGER_ALIASES.get(manager, manager)
 	config = Distribution(
 		pm_installer=installer,
 		pm_finalizer=finalizer,

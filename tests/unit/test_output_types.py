@@ -1,7 +1,13 @@
 import unittest
+from rich.text import Text
 from secator.output_types import Vulnerability
 from secator.output_types.error import Error
 from secator.output_types.warning import Warning
+from secator.utils import rich_escape
+
+# text that is not markup, or markup to show as is
+NOT_MARKUP = [']', r'\]', '[/]', '[bold]', 'arr[0]', "[e.__cause__, e.__context__, getattr(e, 'reason', None)]"]
+
 
 class TestOutputTypes(unittest.TestCase):
 	def test_merge_with(self):
@@ -120,6 +126,11 @@ class TestErrorRich(unittest.TestCase):
 		assert 'workflow_node' in rich_str
 		assert 'nmap' not in rich_str
 
+	def test_error_from_exception_message_literal(self):
+		for text in NOT_MARKUP:
+			err = Error.from_exception(ValueError(text))
+			assert Text.from_markup(err.__rich__()).plain.startswith(f'[ERR] ValueError: {text}')
+
 
 class TestWarningRich(unittest.TestCase):
 
@@ -139,6 +150,24 @@ class TestWarningRich(unittest.TestCase):
 		warn = Warning(message='watch out')
 		rich_str = warn.__rich__()
 		assert 'watch out' in rich_str
+
+	def test_warning_not_markup_rendered_literally(self):
+		for text in [t for t in NOT_MARKUP if t != '[bold]']:   # '[bold]' is valid markup: applied
+			warn = Warning(message=f'careful {text}', _source='ai')
+			assert warn.message == f'careful {text}'
+			assert Text.from_markup(warn.__rich__()).plain == f'[WRN] ai careful {text}'
+
+	def test_warning_keeps_valid_markup(self):
+		warn = Warning(message='[bold]careful[/] now')
+		assert warn.message == 'careful now'
+		assert Text.from_markup(warn.__rich__()).spans[-1].style == 'bold'
+
+
+class TestRichEscape(unittest.TestCase):
+
+	def test_escaped_text_renders_as_input(self):
+		for text in NOT_MARKUP + ['a [/] b'] + ['trailing ' + '\\' * n for n in (1, 2, 3)]:
+			assert Text.from_markup(f'[dim]{rich_escape(text)}[/]').plain == text
 
 
 class TestFindingVerdictFields(unittest.TestCase):
@@ -242,3 +271,36 @@ class TestUrlIsRoot(unittest.TestCase):
 			'http://example.com/#top',
 		]:
 			self.assertFalse(Url(url).is_root, url)
+
+
+class TestTagRich(unittest.TestCase):
+
+	def test_none_value_renders_without_type_error(self):
+		from rich.text import Text
+		from secator.output_types import Tag
+		tag = Tag(name='missing-value', value=None, match='https://example.com')
+		markup = tag.__rich__()
+		plain = Text.from_markup(markup).plain
+		self.assertIn('missing-value', plain)
+		self.assertIn('https://example.com', plain)
+		self.assertNotIn('None', plain)
+
+	def test_none_value_and_none_match_renders_cleanly(self):
+		from rich.text import Text
+		from secator.output_types import Tag
+		tag = Tag(name='empty-tag', value=None, match=None)
+		plain = Text.from_markup(tag.__rich__()).plain
+		self.assertIn('empty-tag', plain)
+		self.assertNotIn('found @', plain)
+
+	def test_short_and_long_values(self):
+		from secator.output_types import Tag
+		short_tag = Tag(name='aws-key', value='AKIA123', match='http://a.com', category='secret')
+		self.assertIn('AKIA123', short_tag.__rich__())
+		self.assertIn('found @', short_tag.__rich__())
+
+		long_val = 'x' * 120
+		long_tag = Tag(name='whois', value=long_val, match='example.com')
+		self.assertIn('value', long_tag.__rich__())
+		self.assertIn(long_val, long_tag.__rich__())
+

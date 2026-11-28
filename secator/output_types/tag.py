@@ -40,7 +40,7 @@ class Tag(OutputType):
 		return self.match
 
 	def __rich__(self) -> str:
-		content = self.value
+		content = '' if self.value is None else str(self.value)
 		category_color = {
 			'error': 'bold dark_orange3',
 			'secret': 'bold red3',
@@ -52,9 +52,9 @@ class Tag(OutputType):
 			small_content = True
 			content = content.strip()
 		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
-		if small_content:
+		if small_content and content:
 			s += f' [bold orange4]{_s(content)}[/]'
-		if self.match != content:
+		if self.match is not None and self.match != content:
 			s += f' found @ [bold]{_s(self.match)}[/]'
 		if self.tags:
 			tags_str = ','.join(self.tags)
