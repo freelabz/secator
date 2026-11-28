@@ -49,8 +49,8 @@ without any API key or extra dependency:
 ``tavily_search`` is used ONLY when ``addons.ai.web_search.tavily_api_key`` is set
 (a synthesized-answer engine); otherwise it is skipped.
 ``keenable_search`` is opt-in: used ONLY when ``addons.ai.web_search.keenable_api_key`` is
-set or ``keenable_keyless`` is true. It then runs before DuckDuckGo for 'answer' (after
-Tavily) and 'links', and falls back to DuckDuckGo when it errors or returns nothing.
+set. It then runs before DuckDuckGo for 'answer' (after Tavily) and 'links', and falls back
+to DuckDuckGo when it errors or returns nothing.
 
 ``web_search`` is the single orchestrator the handler calls: it picks the engine
 from ``mode`` and returns a list of plain result dicts. Everything uses
@@ -511,11 +511,12 @@ _DDG_IA_URL = 'https://api.duckduckgo.com/'
 _SPLOITUS_URL = 'https://sploitus.com/search'
 _TAVILY_URL = 'https://api.tavily.com/search'
 _KEENABLE_URL = 'https://api.keenable.ai/v1/search'
-# Keyless endpoint: no key, but it requires an X-Keenable-Title header naming the client.
-_KEENABLE_PUBLIC_URL = 'https://api.keenable.ai/v1/search/public'
-_KEENABLE_TITLE = 'secator'
+# Shorter than the shared _TIMEOUT: Keenable is optional, so a dead endpoint should hand over to
+# DuckDuckGo quickly.
+_KEENABLE_TIMEOUT = 10
 # Keenable snippets can be long page extracts; keep each result small for the model.
 _KEENABLE_SNIPPET_CHARS = 600
+_KEENABLE_TITLE_CHARS = 200
 
 # Parse the DuckDuckGo HTML result rows: each hit is an <a class="result__a" href=...>title</a>
 # optionally followed by an <a class="result__snippet">snippet</a>. We locate each link, then
@@ -757,21 +758,19 @@ def tavily_search(query, max_results=5, api_key=''):
 	return results
 
 
-def keenable_search(query, max_results=5, api_key='', keyless=False):
-	"""Web search via Keenable. Opt-in: returns ``[]`` (so the caller falls back to DuckDuckGo)
-	unless an API key is set or keyless use is enabled, and on any error."""
-	if not api_key and not keyless:
+def keenable_search(query, max_results=5, api_key=''):
+	"""Web search via Keenable's keyed endpoint. Opt-in: returns ``[]`` (so the caller falls back
+	to DuckDuckGo) when no API key is set, as ``tavily_search`` does, and on any error."""
+	if not api_key:
 		return []
 	max_results = _clamp(max_results, 1, 20, 5)
-	headers = {'User-Agent': _UA, 'Content-Type': 'application/json', 'X-Keenable-Title': _KEENABLE_TITLE}
-	if api_key:
-		headers['X-API-Key'] = api_key
+	headers = {'User-Agent': _UA, 'Content-Type': 'application/json', 'X-API-Key': api_key}
 	try:
 		resp = requests.post(
-			_KEENABLE_URL if api_key else _KEENABLE_PUBLIC_URL,
+			_KEENABLE_URL,
 			json={'query': query, 'max_results': max_results},
 			headers=headers,
-			timeout=_TIMEOUT,
+			timeout=_KEENABLE_TIMEOUT,
 			proxies=_proxies(),
 		)
 		resp.raise_for_status()
@@ -791,12 +790,12 @@ def keenable_search(query, max_results=5, api_key='', keyless=False):
 		url = hit.get('url')
 		if not isinstance(url, str) or not url:
 			continue
-		text = hit.get('description') or hit.get('snippet') or ''
+		text = hit.get('snippet') or ''
 		title = hit.get('title') or ''
 		snippet = ' '.join(text.split()) if isinstance(text, str) else ''
 		results.append({
 			'_type': 'web_result',
-			'title': title.strip() if isinstance(title, str) else '',
+			'title': title.strip()[:_KEENABLE_TITLE_CHARS] if isinstance(title, str) else '',
 			'url': url,
 			'snippet': snippet[:_KEENABLE_SNIPPET_CHARS],
 		})
@@ -809,7 +808,7 @@ def web_search(query, mode='answer', max_results=5, exploit_type='exploits', sor
 	mode 'exploit' -> Sploitus (exploit code / PoCs / offensive tools).
 	mode 'answer'  -> Tavily when a key is configured (synthesized answer), else DuckDuckGo.
 	mode 'links'   -> DuckDuckGo (raw result links + snippets).
-	When Keenable is enabled (key or keenable_keyless), it runs before DuckDuckGo in both.
+	When a Keenable key is set, Keenable runs before DuckDuckGo in both.
 
 	Never raises: an engine fault yields an empty list. The caller turns ``[]`` into a
 	clear "no results" message for the model.
@@ -825,12 +824,11 @@ def web_search(query, mode='answer', max_results=5, exploit_type='exploits', sor
 			return results, 'tavily'
 		# Tavily configured but errored/empty -> fall back to the keyless engine.
 	keenable_key = getattr(ws_cfg, 'keenable_api_key', '') if ws_cfg is not None else ''
-	keenable_keyless = bool(getattr(ws_cfg, 'keenable_keyless', False)) if ws_cfg is not None else False
-	if keenable_key or keenable_keyless:
-		results = keenable_search(query, max_results=max_results, api_key=keenable_key, keyless=keenable_keyless)
+	if keenable_key:
+		results = keenable_search(query, max_results=max_results, api_key=keenable_key)
 		if results:
 			return results, 'keenable'
-		# Keenable enabled but errored/empty -> fall back to DuckDuckGo.
+		# Keenable keyed but errored/empty -> fall back to DuckDuckGo.
 	# Keyless web: the DuckDuckGo HTML endpoint first, then the Instant Answer API when the
 	# HTML scrape comes back empty (anomaly-gated or no hits). IA is entity/concept-only, so
 	# it's a fallback, not the primary — but it keeps answer/links useful without an API key.
