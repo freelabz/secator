@@ -25,7 +25,7 @@ class ph(Tagger):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
-	profile = 'cpu'
+	profile = 'small'
 
 	@staticmethod
 	def on_json_loaded(self, item):
