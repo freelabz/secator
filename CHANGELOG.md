@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.58.0](https://github.com/freelabz/secator/compare/v0.57.1...v0.58.0) (2026-11-28)
+
+
+### Features
+
+* **ai:** add OAuth2 authentication ([#1774](https://github.com/freelabz/secator/issues/1774)) ([74d0ff8](https://github.com/freelabz/secator/commit/74d0ff8420e9b4f61441360984c0d2553858963b))
+* **ai:** show every model, quick re-runs and OAuth2 sign-in in ai setup ([#1776](https://github.com/freelabz/secator/issues/1776)) ([f60c13f](https://github.com/freelabz/secator/commit/f60c13fe249d1200ba7dcc45b86d7c006044f466))
+
+
+### Bug Fixes
+
+* **ai:** do not send name on tool messages ([#1777](https://github.com/freelabz/secator/issues/1777)) ([3b3e2a4](https://github.com/freelabz/secator/commit/3b3e2a429662578a7b5075082407779a33de00af))
+* **ai:** drop unsupported temperature, clear empty-choices error, verify before saving setup ([#1772](https://github.com/freelabz/secator/issues/1772)) ([67dd16e](https://github.com/freelabz/secator/commit/67dd16eb32525f956c2eb8eeeba0211cd1216755))
+* **ai:** harden OAuth2 token flow and default the token URL ([#1779](https://github.com/freelabz/secator/issues/1779)) ([e7dd8eb](https://github.com/freelabz/secator/commit/e7dd8eb6312bb94855511f870893019d66197ee3))
+* **ai:** keep tool-call turns free of empty content ([#1778](https://github.com/freelabz/secator/issues/1778)) ([40d8953](https://github.com/freelabz/secator/commit/40d8953bb62316b22d740244c3675b2936814d81))
+* **ai:** raise the last error when call_llm retries run out ([#1783](https://github.com/freelabz/secator/issues/1783)) ([1aa7255](https://github.com/freelabz/secator/commit/1aa72552d285439a999cff3eccb9f71efd9f9632))
+* **ai:** require an explicit OAuth2 token URL ([#1780](https://github.com/freelabz/secator/issues/1780)) ([bf6ed0c](https://github.com/freelabz/secator/commit/bf6ed0c666c72c90716474618b2ca25de057efcb))
+* **tui:** show external AI tool calls as tool cards ([#1782](https://github.com/freelabz/secator/issues/1782)) ([e870b03](https://github.com/freelabz/secator/commit/e870b037e7bee789c3a118b86097ffca7bcead31))
+
 ## [0.57.1](https://github.com/freelabz/secator/compare/v0.57.0...v0.57.1) (2026-11-26)
 
 
