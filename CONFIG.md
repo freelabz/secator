@@ -650,6 +650,8 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |
 | `addons.ai.fetch_url_ssrf_protection` | `bool` | `false` | Strict SSRF mode for the AI `fetch_url` tool: resolve the host locally and require public IPs, plus a connected-peer check (DNS rebinding). Off = no address filtering (http/https only). Enable on shared or server-side deployments. |
 | `addons.ai.web_proxy_url` | `string` | `''` | Proxy for the AI's own web calls only (`fetch_url`, `web_search`): `http://`, `https://` or `socks5h://` (socks needs `pip install 'requests[socks]'`). `HTTP(S)_PROXY` env vars are ignored by `fetch_url`. In strict mode the target host must still resolve locally. |
+| `addons.ai.web_search.tavily_api_key` | `string` | `''` | Optional Tavily key for `web_search` 'answer' mode (synthesized answer). Empty = keyless engines only |
+| `addons.ai.web_search.keenable_api_key` | `string` | `''` | Optional Keenable key. When set, `web_search` 'answer' (after Tavily) and 'links' try Keenable before DuckDuckGo. Keenable logs queries (and your IP address) on its default data policy, so don't enable it for queries you wouldn't send to a third party; see [Keenable's data and privacy page](https://docs.keenable.ai/data-privacy) |
 
 **Custom provider / OpenAI-compatible gateway.** Any OpenAI-compatible endpoint (a
 gateway/router, a self-hosted server, etc.) works by setting `addons.ai.api_base` +
