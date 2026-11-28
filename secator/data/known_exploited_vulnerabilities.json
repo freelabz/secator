@@ -1,9 +1,59 @@
 {
     "title": "CISA Catalog of Known Exploited Vulnerabilities",
-    "catalogVersion": "2026.11.25",
-    "dateReleased": "2026-11-25T19:48:12.4344Z",
-    "count": 1805,
+    "catalogVersion": "2026.11.27",
+    "dateReleased": "2026-11-27T18:03:12.5733Z",
+    "count": 1808,
     "vulnerabilities": [
+        {
+            "cveID": "CVE-2026-120705",
+            "vendorProject": "OSGeo",
+            "product": "GeoServer",
+            "vulnerabilityName": "OSGeo GeoServer XML Injection Vulnerability",
+            "dateAdded": "2026-11-27",
+            "shortDescription": "OsGeo GeoServer contains an XML injection vulnerability that allows an unauthenticated remote attacker to cause the server to read local text files accessible to the GeoServer process or fetch attacker-specified HTTP or HTTPS URLs via a crafted ID parameter in the WFS 2.0 GetFeatureById stored query. This vulnerability can be chained with CVE-2026-129244, CVE-2026-129243, CVE-2026-129245, and CVE-2026-129242 to achieve unauthenticated remote code execution on an affected GeoServer instance.",
+            "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA\u2019s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA\u2019s \u201cForensics Triage Requirements\u201d (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+            "dueDate": "2026-11-30",
+            "knownRansomwareCampaignUse": "Unknown",
+            "forensicTriage": "No",
+            "notes": "https:\/\/geoserver.org\/vulnerability\/2026\/11\/23\/cve-update.html ; https:\/\/github.com\/geoserver\/geoserver\/security\/advisories\/GHSA-39mw-5chv-jh47 ; BOD 26-04: https:\/\/www.cisa.gov\/news-events\/directives\/bod-26-04-prioritizing-security-updates-based-risk ; Forensics Triage Requirements: https:\/\/www.cisa.gov\/news-events\/directives\/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk ; https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-120705",
+            "cwes": [
+                "CWE-91",
+                "CWE-611",
+                "CWE-918"
+            ]
+        },
+        {
+            "cveID": "CVE-2026-129243",
+            "vendorProject": "OSGeo",
+            "product": "GeoServer",
+            "vulnerabilityName": "OSGeo GeoServer Incorrect Authorization Vulnerability",
+            "dateAdded": "2026-11-27",
+            "shortDescription": "GeoServer contains an incorrect authorization vulnerability that allows an unauthenticated remote attacker to bypass service-level role checks and invoke operations protected solely by those checks via a request with a prefixed service parameter. This vulnerability can be chained with CVE-2026-129244, CVE-2026-120705, CVE-2026-129245, and CVE-2026-129242 to achieve unauthenticated remote code execution on an affected GeoServer instance.",
+            "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA\u2019s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA\u2019s \u201cForensics Triage Requirements\u201d (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+            "dueDate": "2026-11-30",
+            "knownRansomwareCampaignUse": "Unknown",
+            "forensicTriage": "No",
+            "notes": "https:\/\/geoserver.org\/vulnerability\/2026\/11\/23\/cve-update.html ; https:\/\/github.com\/geoserver\/geoserver\/security\/advisories\/GHSA-rv5g-g2r9-58rj ; BOD 26-04: https:\/\/www.cisa.gov\/news-events\/directives\/bod-26-04-prioritizing-security-updates-based-risk ; Forensics Triage Requirements: https:\/\/www.cisa.gov\/news-events\/directives\/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk ; https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-129243",
+            "cwes": [
+                "CWE-863"
+            ]
+        },
+        {
+            "cveID": "CVE-2026-136716",
+            "vendorProject": "Drupal",
+            "product": "Core",
+            "vulnerabilityName": "Drupal Core Improper Check for Unusual or Exceptional Conditions Vulnerability",
+            "dateAdded": "2026-11-27",
+            "shortDescription": "Drupal Core contains an improper check for unusual or exceptional conditions vulnerability that allows an unauthenticated remote attacker to take over a site via the exposed Drupal installer when the site is in one of the affected unusual or incomplete installation states.",
+            "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA\u2019s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA\u2019s \u201cForensics Triage Requirements\u201d (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+            "dueDate": "2026-11-30",
+            "knownRansomwareCampaignUse": "Unknown",
+            "forensicTriage": "Yes",
+            "notes": "https:\/\/www.drupal.org\/sa-core-2026-019 ; BOD 26-04: https:\/\/www.cisa.gov\/news-events\/directives\/bod-26-04-prioritizing-security-updates-based-risk ; Forensics Triage Requirements: https:\/\/www.cisa.gov\/news-events\/directives\/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk ; https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-136716",
+            "cwes": [
+                "CWE-754"
+            ]
+        },
         {
             "cveID": "CVE-2026-103406",
             "vendorProject": "Hewlett Packard Enterprise (HPE)",
