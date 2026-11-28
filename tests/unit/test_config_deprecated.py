@@ -74,6 +74,15 @@ class TestDeprecatedKeys(unittest.TestCase):
 			Config.parse(data={'addons': {'api': {'enabled': True}}})
 		self.assertEqual(_printed(mock_print).count('Config key "addons.api.enabled"'), 1)
 
+	def test_vulners_enabled(self):
+		with mock.patch.object(config_mod.console, 'print') as mock_print:
+			config = Config.parse(data={'addons': {'vulners': {'enabled': True, 'api_key': 'k'}}})
+		self.assertIsNotNone(config)
+		self.assertEqual(config.addons.vulners.api_key, 'k')
+		self.assertNotIn('enabled', config.addons.vulners)
+		self.assertIn('Config key "addons.vulners.enabled" is deprecated and ignored', _printed(mock_print))
+		self.assertEqual(DEPRECATED_ENV_VARS['SECATOR_ADDONS_VULNERS_ENABLED'], 'addons.vulners.enabled')
+
 	def test_env_var(self):
 		self.assertEqual(DEPRECATED_ENV_VARS['SECATOR_ADDONS_GCS_ENABLED'], 'addons.gcs.enabled')
 		self.assertEqual(DEPRECATED_ENV_VARS['SECATOR_ADDONS_WORKER_ENABLED'], 'addons.worker')

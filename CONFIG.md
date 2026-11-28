@@ -583,7 +583,6 @@ Optional integrations and addon configurations.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `addons.vulners.enabled` | `bool` | `false` | Enable Vulners integration |
 | `addons.vulners.api_key` | `string` | `''` | Vulners API key |
 
 ### addons.discord — Discord Notifications
@@ -716,7 +715,6 @@ addons:
     drive_parent_folder_id: 1a2b3c4d5e6f
     credentials_path: ~/.config/gdrive/credentials.json
   vulners:
-    enabled: true
     api_key: VULNERS_API_KEY
   ai:
     api_key: sk-ant-…
@@ -951,7 +949,6 @@ addons:
     webhook_url: https://discord.com/api/webhooks/…
     min_severity: medium
   vulners:
-    enabled: true
     api_key: VULNERS_API_KEY
 
 security:
@@ -973,4 +970,5 @@ loading: the key is ignored with a one-time notice, and `secator config` drops i
 `wordlists.lists`, `addons.gdrive.enabled`, `addons.gcs.enabled`, `addons.worker` (the whole section),
 `addons.mongodb.update_frequency` (use `runners.backend_update_frequency`), `addons.sqlite.enabled`,
 `addons.ai.enabled`, `addons.ai.max_tokens`, `addons.ai.max_results`, `addons.discord.enabled`,
-`addons.api.enabled`. Drivers and exporters are selected with `--driver` / `-o` or `drivers.defaults`.
+`addons.api.enabled`, `addons.vulners.enabled` (use `providers.defaults.cve`). Drivers and exporters are
+selected with `--driver` / `-o` or `drivers.defaults`.
