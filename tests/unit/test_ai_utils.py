@@ -340,6 +340,34 @@ class TestCallLLM(unittest.TestCase):
 
     @patch('time.sleep')
     @patch('litellm.completion')
+    def test_call_llm_orphan_400_on_every_attempt_raises_it(self, mock_completion, mock_sleep):
+        """An orphan 400 repaired on the last attempt raises that 400, not UnboundLocalError."""
+        import litellm
+        from secator.ai.utils import call_llm
+
+        err = litellm.BadRequestError(
+            message="AnthropicException - tool_use ids were found without tool_result blocks",
+            model="claude", llm_provider="anthropic",
+        )
+
+        def side_effect(**kwargs):  # every call: inject a fresh orphan, then raise the orphan 400
+            kwargs["messages"].insert(0, {
+                "role": "assistant", "content": None,
+                "tool_calls": [{"id": f"toolu_{mock_completion.call_count}", "type": "function",
+                                "function": {"name": "f", "arguments": "{}"}}],
+            })
+            raise err
+
+        mock_completion.side_effect = side_effect
+        with self.assertRaises(litellm.BadRequestError) as ctx:
+            call_llm([{"role": "user", "content": "hi"}], "claude")
+
+        self.assertIs(ctx.exception, err)
+        self.assertEqual(mock_completion.call_count, 3)  # bounded by max_retries
+        mock_sleep.assert_not_called()
+
+    @patch('time.sleep')
+    @patch('litellm.completion')
     def test_call_llm_duplicate_tool_result_400_repairs_and_retries(self, mock_completion, mock_sleep):
         """A 'multiple tool_result blocks with id' 400 is now deduped and retried,
         instead of failing fast as non-retryable."""
