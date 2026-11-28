@@ -1619,6 +1619,35 @@ def _format_vuln_counts(counts):
 	return '|'.join(parts) if parts else '-'
 
 
+def _runner_vuln_ref(runner, workspace_fallback=None):
+	"""Return the workspace, type, and finding-context id for a listed runner."""
+	context = runner.get('context') or {}
+	runner_type = runner.get('_type') or runner.get('config', {}).get('type', '')
+	runner_type = str(runner_type).rstrip('s')
+	if runner_type not in ('task', 'workflow', 'scan'):
+		return None
+	runner_id = context.get(f'{runner_type}_id')
+	if runner_id is None:
+		runner_id_str = runner.get('_id_str') or ''
+		if '/' in runner_id_str:
+			runner_id = runner_id_str.split('/', 1)[1]
+		else:
+			runner_id = runner.get('_id')
+	if runner_id is None:
+		return None
+	# Keep the displayed workspace identity stable (API runner payloads may contain only
+	# the name), while preferring a resolved workspace ID for finding queries.
+	workspace_key = (
+		context.get('workspace_id') or runner.get('_workspace') or
+		context.get('workspace_name') or workspace_fallback
+	)
+	workspace_id = (
+		context.get('workspace_id') or runner.get('_workspace') or
+		workspace_fallback or context.get('workspace_name')
+	)
+	return str(workspace_key or ''), workspace_id, runner_type, runner_id
+
+
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name (default: current)')
 @click.option('--all-workspaces', 'all_workspaces', is_flag=True, default=False, help='List reports from every workspace')  # noqa: E501
@@ -1704,6 +1733,54 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent, order='asc')
 		debug(f'listed {len(runners)} runner(s) in {time.time() - _t:.3f}s', sub='report')
 
+	# Query-backed reports store findings separately from runner records. Fetch counts
+	# once per workspace and group them in the backend, leaving local JSON's lazy file
+	# count path untouched. Grouping by workspace preserves the backend's tenant scope
+	# when --all-workspaces is selected.
+	vuln_counts_by_runner = {}
+	if not is_local and runners:
+		runner_groups = {}
+		resolved_workspace_ids = {}
+		for runner in runners:
+			ref = _runner_vuln_ref(runner, list_workspace or workspace_name)
+			if not ref:
+				continue
+			workspace_key, scoped_workspace_id, runner_type_name, runner_id = ref
+			if effective_driver == 'api' and not (runner.get('context') or {}).get('workspace_id'):
+				# --all-workspaces API responses can omit workspace IDs. Resolve each name
+				# once so findings are queried with the tenant ID, while rows stay keyed by
+				# their workspace name. For a selected workspace, list_workspace is already
+				# the resolved ID.
+				if list_workspace:
+					scoped_workspace_id = list_workspace
+				else:
+					workspace_name_for_runner = (
+						(runner.get('context') or {}).get('workspace_name') or
+						runner.get('_workspace') or str(scoped_workspace_id or '')
+					)
+					if workspace_name_for_runner:
+						if workspace_name_for_runner not in resolved_workspace_ids:
+							from secator.hooks.api import resolve_workspace
+							resolved_workspace_ids[workspace_name_for_runner] = resolve_workspace(
+								workspace_name_for_runner)[0]
+						scoped_workspace_id = resolved_workspace_ids[workspace_name_for_runner]
+			if not scoped_workspace_id:
+				continue
+			group = runner_groups.setdefault(workspace_key, {
+				'workspace_id': scoped_workspace_id,
+				'runner_ids_by_type': {},
+			})
+			by_id = group['runner_ids_by_type'].setdefault(runner_type_name, {})
+			by_id.setdefault(str(runner_id), runner_id)
+		for workspace_key, group in runner_groups.items():
+			count_engine = QueryEngine(group['workspace_id'], context={'drivers': [effective_driver]})
+			grouped_counts = count_engine.vuln_counts_by_runner({
+				rtype: list(ids.values()) for rtype, ids in group['runner_ids_by_type'].items()
+			})
+			for runner_type_name, counts_by_id in grouped_counts.items():
+				for runner_id, counts in counts_by_id.items():
+					vuln_counts_by_runner[(workspace_key, runner_type_name, str(runner_id))] = counts
+
 	# --time-delta cutoff (local only): keep reports whose mtime is newer than the delta.
 	cutoff_ts = None
 	if is_local and time_delta:
@@ -1771,7 +1848,14 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 					continue
 				vuln_str = _format_vuln_counts(counts)
 			else:
-				vuln_str = '-'
+				ref = _runner_vuln_ref(r, list_workspace or workspace_name)
+				if ref:
+					workspace_key, _, runner_type_name, runner_id = ref
+					counts = vuln_counts_by_runner.get(
+						(workspace_key, runner_type_name, str(runner_id)), {})
+				else:
+					counts = {}
+				vuln_str = _format_vuln_counts(counts)
 			table.add_row(*_build_row(r, vuln_str))
 			shown += 1
 

@@ -1,7 +1,7 @@
 # secator/query/api.py
 
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Iterator, Optional
 from urllib.parse import urlencode
 
 
@@ -165,20 +165,46 @@ class ApiBackend(QueryBackend):
             raise RuntimeError(f"API finding update failed for all {len(errors)} matching finding(s): {errors[-1]}")
         return written
 
+    def _iter_search_all(self, query: dict, page_size: int = 1000) -> Iterator[Dict[str, Any]]:
+        """Yield findings matching ``query`` page by page, retaining only their IDs."""
+        seen = set()
+        while True:
+            page = self._search_items(query, limit=page_size, offset=len(seen), raise_errors=True)
+            new = [d for d in page if isinstance(d, dict) and d.get("_id") not in seen]
+            if not new:
+                return
+            seen.update(d.get("_id") for d in new)
+            yield from new
+
     def _search_all(self, query: dict, page_size: int = 1000) -> List[Dict[str, Any]]:
         """Every finding matching ``query`` (raw, with ``_id``), across all search pages.
 
         Snapshotting all matches before writing keeps writes that change a finding's eligibility
-        from shifting the pages being read. Pages until an empty one (the API may serve fewer
-        than ``page_size`` per page), and stops if a page brings no new finding."""
-        docs, seen = [], set()
-        while True:
-            page = self._search_items(query, limit=page_size, offset=len(docs), raise_errors=True)
-            new = [d for d in page if isinstance(d, dict) and d.get("_id") not in seen]
-            if not new:
-                return docs
-            seen.update(d.get("_id") for d in new)
-            docs.extend(new)
+        from shifting the pages being read. Count-only callers can use ``_iter_search_all`` to
+        avoid retaining full finding documents in memory.
+        """
+        return list(self._iter_search_all(query, page_size=page_size))
+
+    def vuln_counts_by_runner(self, runner_ids_by_type: dict) -> dict:
+        """Fetch matching vulnerabilities in pages and group their counts locally.
+
+        The remote search API exposes filtering and totals, but no group-by endpoint.
+        One filtered search across all requested runner ids avoids a request per runner.
+        """
+        query = self._vulnerability_query(runner_ids_by_type)
+        if not query:
+            return {}
+        counts = {}
+        runner_id_sets = self._runner_id_sets_by_type(runner_ids_by_type)
+        try:
+            safe_query = self._merge_query(query)
+            for finding in self._iter_search_all(safe_query):
+                self._add_vulnerability_count(counts, finding, runner_id_sets)
+        except QueryBackendError:
+            raise
+        except Exception as e:
+            console.print(Warning(message=f"API vulnerability count aggregation failed: {e}"))
+        return counts
 
     def _execute_create_note(self, note: dict) -> int:
         """POST the note to the remote notes endpoint.

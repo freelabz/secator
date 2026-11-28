@@ -100,6 +100,54 @@ class MongoDBBackend(QueryBackend):
 			console.print(Warning(message=f'MongoDB count failed: {e}'))
 			return 0
 
+	def vuln_counts_by_runner(self, runner_ids_by_type: dict) -> dict:
+		"""Aggregate vulnerability severities by runner id in MongoDB."""
+		if not self._vulnerability_query(runner_ids_by_type):
+			return {}
+		counts = {}
+		try:
+			db = self._get_client().main
+			for runner_type, runner_ids in (runner_ids_by_type or {}).items():
+				if runner_type not in ('task', 'workflow', 'scan') or not runner_ids:
+					continue
+				# Mongo-backed runner ids are normally stored as strings in finding context,
+				# but older data may retain the equivalent BSON ObjectId. Match both forms.
+				from bson.objectid import ObjectId
+				query_ids = []
+				for runner_id in runner_ids:
+					query_ids.append(runner_id)
+					if isinstance(runner_id, str) and ObjectId.is_valid(runner_id):
+						query_ids.append(ObjectId(runner_id))
+					elif isinstance(runner_id, ObjectId):
+						query_ids.append(str(runner_id))
+				query = self._merge_query({
+					'_type': 'vulnerability',
+					f'_context.{runner_type}_id': {'$in': query_ids},
+				})
+				pipeline = [
+					{'$match': query},
+					{'$group': {
+						'_id': {
+							'runner_id': f'$_context.{runner_type}_id',
+							'severity': '$severity',
+						},
+						'count': {'$sum': 1},
+					}},
+				]
+				for row in db.findings.aggregate(pipeline):
+					group = row.get('_id') or {}
+					runner_id = group.get('runner_id')
+					severity = str(group.get('severity') or '').strip().lower()
+					if runner_id is None or severity not in ('critical', 'high', 'medium', 'low'):
+						continue
+					by_id = counts.setdefault(runner_type, {})
+					severity_counts = by_id.setdefault(str(runner_id), {})
+					severity_counts[severity] = severity_counts.get(severity, 0) + row.get('count', 0)
+			return counts
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB vulnerability count aggregation failed: {e}'))
+			return counts
+
 	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Update every document matching query in MongoDB.
 

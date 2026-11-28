@@ -145,14 +145,33 @@ class TestReportListSqlite(ReportListAssertions, unittest.TestCase):
 		rows = [
 			# (table, id, workspace_id column, doc)
 			('tasks', 't1', WS_ID, {'name': 'alpha', 'has_parent': False, 'start_time': '2026-01-02T00:00:00',
-				'context': {'workspace_id': WS_ID, 'workspace_name': 'ws1'}}),
+				'context': {'task_id': 't1', 'workspace_id': WS_ID, 'workspace_name': 'ws1'}}),
 			('scans', 's1', 'ws2', {'name': 'beta', 'start_time': '2026-01-01T00:00:00',
-				'context': {'workspace_id': 'ws2', 'workspace_name': 'ws2'}}),
+				'context': {'scan_id': 's1', 'workspace_id': 'ws2', 'workspace_name': 'ws2'}}),
 			('tasks', 't2', WS_ID, {'name': 'child', 'has_parent': True, 'start_time': '2026-01-03T00:00:00',
-				'context': {'workspace_id': WS_ID, 'workspace_name': 'ws1'}}),
+				'context': {'task_id': 't2', 'workspace_id': WS_ID, 'workspace_name': 'ws1'}}),
 		]
 		for table, rid, ws, doc in rows:
 			conn.execute(f'INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?)', (rid, ws, json.dumps(doc)))
+		findings = [
+			('v1', WS_ID, 't1', 'critical', False),
+			('v2', WS_ID, 't1', 'high', False),
+			('v3', WS_ID, 't1', 'info', False),
+			('v4', WS_ID, 't1', 'low', True),
+			('v5', WS_ID, 't2', 'low', False),
+			('v6', 'ws2', 's1', 'medium', False),
+		]
+		for uuid, ws, runner_id, severity, is_false_positive in findings:
+			doc = {
+				'_uuid': uuid, '_type': 'vulnerability', 'severity': severity,
+				'is_false_positive': is_false_positive,
+				'_context': {'workspace_id': ws, 'task_id' if runner_id.startswith('t') else 'scan_id': runner_id},
+			}
+			conn.execute(
+				'INSERT INTO findings (uuid, type, workspace_id, is_false_positive, _tagged, data) '
+				'VALUES (?, ?, ?, ?, 0, ?)',
+				(uuid, 'vulnerability', ws, int(is_false_positive), json.dumps(doc)),
+			)
 		conn.commit()
 
 	def tearDown(self):
@@ -184,6 +203,18 @@ class TestReportListSqlite(ReportListAssertions, unittest.TestCase):
 		self.assertEqual(scans[0]['_workspace'], 'ws2')
 		self.assertEqual(b.list_runners(runner_type='bogus'), [])
 
+	def test_report_list_shows_scoped_vulnerability_counts(self):
+		result, out = _invoke(['--driver', 'sqlite'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('1C|1H', out)
+		self.assertNotIn('1M', out)
+
+	def test_all_workspaces_shows_each_workspace_vulnerability_counts(self):
+		result, out = _invoke(['--driver', 'sqlite', '--all-workspaces'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('1C|1H', out)
+		self.assertIn('1M', out)
+
 
 class TestReportListMongoDB(ReportListAssertions, unittest.TestCase):
 	"""Mongo runner docs carry context.workspace_id and context.workspace_name."""
@@ -197,10 +228,19 @@ class TestReportListMongoDB(ReportListAssertions, unittest.TestCase):
 		client = mongomock.MongoClient()
 		client.main.tasks.insert_one({'name': 'alpha', 'has_parent': False, 'status': 'SUCCESS',
 			'start_time': datetime(2026, 1, 2),
-			'context': {'task_id': 't1', 'workspace_id': WS_ID, 'workspace_name': 'ws1'}})
+			'context': {'task_id': '64b000000000000000000001', 'workspace_id': WS_ID, 'workspace_name': 'ws1'}})
 		client.main.scans.insert_one({'name': 'beta', 'has_parent': False, 'status': 'SUCCESS',
 			'start_time': datetime(2026, 1, 1),
-			'context': {'scan_id': 's1', 'workspace_id': OTHER_WS_ID, 'workspace_name': 'ws2'}})
+			'context': {'scan_id': '64b000000000000000000002', 'workspace_id': OTHER_WS_ID, 'workspace_name': 'ws2'}})
+		from bson.objectid import ObjectId
+		client.main.findings.insert_many([
+			{'_type': 'vulnerability', 'severity': 'critical',
+				'_context': {'workspace_id': WS_ID, 'task_id': ObjectId('64b000000000000000000001')}},
+			{'_type': 'vulnerability', 'severity': 'high',
+				'_context': {'workspace_id': WS_ID, 'task_id': '64b000000000000000000001'}},
+			{'_type': 'vulnerability', 'severity': 'medium',
+				'_context': {'workspace_id': OTHER_WS_ID, 'scan_id': '64b000000000000000000002'}},
+		])
 		patcher = mock.patch('secator.query.mongodb.MongoDBBackend._get_client', return_value=client)
 		patcher.start()
 		self.addCleanup(patcher.stop)
@@ -208,6 +248,17 @@ class TestReportListMongoDB(ReportListAssertions, unittest.TestCase):
 	def _backend(self):
 		from secator.query.mongodb import MongoDBBackend
 		return MongoDBBackend('')
+
+	def test_report_list_aggregates_mongodb_vulnerability_counts(self):
+		result, out = _invoke(['--driver', 'mongodb'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('1C|1H', out)
+
+	def test_all_workspaces_shows_each_mongodb_vulnerability_count(self):
+		result, out = _invoke(['--driver', 'mongodb', '--all-workspaces'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('1C|1H', out)
+		self.assertIn('1M', out)
 
 
 class TestReportListApi(unittest.TestCase):
@@ -218,6 +269,8 @@ class TestReportListApi(unittest.TestCase):
 
 		def fake_request(method, endpoint, *a, **kw):
 			calls.append(endpoint)
+			if 'findings/_search' in endpoint:
+				return []
 			# Newest first, as a remote endpoint may return them.
 			return [
 				{'name': 'alpha', 'status': 'SUCCESS', '_type': 'task', '_id': 'x1',
@@ -237,18 +290,48 @@ class TestReportListApi(unittest.TestCase):
 		result, out, calls, resolve = self._invoke([])
 		self.assertEqual(result.exit_code, 0, result.output)
 		resolve.assert_called_once_with('ws1')
-		self.assertEqual(len(calls), 1)
+		self.assertEqual(len([call for call in calls if 'runners' in call]), 1)
 		self.assertIn(f'workspace_id={WS_ID}', calls[0])
 		self.assertIn('Current workspace: ws1', out)
 
 	def test_all_workspaces_sends_no_workspace_filter(self):
 		result, out, calls, resolve = self._invoke(['--all-workspaces'])
 		self.assertEqual(result.exit_code, 0, result.output)
-		resolve.assert_not_called()
+		# Listing is unfiltered; the API workspace name is resolved later for finding counts.
+		resolve.assert_called_once_with('ws1')
 		self.assertNotIn('workspace_id=', calls[0])
 		self.assertNotIn('workspace_name=', calls[0])
 		self.assertIn('Workspace', out)
 		self.assertIn('ws1', out)
+
+	def test_vulnerability_counts_use_resolved_workspace_id(self):
+		from secator.cli import cli
+		calls = []
+
+		def fake_request(method, endpoint, data=None):
+			calls.append((method, endpoint, data))
+			if 'runners' in endpoint:
+				return [{'name': 'alpha', 'status': 'SUCCESS', '_type': 'task', '_id': 't1',
+					'context': {'workspace_name': 'ws1'}}]
+			if 'findings/_search' in endpoint:
+				return [{'_id': 'v1', '_type': 'vulnerability', 'severity': 'high',
+					'_context': {'workspace_id': WS_ID, 'task_id': 't1'}}]
+			return []
+
+		resolve = mock.Mock(return_value=(WS_ID, 'ws1'))
+		with mock.patch.object(CONFIG.workspaces, 'current', 'ws1'):
+			with mock.patch('secator.query.api.ApiBackend._make_request', side_effect=fake_request):
+				with mock.patch('secator.hooks.api.resolve_workspace', resolve):
+					result = CliRunner().invoke(
+						cli, ['r', 'list', '--driver', 'api'], env={'COLUMNS': '400'})
+
+		out = ' '.join(_strip_ansi(result.output).split())
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('1H', out)
+		resolve.assert_called_once_with('ws1')
+		finding_queries = [data for _, endpoint, data in calls if 'findings/_search' in endpoint]
+		self.assertTrue(finding_queries)
+		self.assertIn(WS_ID, str(finding_queries[0]))
 
 	def test_most_recent_last_regardless_of_endpoint_order(self):
 		result, out, _, _ = self._invoke([])
@@ -275,6 +358,42 @@ class TestReportListApi(unittest.TestCase):
 		self.assertEqual(calls, [])
 		self.assertIn('not found', out)
 		self.assertIn('--all-workspaces', out)
+
+	def test_vulnerability_counts_use_one_paginated_search_for_all_runner_ids(self):
+		from secator.query.api import ApiBackend
+		findings = [
+			{'_id': 'v1', '_type': 'vulnerability', 'severity': 'critical',
+				'_context': {'workspace_id': WS_ID, 'task_id': 't1'}},
+			{'_id': 'v2', '_type': 'vulnerability', 'severity': 'high',
+				'_context': {'workspace_id': WS_ID, 'task_id': 't1', 'workflow_id': 'w1'}},
+			{'_id': 'v3', '_type': 'vulnerability', 'severity': 'low',
+				'_context': {'workspace_id': WS_ID, 'task_id': 't2'}},
+		]
+		calls = []
+
+		def fake_request(method, endpoint, data=None):
+			calls.append((method, endpoint, data))
+			if len(calls) == 1:
+				return {'items': findings}
+			return {'items': []}
+
+		with mock.patch.object(ApiBackend, '_search_all', side_effect=AssertionError('count path must stream')):
+			with mock.patch.object(ApiBackend, '_make_request', side_effect=fake_request):
+				counts = ApiBackend(WS_ID).vuln_counts_by_runner({
+					'task': ['t1', 't2'], 'workflow': ['w1'],
+				})
+
+		self.assertEqual(counts, {
+			'task': {'t1': {'critical': 1, 'high': 1}, 't2': {'low': 1}},
+			'workflow': {'w1': {'high': 1}},
+		})
+		self.assertEqual(len(calls), 2)  # one result page and one terminal empty page
+		query = calls[0][2]
+		self.assertEqual(query['_type'], 'vulnerability')
+		self.assertEqual(query['$or'], [
+			{'_context.task_id': {'$in': ['t1', 't2']}},
+			{'_context.workflow_id': {'$in': ['w1']}},
+		])
 
 
 class TestSortRunnersChronologically(unittest.TestCase):
