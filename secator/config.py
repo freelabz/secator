@@ -71,6 +71,7 @@ DEPRECATED_KEYS = {
 	'addons.ai.max_results': 'unused',
 	'addons.discord.enabled': 'unused, the discord driver is selected with --driver discord or drivers.defaults',
 	'addons.api.enabled': 'unused, the api driver is selected with --driver api or drivers.defaults',
+	'addons.vulners.enabled': 'unused, the vulners provider is selected with providers.defaults.cve',
 }
 DEPRECATED_ENV_VARS = {'SECATOR_' + key.upper().replace('.', '_'): key for key in DEPRECATED_KEYS}
 DEPRECATED_ENV_VARS['SECATOR_ADDONS_WORKER_ENABLED'] = 'addons.worker'
@@ -443,7 +444,6 @@ class SqliteAddon(StrictModel):
 
 
 class VulnersAddon(StrictModel):
-	enabled: bool = False
 	api_key: Secret = ''
 
 

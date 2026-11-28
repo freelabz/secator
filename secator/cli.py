@@ -2647,7 +2647,7 @@ def install_vulners():
 		title='Vulners addon',
 		next_steps=[
 			'Run [bold green4]secator config set addons.vulners.api_key <API_KEY>[/].',
-			'Set [bold green4]secator config set providers.cve_default_provider vulners[/].',
+			'Set [bold green4]secator config set providers.defaults.cve vulners[/].',
 		],
 	)
 

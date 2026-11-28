@@ -1,10 +1,13 @@
 import json
 import os
 import unittest
+from unittest import mock
 
 from secator.utils_test import load_fixture, FIXTURES_DIR
 from secator.tasks._categories import Vuln
+from secator.providers._base import CVEProvider
 from secator.providers.circl import circl
+from secator.providers.vulners import vulners
 from secator.config import CONFIG
 from secator.cve import extract_software_and_version
 from secator.output_types import Url
@@ -28,6 +31,31 @@ class TestCveHelpers(unittest.TestCase):
 		vuln2 = Vuln.lookup_cve('CVE-2023-5568', 'cpe:2.3:o:redhat:enterprise_linux:9:*:*:*:*:*:*:*')
 		self.assertIn('cpe-match', vuln.tags)
 		self.assertIn('cpe-match', vuln2.tags)
+
+
+class TestVulnersProvider(unittest.TestCase):
+
+	def setUp(self):
+		vulners.lookup_cve.cache_clear()
+		CVEProvider.lookup_external_cve.cache_clear()
+		self.client = mock.MagicMock()
+		self.client.VulnersApi.return_value.search.get_bulletin.return_value = {'id': 'CVE-2023-5568'}
+		patcher = mock.patch.dict('sys.modules', {'vulners': self.client})
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def test_lookup_cve_with_api_key(self):
+		with mock.patch.object(CONFIG.addons.vulners, 'api_key', 'test-key'):
+			data = CVEProvider.lookup_external_cve('CVE-2023-5568', provider='vulners')
+		self.assertEqual(data, {'id': 'CVE-2023-5568'})
+		self.client.VulnersApi.assert_called_once_with(api_key='test-key')
+		self.client.VulnersApi.return_value.search.get_bulletin.assert_called_once_with('CVE-2023-5568', fields=['*'])
+
+	def test_lookup_cve_without_api_key(self):
+		with mock.patch.object(CONFIG.addons.vulners, 'api_key', ''):
+			with self.assertRaises(ValueError):
+				vulners.lookup_cve('CVE-2023-5568')
+		self.client.VulnersApi.assert_not_called()
 
 
 class TestSoftwareVersionExtraction(unittest.TestCase):

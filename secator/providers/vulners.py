@@ -20,9 +20,6 @@ class vulners(CVEProvider):
 			dict: vulnerability data.
 		"""
 		api_key = CONFIG.addons.vulners.api_key
-		enabled = CONFIG.addons.vulners.enabled
-		if not enabled:
-			return None
 		if not api_key:
 			raise ValueError('Vulners API key not set. Please run secator config set addons.vulners.api_key <API_KEY>')
 		try:
@@ -46,9 +43,6 @@ class vulners(CVEProvider):
 			dict: CPE data.
 		"""
 		api_key = CONFIG.addons.vulners.api_key
-		enabled = CONFIG.addons.vulners.enabled
-		if not enabled:
-			return None
 		if not api_key:
 			raise ValueError('Vulners API key not set. Please run secator config set addons.vulners.api_key <API_KEY>')
 		try:
