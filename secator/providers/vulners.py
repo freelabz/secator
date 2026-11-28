@@ -19,6 +19,12 @@ class vulners(CVEProvider):
 		Returns:
 			dict: vulnerability data.
 		"""
+		if CONFIG.runners.skip_cve_search:
+			debug(f'{cve_id}: skipped remote query since config.runners.skip_cve_search is set.', sub='cve.vulners')
+			return None
+		if CONFIG.offline_mode:
+			debug(f'{cve_id}: skipped remote query since config.offline_mode is set.', sub='cve.vulners')
+			return None
 		api_key = CONFIG.addons.vulners.api_key
 		if not api_key:
 			raise ValueError('Vulners API key not set. Please run secator config set addons.vulners.api_key <API_KEY>')
@@ -42,6 +48,12 @@ class vulners(CVEProvider):
 		Returns:
 			dict: CPE data.
 		"""
+		if CONFIG.runners.skip_cve_search:
+			debug(f'{cpe_id}: skipped remote query since config.runners.skip_cve_search is set.', sub='cve.vulners')
+			return None
+		if CONFIG.offline_mode:
+			debug(f'{cpe_id}: skipped remote query since config.offline_mode is set.', sub='cve.vulners')
+			return None
 		api_key = CONFIG.addons.vulners.api_key
 		if not api_key:
 			raise ValueError('Vulners API key not set. Please run secator config set addons.vulners.api_key <API_KEY>')

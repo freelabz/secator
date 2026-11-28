@@ -40,9 +40,12 @@ class TestVulnersProvider(unittest.TestCase):
 		CVEProvider.lookup_external_cve.cache_clear()
 		self.client = mock.MagicMock()
 		self.client.VulnersApi.return_value.search.get_bulletin.return_value = {'id': 'CVE-2023-5568'}
-		patcher = mock.patch.dict('sys.modules', {'vulners': self.client})
-		patcher.start()
-		self.addCleanup(patcher.stop)
+		for patcher in (
+				mock.patch.dict('sys.modules', {'vulners': self.client}),
+				mock.patch.object(CONFIG.runners, 'skip_cve_search', False),
+				mock.patch.object(CONFIG, 'offline_mode', False)):
+			patcher.start()
+			self.addCleanup(patcher.stop)
 
 	def test_lookup_cve_with_api_key(self):
 		with mock.patch.object(CONFIG.addons.vulners, 'api_key', 'test-key'):
@@ -55,6 +58,11 @@ class TestVulnersProvider(unittest.TestCase):
 		with mock.patch.object(CONFIG.addons.vulners, 'api_key', ''):
 			with self.assertRaises(ValueError):
 				vulners.lookup_cve('CVE-2023-5568')
+		self.client.VulnersApi.assert_not_called()
+
+	def test_lookup_cve_offline(self):
+		with mock.patch.object(CONFIG.addons.vulners, 'api_key', 'test-key'), mock.patch.object(CONFIG, 'offline_mode', True):
+			self.assertIsNone(vulners.lookup_cve('CVE-2023-5568'))
 		self.client.VulnersApi.assert_not_called()
 
 
