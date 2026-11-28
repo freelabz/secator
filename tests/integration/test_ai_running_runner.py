@@ -72,7 +72,7 @@ class ScriptedModel:
 		self.calls = 0
 		self.error = None
 
-	def __call__(self, messages, model, temp, api_base, api_key, tools=None):
+	def __call__(self, messages, model, temp, api_base, api_key, tools=None, profile=None):
 		# The tool results of the previous call: the tool messages after the last assistant turn
 		# (a per-turn status block may follow them).
 		tail = []
