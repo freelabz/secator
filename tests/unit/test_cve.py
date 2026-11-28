@@ -42,26 +42,26 @@ class TestVulnersProvider(unittest.TestCase):
 		self.client.VulnersApi.return_value.search.get_bulletin.return_value = {'id': 'CVE-2023-5568'}
 		for patcher in (
 				mock.patch.dict('sys.modules', {'vulners': self.client}),
-				mock.patch.object(CONFIG.runners, 'skip_cve_search', False),
-				mock.patch.object(CONFIG, 'offline_mode', False)):
+				mock.patch.dict(CONFIG.runners, {'skip_cve_search': False}),
+				mock.patch.dict(CONFIG, {'offline_mode': False})):
 			patcher.start()
 			self.addCleanup(patcher.stop)
 
 	def test_lookup_cve_with_api_key(self):
-		with mock.patch.object(CONFIG.addons.vulners, 'api_key', 'test-key'):
+		with mock.patch.dict(CONFIG.addons.vulners, {'api_key': 'test-key'}):
 			data = CVEProvider.lookup_external_cve('CVE-2023-5568', provider='vulners')
 		self.assertEqual(data, {'id': 'CVE-2023-5568'})
 		self.client.VulnersApi.assert_called_once_with(api_key='test-key')
 		self.client.VulnersApi.return_value.search.get_bulletin.assert_called_once_with('CVE-2023-5568', fields=['*'])
 
 	def test_lookup_cve_without_api_key(self):
-		with mock.patch.object(CONFIG.addons.vulners, 'api_key', ''):
+		with mock.patch.dict(CONFIG.addons.vulners, {'api_key': ''}):
 			with self.assertRaises(ValueError):
 				vulners.lookup_cve('CVE-2023-5568')
 		self.client.VulnersApi.assert_not_called()
 
 	def test_lookup_cve_offline(self):
-		with mock.patch.object(CONFIG.addons.vulners, 'api_key', 'test-key'), mock.patch.object(CONFIG, 'offline_mode', True):
+		with mock.patch.dict(CONFIG.addons.vulners, {'api_key': 'test-key'}), mock.patch.dict(CONFIG, {'offline_mode': True}):
 			self.assertIsNone(vulners.lookup_cve('CVE-2023-5568'))
 		self.client.VulnersApi.assert_not_called()
 
