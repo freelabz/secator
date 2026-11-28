@@ -178,6 +178,7 @@ class ChatHistory:
     billed_tokens: int = 0
     billed_prompt_tokens: int = 0
     billed_completion_tokens: int = 0
+    billed_cached_tokens: int = 0
     billed_cost: float = 0.0
 
     def set_system(self, content: str) -> None:
@@ -423,7 +424,7 @@ class ChatHistory:
         return should
 
     def maybe_summarize(self, model: str, api_base: Optional[str] = None,
-                        api_key: Optional[str] = None) -> Tuple[bool, int, int]:
+                        api_key: Optional[str] = None, profile: Optional[str] = None) -> Tuple[bool, int, int]:
         """Summarize history if token usage exceeds percentage threshold.
 
         Uses should_compact() to determine if compaction is needed based on
@@ -433,6 +434,7 @@ class ChatHistory:
             model: LLM model name
             api_base: Optional API base URL
             api_key: Optional API key
+            profile: AI profile whose OAuth2 settings the call uses (None = the active one)
 
         Returns:
             tuple: (compacted, old_tokens, new_tokens)
@@ -443,7 +445,7 @@ class ChatHistory:
             return False, old_tokens, old_tokens
 
         debug(f'compacting: {old_tokens} tokens', sub='runner.ai.context')
-        self.compact(model, api_base, api_key)
+        self.compact(model, api_base, api_key, profile=profile)
         new_tokens = self.count_tokens(model)
         debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='runner.ai.context')
         return True, old_tokens, new_tokens
@@ -479,7 +481,7 @@ class ChatHistory:
         return stubbed
 
     def compact(self, model: str, api_base: Optional[str] = None,
-                api_key: Optional[str] = None) -> None:
+                api_key: Optional[str] = None, profile: Optional[str] = None) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt
         and the last few messages intact so the LLM retains recent context.
 
@@ -487,6 +489,7 @@ class ChatHistory:
             model: LLM model name
             api_base: Optional API base URL
             api_key: Optional API key
+            profile: AI profile whose OAuth2 settings the call uses (None = the active one)
         """
         keep_last = 4
         if len(self.messages) <= 2:
@@ -542,7 +545,7 @@ class ChatHistory:
         prompt = SUMMARIZATION_PROMPT.format(history=history_text, max_words=max_words)
         token_str = format_token_count(self.count_tokens(model), icon='arrow_up')
         with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
-            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
+            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key, profile=profile)
 
         # Record billed usage of the summarization call so the owning task can
         # roll it into context.ai_tokens. Missing usage counts as 0.
@@ -551,6 +554,7 @@ class ChatHistory:
             ("billed_tokens", "tokens", int),
             ("billed_prompt_tokens", "prompt_tokens", int),
             ("billed_completion_tokens", "completion_tokens", int),
+            ("billed_cached_tokens", "cached_tokens", int),
             ("billed_cost", "cost", float),
         ):
             try:

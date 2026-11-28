@@ -137,7 +137,7 @@ class TestLoadProviders:
 def _asker(answers):
 	"""Prompt.ask stub: answers is a list of (label prefix, reply), consumed in order.
 
-	Like rich, an empty reply returns the prompt's default."""
+	Like rich, an empty reply returns the prompt's default. An unscripted "Save as profile" gets Enter."""
 	pending = list(answers)
 
 	def ask(prompt, *args, **kwargs):
@@ -146,6 +146,8 @@ def _asker(answers):
 			if label.startswith(prefix):
 				del pending[i]
 				return reply or kwargs.get('default') or ''
+		if label.startswith('Save as profile'):
+			return kwargs.get('default') or ''
 		raise AssertionError(f'unexpected prompt: {label}')
 	return ask
 
@@ -173,7 +175,8 @@ def _run_wizard(monkeypatch, tmp_path, answers, config=None, **patches):
 	# Pin the saved AI config so the run does not depend on the local config file.
 	saved_config = {
 		'default_model': '', 'intent_model': '', 'api_key': '', 'api_base': '', 'oauth2_endpoint': '',
-		'oauth2_client_id': '', 'oauth2_client_secret': '', 'oauth2_scope': '', **(config or {}),
+		'oauth2_client_id': '', 'oauth2_client_secret': '', 'oauth2_scope': '', 'profile': '', 'profiles': {},
+		**(config or {}),
 	}
 	for name, value in saved_config.items():
 		monkeypatch.setitem(CONFIG.addons.ai, name, value)
@@ -709,6 +712,98 @@ class TestListers:
 		msg = u._short_error(e, 'sk-secret-value-123456789')
 		assert 'bad key' in msg and 'sk-secret-value-123456789' not in msg
 		assert '\\[x]' in msg  # escaped for rich markup
+
+
+class TestProfiles:
+	"""`ai setup` with AI profiles: save as profile, switch profile, add profile."""
+
+	KEY = 'sk-ant-saved-key-1234567890'
+
+	def test_save_as_a_new_profile_leaves_the_main_setup(self, tmp_path, monkeypatch):
+		live = MagicMock(return_value=['anthropic/claude-x', 'anthropic/claude-y'])
+		answers = [('Choice', ''), ('Model', 'claude-y'), ('Save as profile', 'fast')]
+		result, saved, save, llm, text = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=live,
+			config={'api_key': self.KEY, 'default_model': 'anthropic/claude-x', 'intent_model': 'anthropic/claude-x'})
+		assert result == 'anthropic/claude-y'
+		assert not any(k.startswith('addons.ai.') and '.profiles.' not in k and k != 'addons.ai.profile' for k in saved)
+		assert saved['addons.ai.profiles.fast.model'] == 'anthropic/claude-y'
+		assert saved['addons.ai.profiles.fast.intent_model'] == 'anthropic/claude-x'
+		assert saved['addons.ai.profiles.fast.api_key'] == self.KEY  # written whole: nothing inherited
+		assert saved['addons.ai.profile'] == 'fast'
+		assert sorted(c.args[1] for c in llm.call_args_list) == ['anthropic/claude-x', 'anthropic/claude-y']
+		save.assert_called_once()
+		assert self.KEY not in text and 'Profile' in text
+
+	def test_rerun_edits_the_active_profile_only(self, tmp_path, monkeypatch):
+		live = MagicMock(return_value=['anthropic/claude-x', 'anthropic/claude-y'])
+		config = {'api_key': self.KEY, 'default_model': 'anthropic/claude-x', 'intent_model': 'anthropic/claude-x',
+		          'profile': 'fast', 'profiles': {'fast': {'model': 'anthropic/claude-x'}}}
+		answers = [('Choice', ''), ('Model', 'claude-y')]  # Enter at "Save as profile" keeps fast
+		_, saved, save, _, _ = _run_wizard(monkeypatch, tmp_path, answers, _list_provider_models=live, config=config)
+		assert saved == {'addons.ai.profiles.fast.model': 'anthropic/claude-y'}  # the key stays inherited
+		save.assert_called_once()
+
+	def test_switch_profile(self, tmp_path, monkeypatch):
+		config = {'api_key': self.KEY, 'default_model': 'anthropic/claude-x',
+		          'profiles': {'fast': {'model': 'anthropic/claude-y'}}}
+		answers = [('Choice', 'Switch profile'), ('Choice', 'fast')]
+		result, saved, save, llm, text = _run_wizard(monkeypatch, tmp_path, answers, config=config)
+		assert result == 'anthropic/claude-y'
+		assert saved == {'addons.ai.profile': 'fast'}
+		save.assert_called_once()
+		llm.assert_not_called()
+		assert 'Now using profile fast' in text
+
+	def test_switch_profile_is_hidden_without_profiles(self, tmp_path, monkeypatch):
+		answers = [('Choice', 'Done')]
+		_, _, _, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, config={'api_key': self.KEY, 'default_model': 'anthropic/claude-x'})
+		assert 'Switch profile' not in text and 'Add profile' in text
+
+	def test_oauth2_saved_to_default_from_a_profile_asks_before_removing_the_key(self, tmp_path, monkeypatch):
+		# Started from profile "gw"; saving OAuth2 into "default" must not drop the top-level key unasked.
+		config = {'api_key': self.KEY, 'default_model': 'openai/a', 'profile': 'gw',
+		          'profiles': {'gw': {'model': 'openai/a', 'api_base': GW, 'api_key': 'sk-gw-key-0123456789'}}}
+		answers = [('Choice', '3'), ('Choice', '2'), ('Client ID', 'cid'), ('Token URL', ''),
+		           ('Client secret', 'cs-new-secret-0123456789'), ('Save as profile', 'default'),
+		           ('Remove the saved API key?', 'n')]
+		with _token_endpoint():
+			result, saved, save, _, text = _run_wizard(
+				monkeypatch, tmp_path, answers, config=config,
+				fetch_openai_compatible_models=MagicMock(return_value=['a']))
+		assert result is None and not saved
+		save.assert_not_called()
+		assert 'Nothing saved' in text
+
+	def test_profile_moved_to_another_base_keeps_the_key_it_was_checked_with(self, tmp_path, monkeypatch):
+		# "gw" inherits the key on base A; on base B it inherits none, so the same key must be written.
+		key = 'sk-a-saved-0123456789'
+		config = {'api_base': 'https://a.example/v1', 'api_key': key, 'default_model': 'openai/m',
+		          'intent_model': 'openai/i', 'profile': 'gw', 'profiles': {'gw': {'model': 'openai/m'}}}
+		answers = [('Choice', '2'), ('Provider', 'Custom'), ('API base URL', GW), ('Choice', '1'),
+		           ('API key', key), ('Model', '1'), ('Intent model', '')]
+		_, saved, save, _, _ = _run_wizard(monkeypatch, tmp_path, answers, config=config,
+		                                   fetch_openai_compatible_models=MagicMock(return_value=['m', 'i']))
+		assert saved['addons.ai.profiles.gw.api_base'] == GW
+		assert saved['addons.ai.profiles.gw.api_key'] == key
+		assert saved['addons.ai.profiles.gw.intent_model'] == 'openai/i'  # else it would become the model
+		assert not any(k.startswith('addons.ai.') and '.profiles.' not in k for k in saved)
+		save.assert_called_once()
+
+	def test_add_profile_needs_a_name(self, tmp_path, monkeypatch):
+		live = MagicMock(return_value=['anthropic/claude-z'])
+		answers = [('Choice', 'Add profile'), ('Provider', 'Anthropic'), ('API key', 'sk-ant-other-0123456789'),
+		           ('Model', '1'), ('Intent model', ''), ('Save as profile', ''), ('Save as profile', 'bad.name'),
+		           ('Save as profile', 'other')]
+		result, saved, save, _, text = _run_wizard(
+			monkeypatch, tmp_path, answers, _list_provider_models=live,
+			config={'api_key': self.KEY, 'default_model': 'anthropic/claude-x'})
+		assert result == 'anthropic/claude-z'
+		assert saved['addons.ai.profiles.other.api_key'] == 'sk-ant-other-0123456789'
+		assert saved['addons.ai.profile'] == 'other'
+		assert 'addons.ai.api_key' not in saved and 'addons.ai.default_model' not in saved
+		assert text.count('Type a name') == 2
 
 
 class TestPrettyProvider:

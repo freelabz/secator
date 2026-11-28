@@ -196,7 +196,7 @@ def _drive(task, method="_run_loop"):
 
 
 def content_only_llm(text="Here is my analysis. What next?"):
-	def _fn(messages, model, temp, api_base, api_key, tools=None):
+	def _fn(messages, model, temp, api_base, api_key, tools=None, **kwargs):
 		return {"content": text, "tool_calls": [], "usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "stop"}
 	return _fn
 

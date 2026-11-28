@@ -881,13 +881,16 @@ class TestRunRunner(unittest.TestCase):
 		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
 		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
 		ctx = ActionContext(targets=['10.0.0.1'], model='openrouter/anthropic/x',
-							api_key='PARENTKEY', api_base='https://base',
+							api_key='PARENTKEY', api_base='https://base', profile='parent-profile',
 							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
 		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
-			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'], 'opts': {'prompt': 'do x'}}
+			# a tool-supplied profile is dropped: the parent's is forced, like the model
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
+					  'opts': {'prompt': 'do x', 'profile': 'tool-profile'}}
 			list(_run_runner(action, ctx, 'task'))
 		ro = mock_task_cls.call_args[1].get('run_opts', {})
 		self.assertEqual(ro.get('model'), 'openrouter/anthropic/x')
+		self.assertEqual(ro.get('profile'), 'parent-profile')
 		self.assertEqual(ro.get('api_key'), 'PARENTKEY')
 		self.assertEqual(ro.get('api_base'), 'https://base')
 

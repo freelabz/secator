@@ -58,6 +58,12 @@ class AITUI(TUIApp):
 			"every tool result. With sensitive-data encryption on, hosts, IPs and emails appear "
 			"as the [TYPE:hash] placeholders the model received. Display only: nothing sent or "
 			"saved changes. Run it again to return to the conversation."),
+		"/model": SlashCommand(
+			"[profile]", "list the AI profiles, or switch the chat to one",
+			"Without an argument: the AI profiles (addons.ai.profiles, plus default = the addons.ai "
+			"settings) with their model, the one in use marked. With a name: the next model calls use "
+			"that profile, the conversation so far is kept. Set the default one with "
+			"`secator config set addons.ai.profile <name>`."),
 	}
 	CSS = TUIApp.CSS + """
 	#model-view { display: none; }
@@ -196,6 +202,36 @@ class AITUI(TUIApp):
 	async def _slash_model_view(self, text: str) -> None:
 		"""`/model-view`: toggle the model view (display only — nothing sent or stored changes)."""
 		await self._set_model_view(not self._model_view_on)
+
+	async def _slash_model(self, text: str) -> None:
+		"""`/model [profile]`: list the AI profiles, or queue a switch the runner applies before its next model call."""
+		from secator.ai.utils import DEFAULT_PROFILE, resolve_ai_profile
+		from secator.config import CONFIG
+		name = text[len("/model"):].strip()
+		names = [name] if name else list(dict.fromkeys([DEFAULT_PROFILE, *CONFIG.addons.ai.profiles]))
+		try:
+			models = {n: resolve_ai_profile(n)["model"] for n in names}
+		except ValueError as e:
+			await self._append_note(Text(str(e), style="#e06c75"))
+			return
+		if name:
+			with self._control_lock:
+				self._control["profile"] = name
+			await self._append_note(Text.from_markup(
+				f"[#6b7187]↻ switching to AI profile [b]{escape(name)}[/] ({escape(models[name] or 'no model')}) "
+				"from the next model call[/]"))
+			return
+		try:
+			current = (self._model_source() or {}).get("profile") if self._model_source else None
+		except Exception:  # noqa: BLE001 - display only
+			current = None
+		width = max(len(n) for n in models)
+		lines = [Text.assemble(("AI profiles", "bold"), (" · /model <name> to switch", "#6b7187"))]
+		for n, model in models.items():
+			mark = "●" if n == (current or "") else " "
+			lines.append(Text.assemble((f"{mark} ", "#c2a0ff"), (f"{n:<{width}}  ", "bold" if mark != " " else ""),
+			                           (model or "no model", "#6b7187")))
+		await self._append_note(Text("\n").join(lines))
 
 	async def _set_model_view(self, on: bool) -> None:
 		view = self._model_view()

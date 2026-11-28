@@ -411,7 +411,7 @@ def _drive_content_only_loop(engine, initial_cap=8, llm_fn=None):
 	t._system_prompt_for = lambda m: "SYS"
 	t._get_query_engine = lambda: engine
 
-	def fake_call_llm(messages, model, temp, api_base, api_key, tools=None):
+	def fake_call_llm(messages, model, temp, api_base, api_key, tools=None, **kwargs):
 		return {"content": "Here is my analysis. What next?", "tool_calls": [],
 				"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "stop"}
 
@@ -430,7 +430,7 @@ def _stop_tool_llm(choices):
 	content-only (defensive — an empty-choices stop should end before a 2nd call)."""
 	calls = {"n": 0}
 
-	def _fn(messages, model, temp, api_base, api_key, tools=None):
+	def _fn(messages, model, temp, api_base, api_key, tools=None, **kwargs):
 		calls["n"] += 1
 		if calls["n"] == 1:
 			tc = MagicMock()
@@ -480,7 +480,7 @@ class TestRemoteStopEnds(unittest.TestCase):
 					   "_context": {"session_id": SID}, "_timestamp": 1.0})
 		calls = {"n": 0}
 
-		def llm(messages, model, temp, api_base, api_key, tools=None):
+		def llm(messages, model, temp, api_base, api_key, tools=None, **kwargs):
 			calls["n"] += 1
 			if calls["n"] == 1:
 				tc = MagicMock()
